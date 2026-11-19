@@ -3,9 +3,10 @@
  * State is process-local: use an external shared limiter if the app is scaled
  * across multiple instances.
  */
-export function createRateLimiter({ limit = 20, windowMs = 60_000, now = Date.now } = {}) {
+export function createRateLimiter({ limit = 20, windowMs = 60_000, now = Date.now, maxKeys = 10_000 } = {}) {
   if (!Number.isInteger(limit) || limit < 1) throw new TypeError('limit must be a positive integer');
   if (!Number.isFinite(windowMs) || windowMs < 1) throw new TypeError('windowMs must be positive');
+  if (!Number.isInteger(maxKeys) || maxKeys < 1) throw new TypeError('maxKeys must be a positive integer');
 
   const buckets = new Map();
 
@@ -15,17 +16,19 @@ export function createRateLimiter({ limit = 20, windowMs = 60_000, now = Date.no
     let bucket = buckets.get(normalizedKey);
 
     if (!bucket || currentTime - bucket.startedAt >= windowMs || currentTime < bucket.startedAt) {
-      bucket = { startedAt: currentTime, count: 0 };
-      buckets.set(normalizedKey, bucket);
-    }
-
-    // Opportunistically remove expired entries to prevent unbounded growth.
-    if (buckets.size > 10_000) {
-      for (const [entryKey, entry] of buckets) {
-        if (currentTime - entry.startedAt >= windowMs || currentTime < entry.startedAt) {
-          buckets.delete(entryKey);
+      if (!bucket && buckets.size >= maxKeys) {
+        for (const [entryKey, entry] of buckets) {
+          if (currentTime - entry.startedAt >= windowMs || currentTime < entry.startedAt) {
+            buckets.delete(entryKey);
+          }
+        }
+        if (buckets.size >= maxKeys) {
+          const oldestKey = buckets.keys().next().value;
+          if (oldestKey !== undefined) buckets.delete(oldestKey);
         }
       }
+      bucket = { startedAt: currentTime, count: 0 };
+      buckets.set(normalizedKey, bucket);
     }
 
     if (bucket.count >= limit) {
