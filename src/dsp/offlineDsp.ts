@@ -575,9 +575,6 @@ function applyStereoImager(
   const wMid = 1 + ((params.midWidth / 100 - 1) * intensityScale);
   const wHigh = 1 + ((params.highWidth / 100 - 1) * intensityScale);
   const sideGainOffset = dbToLinear(params.midSideGainDb * intensityScale);
-  const balL = params.lrBalanceDb < 0 ? 1 : dbToLinear(-params.lrBalanceDb * intensityScale);
-  const balR = params.lrBalanceDb > 0 ? 1 : dbToLinear(params.lrBalanceDb * intensityScale);
-
   const s = Array.from({ length: 18 }, () => createBiquadState());
 
   for (let i = 0; i < n; i++) {

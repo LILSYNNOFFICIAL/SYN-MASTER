@@ -42,19 +42,33 @@ function makeWarmDarkArtisticMix(durationSec = 1.6): [Float32Array, Float32Array
   const n = Math.floor(SR * durationSec);
   const l = new Float32Array(n);
   const r = new Float32Array(n);
+  let seed = 20261119;
+  let low140 = 0;
+  let low500 = 0;
+  let low2000 = 0;
+  const alpha140 = Math.exp((-2 * Math.PI * 140) / SR);
+  const alpha500 = Math.exp((-2 * Math.PI * 500) / SR);
+  const alpha2000 = Math.exp((-2 * Math.PI * 2000) / SR);
+
+  const random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed / 2147483647) * 2 - 1;
+  };
+
   for (let i = 0; i < n; i++) {
-    const t = i / SR;
     const cyclePhase = (i % Math.floor(SR * 0.4)) / (SR * 0.4);
-    // Include real low-level quiet passages so the 5th-percentile estimator measures noise, not sustained music.
-    const env = cyclePhase < 0.72 ? 0.7 + 0.3 * Math.sin(2 * Math.PI * 2.5 * t) : 0.00035;
-    // Warm downward spectral tilt without mud spike or phase issues
-    const mid =
-      0.18 * Math.sin(2 * Math.PI * 95 * t) * env +
-      0.11 * Math.sin(2 * Math.PI * 750 * t) * env +
-      0.025 * Math.sin(2 * Math.PI * 6500 * t) * env;
-    const side = 0.06 * Math.sin(2 * Math.PI * 1200 * t) * env;
-    l[i] = mid + side;
-    r[i] = mid - side;
+    // Include low-level quiet passages so the noise estimator has genuine room-tone frames.
+    const env = cyclePhase < 0.72 ? 0.7 + 0.3 * Math.sin((2 * Math.PI * 2.5 * i) / SR) : 0.00035;
+    const white = random();
+    low140 = alpha140 * low140 + (1 - alpha140) * white;
+    low500 = alpha500 * low500 + (1 - alpha500) * white;
+    low2000 = alpha2000 * low2000 + (1 - alpha2000) * white;
+
+    // Broadband, non-tonal warm spectrum: avoid narrow sine peaks and keep bass/mid tilt controlled.
+    const midBand = low2000 - low500;
+    const sample = (0.05 * white + 0.4 * low140 + 0.1 * midBand) * env;
+    l[i] = sample;
+    r[i] = sample;
   }
   return [l, r];
 }
