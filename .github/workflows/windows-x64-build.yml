@@ -37,7 +37,7 @@ jobs:
         working-directory: native
         run: >
           cmake --build --preset windows-x64-release --parallel
-          --target syn-plugin-host syn-plugin-scanner syn-plugin-worker syn_test_vst3_gain syn_core_tests
+          --target syn-plugin-host syn-plugin-scanner syn-plugin-worker syn_test_vst3_gain syn_test_vst3_gain_VST3 syn_core_tests
 
       - name: Run CTest Native Core & Worker Isolation Suite
         working-directory: native
