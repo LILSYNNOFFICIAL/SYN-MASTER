@@ -577,8 +577,10 @@ function applyStereoImager(
   const s = Array.from({ length: 18 }, () => createBiquadState());
 
   for (let i = 0; i < n; i++) {
-    const l = left[i] * balL;
-    const r = right[i] * balR;
+    // Apply L/R balance after the M/S matrix, matching the live Web Audio graph.
+    // Pre-matrix gain can be partially undone by width reconstruction on asymmetric material.
+    const l = left[i];
+    const r = right[i];
 
     const lLowRaw = processBiquadSample(processBiquadSample(l, lpLow, s[0]), lpLow, s[1]);
     const rLowRaw = processBiquadSample(processBiquadSample(r, lpLow, s[2]), lpLow, s[3]);
@@ -609,8 +611,8 @@ function applyStereoImager(
       totalS = rawS * (1 - intensityScale) + hpS * intensityScale;
     }
 
-    left[i] = totalM + totalS;
-    right[i] = totalM - totalS;
+    left[i] = (totalM + totalS) * balL;
+    right[i] = (totalM - totalS) * balR;
   }
 }
 

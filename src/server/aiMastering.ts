@@ -8,12 +8,42 @@ import type {
   ProcessorModule,
   QCReport,
 } from '../types/mastering.ts';
-import { validateChain } from '../dsp/chainValidation.ts';
+import { validateChainAgainstInventory } from '../director/processorInventory.ts';
+
+export class AiConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AiConfigError';
+  }
+}
+
+export class AiTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AiTimeoutError';
+  }
+}
+
+const GEMINI_TIMEOUT_MS = 25_000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new AiTimeoutError(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function getAiClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured in server secrets.');
+    throw new AiConfigError('Cloud AI mastering is not configured on this server.');
   }
   return new GoogleGenAI({
     apiKey,
@@ -100,6 +130,7 @@ const STRATEGY_SCHEMA = {
 const SYSTEM_PROMPT = `You are SYN-MASTER AI | Mastering Director, an elite mastering engineer controlling a real DSP engine.
 You receive real ITU-R BS.1770 loudness, dynamics, spectral zone energies, resonances, THD, noise floor, L/R balance, and stereo phase diagnostics.
 Never invent fake numbers—reference only the actual measured telemetry provided.
+Supported Mastering Objectives: streaming, commercial-loudness, dynamic, cinematic, electronic, hip-hop, pop, acoustic, vocal-focused, transparent, punchy, warm, custom.
 Distinguish intentional artistic tonal/stereo character from technical defects (clipping, DC offset, low-end phase cancellation, elevated noise floor, narrow painful resonances).
 Use ONLY needed processors; keep EQ moves surgical (+/- 4 dB max unless correcting severe imbalance) and protect musical transients.
 
@@ -130,12 +161,16 @@ function parseAiChain(
   chain: ProcessorModule[];
   reasoning: Array<{ processorType: ProcessorModule['type']; reason: string }>;
 } {
+  if (rawProcessors.length === 0) {
+    return { chain: [], reasoning: [] };
+  }
+
   const parsed = rawProcessors.map((p) => {
     let paramsObj: unknown = {};
     try {
       paramsObj = JSON.parse(p.paramsJson);
     } catch {
-      paramsObj = {};
+      throw new Error(`AI returned malformed paramsJson for processor "${p.type}".`);
     }
     return {
       type: p.type,
@@ -148,12 +183,19 @@ function parseAiChain(
     };
   });
 
-  const chain = validateChain(parsed);
+  const inventoryCheck = validateChainAgainstInventory(parsed);
+  if (!inventoryCheck.valid) {
+    throw new Error(
+      `AI generated invalid processor chain: ${inventoryCheck.errors[0] ?? 'Inventory verification failed'}`,
+    );
+  }
+
+  const chain = inventoryCheck.sanitizedChain;
   const reasoning = rawProcessors
     .slice(0, chain.length)
     .map((p, idx) => ({
       processorType: chain[idx].type,
-      reason: p.reason,
+      reason: String(p.reason || '').slice(0, 400),
     }));
 
   return { chain, reasoning };
@@ -186,16 +228,20 @@ export async function generateGeminiMasterStrategy(input: {
     'Design an optimal, explainable surgical mastering chain ending with a limiter or maximizer, explicitly stating supporting telemetry and potential tradeoffs in each processor reason.',
   ].filter(Boolean);
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-4-hydrogen',
-    contents: promptParts.join('\n\n'),
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
-      responseMimeType: 'application/json',
-      responseSchema: STRATEGY_SCHEMA,
-    },
-  });
+  const response = await withTimeout(
+    ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: promptParts.join('\n\n'),
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+        responseMimeType: 'application/json',
+        responseSchema: STRATEGY_SCHEMA,
+      },
+    }),
+    GEMINI_TIMEOUT_MS,
+    'AI mastering strategy timed out after 25s.',
+  );
 
   const rawText = (response.text ?? '{}').trim();
   const data = JSON.parse(rawText);
@@ -246,16 +292,20 @@ export async function refineGeminiIteration(input: {
     'Evaluate unintended degradation (excessive limiting, distortion/THD, phase loss, L/R imbalance, noise floor, LUFS miss) and output a refined chain resolving QC warnings/failures without degrading dynamics.',
   ].join('\n\n');
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-4-hydrogen',
-    contents: prompt,
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-      responseMimeType: 'application/json',
-      responseSchema: STRATEGY_SCHEMA,
-    },
-  });
+  const response = await withTimeout(
+    ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: prompt,
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        responseMimeType: 'application/json',
+        responseSchema: STRATEGY_SCHEMA,
+      },
+    }),
+    GEMINI_TIMEOUT_MS,
+    'AI refinement pass timed out after 25s.',
+  );
 
   const data = JSON.parse((response.text ?? '{}').trim());
   const { chain, reasoning } = parseAiChain(data.processors ?? []);

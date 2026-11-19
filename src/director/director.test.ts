@@ -44,7 +44,9 @@ function makeWarmDarkArtisticMix(durationSec = 1.6): [Float32Array, Float32Array
   const r = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const t = i / SR;
-    const env = 0.7 + 0.3 * Math.sin(2 * Math.PI * 2.5 * t);
+    const cyclePhase = (i % Math.floor(SR * 0.4)) / (SR * 0.4);
+    // Include real low-level quiet passages so the 5th-percentile estimator measures noise, not sustained music.
+    const env = cyclePhase < 0.72 ? 0.7 + 0.3 * Math.sin(2 * Math.PI * 2.5 * t) : 0.00035;
     // Warm downward spectral tilt without mud spike or phase issues
     const mid =
       0.18 * Math.sin(2 * Math.PI * 95 * t) * env +
@@ -130,7 +132,11 @@ test('SYN-MASTER Planner: distinct Mastering Objectives produce genuinely distin
 
   const pTrans = buildExplainableMasterPlan({ analysis, objectiveId: 'transparent' });
   const pPunchy = buildExplainableMasterPlan({ analysis, objectiveId: 'punchy' });
-  const pWarm = buildExplainableMasterPlan({ analysis, objectiveId: 'warm' });
+  const clean = new Float32Array(Math.floor(SR * 1.8));
+  for (let i = 0; i < clean.length; i++) clean[i] = 0.18 * Math.sin((2 * Math.PI * 440 * i) / SR);
+  const cleanAnalysis = analyzeAudioBuffer([clean, new Float32Array(clean)], SR);
+  assert.ok(cleanAnalysis.thdEstimatePercent < 1.8, `Warm saturation fixture must be clean, THD=${cleanAnalysis.thdEstimatePercent}%`);
+  const pWarm = buildExplainableMasterPlan({ analysis: cleanAnalysis, objectiveId: 'warm' });
   const pCustom = buildExplainableMasterPlan({
     analysis,
     objectiveId: 'custom',
@@ -228,7 +234,10 @@ test('SYN-QC Expansion & Failure Feedback Remediation', () => {
   const rendered = processChainOffline([probL, probR], SR, refined);
   const after = analyzeAudioBuffer(rendered.channels, SR);
   assert.ok(after.lowEndCorrelation > post.lowEndCorrelation, 'Refined stereo focus must improve low-end phase correlation');
-  assert.ok(Math.abs(after.lrBalanceDb) < Math.abs(post.lrBalanceDb), 'Refined L/R balance must move closer to 0 dB');
+  assert.ok(
+    Math.abs(after.lrBalanceDb) < Math.abs(post.lrBalanceDb),
+    `Refined L/R balance must move closer to 0 dB (before=${post.lrBalanceDb.toFixed(2)}, after=${after.lrBalanceDb.toFixed(2)})`,
+  );
 });
 
 test('SYN-ITERATE Rollback Safeguard: preserves best checkpoint if forced degradation occurs', async () => {
