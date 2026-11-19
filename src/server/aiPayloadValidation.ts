@@ -87,7 +87,9 @@ export function isValidAnalysisPayload(value: unknown): value is AudioAnalysis {
     Number.isFinite(peak.freqHz) &&
     peak.freqHz >= 0 &&
     typeof peak.excessDb === 'number' &&
-    Number.isFinite(peak.excessDb),
+    Number.isFinite(peak.excessDb) &&
+    typeof peak.severity === 'string' &&
+    ['low', 'moderate', 'high'].includes(peak.severity),
   );
 }
 

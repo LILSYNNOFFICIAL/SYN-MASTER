@@ -54,6 +54,12 @@ test('rejects missing, non-finite, and malformed nested telemetry', () => {
 
   const mismatched = { ...validAnalysis(), spectrumBinsFreq: [20, 40], spectrumBinsDb: [-30] };
   assert.equal(isValidAnalysisPayload(mismatched), false);
+
+  const missingSeverity = {
+    ...validAnalysis(),
+    resonances: [{ freqHz: 4200, excessDb: 3.2 }],
+  };
+  assert.equal(isValidAnalysisPayload(missingSeverity), false);
 });
 
 test('rejects unreasonable sample rates, channel counts, and oversized arrays', () => {
