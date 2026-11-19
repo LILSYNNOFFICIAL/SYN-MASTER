@@ -22,6 +22,17 @@ test('isolates clients and resets an expired window', () => {
   assert.equal(allow('client-a').allowed, true);
 });
 
+test('does not evict active clients when the key capacity is reached', () => {
+  let now = 1_000;
+  const allow = createRateLimiter({ limit: 1, windowMs: 500, maxKeys: 1, now: () => now });
+
+  assert.equal(allow('client-a').allowed, true);
+  assert.equal(allow('client-b').allowed, false);
+  assert.equal(allow('client-a').allowed, false);
+  now += 500;
+  assert.equal(allow('client-b').allowed, true);
+});
+
 test('rejects invalid limiter configuration', () => {
   assert.throws(() => createRateLimiter({ limit: 0 }), /positive integer/);
   assert.throws(() => createRateLimiter({ windowMs: 0 }), /positive/);
