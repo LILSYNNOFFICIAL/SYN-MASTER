@@ -1413,14 +1413,12 @@ export async function runAutonomousDirectorLoop(
     }
 
     emit('SYN-RENDER', pass, undefined, undefined, workingChain);
-    const rendered = opts.renderPassFn
-      ? await opts.renderPassFn(opts.sourceChannels, opts.sampleRate, workingChain)
-      : await renderAndAnalyzeOffThread({
-          sourceChannels: opts.sourceChannels,
-          sampleRate: opts.sampleRate,
-          chain: workingChain,
-          externalProcessor: opts.externalProcessor,
-        });
+    const rendered = await renderAndAnalyzeOffThread({
+      sourceChannels: opts.sourceChannels,
+      sampleRate: opts.sampleRate,
+      chain: workingChain,
+      externalProcessor: opts.externalProcessor,
+    });
     const post = rendered.analysis;
     const qcReport = runQualityControl(preAnalysis, post, qcProfile, opts.exportConfig);
     const multiObjective = evaluateMultiObjectiveMetrics(

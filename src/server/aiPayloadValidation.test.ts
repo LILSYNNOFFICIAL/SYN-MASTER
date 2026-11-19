@@ -24,7 +24,7 @@ function validAnalysis(): AudioAnalysis {
     zoneEnergyDb: { sub: -32, bass: -24, lowMid: -27, mid: -25, highMid: -28, presence: -33, air: -42 },
     spectrumBinsFreq: [20, 40, 80],
     spectrumBinsDb: [-40, -35, -28],
-    resonances: [{ freqHz: 4200, excessDb: 3.2 }],
+    resonances: [{ freqHz: 4200, excessDb: 3.2, severity: 'low' }],
     stereoWidth: 0.8,
     midSideRatioDb: -6,
     phaseCorrelation: 0.9,
