@@ -32,6 +32,13 @@ if(MSVC)
   add_compile_options(/utf-8 /bigobj)
 endif()
 
+# The companion host pumps JUCE message events in bounded intervals while it
+# services IPC and shutdown signals. JUCE 8 disables modal-loop APIs by default;
+# enable the API consistently for both JUCE modules and host translation units.
+if(SYN_USE_JUCE)
+  add_compile_definitions(JUCE_MODAL_LOOPS_PERMITTED=1)
+endif()
+
 include(FetchContent)
 
 if(SYN_FETCH_DEPS)
