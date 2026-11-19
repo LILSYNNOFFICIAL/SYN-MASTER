@@ -287,6 +287,13 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
     const allowLiveRef = useRef(allowLiveTelemetry);
     allowLiveRef.current = allowLiveTelemetry;
 
+    useEffect(() => {
+      // A new source track or visualization mode must not inherit the previous
+      // track's spectrogram columns.
+      ringRef.current.head = 0;
+      ringRef.current.count = 0;
+    }, [preAnalysis, sampleRate, mode]);
+
     const pushSpectroColumn = (bins: Uint8Array) => {
       const ring = ringRef.current;
       if (ring.binsPerCol !== bins.length) {
