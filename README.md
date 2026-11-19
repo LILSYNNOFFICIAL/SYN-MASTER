@@ -61,7 +61,7 @@ Express proxy trust is disabled by default. If the deployment is behind a known 
 
 AI endpoint errors returned to clients are intentionally generic. Detailed exceptions are logged server-side and must not be returned to browsers.
 
-Before making the service broadly public, implement real user authentication/authorization and a shared rate limiter. The current routes should not be treated as authenticated private APIs.
+SYN MASTER is intentionally account-free for now: there is no in-app registration, login, user profile, or multi-user identity layer. The limiter is not an access-control boundary. Do not expose the Gemini-backed API as an unrestricted public endpoint. For a remote deployment, place the entire application behind a private access boundary before sharing it. Google Cloud Run can enforce invocation access through Cloud IAM/IAP, but that relies on Google identities and is separate from SYN MASTER application accounts. If identity-based access is not wanted, use a local-only deployment or a private gateway/tunnel that injects a server-side access credential. Never embed a gateway credential in browser code. Confirm the actual deployment's ingress and access settings before assuming it is private.
 
 ## CI
 
@@ -95,5 +95,7 @@ The live `/api/health` response only verifies configuration presence, not full A
 - Keep Gemini API credentials server-side.
 - Do not expose API keys in React code or Vite environment variables prefixed for client exposure.
 - Keep `.env` untracked.
-- Use authenticated access and shared abuse controls before public multi-user release.
+- Keep the current account-free, single-user product boundary. Do not add in-app accounts unless that product decision changes.
+- Do not leave a remote Gemini-backed endpoint openly callable. Enforce access at the deployment/network boundary; Cloud Run IAM/IAP is an option when Google-identity sign-in is acceptable, otherwise use local-only hosting or a private gateway.
+- A shared rate limiter is still needed if the service is later scaled across multiple server instances.
 - Avoid logging request bodies, audio, or credentials.
