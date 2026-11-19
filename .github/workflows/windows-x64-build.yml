@@ -7,11 +7,27 @@ on:
       - 'native/**'
       - '.github/workflows/windows-x64-build.yml'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: native-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-windows-x64:
-    runs-on: windows-latest
+    # The CMake preset explicitly selects Visual Studio 17 2022.
+    # windows-2022 guarantees that generator is installed on the runner.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          cmake --version
+          cmake --help | Select-String -Pattern 'Visual Studio 17 2022'
+          if ($LASTEXITCODE -ne 0) { throw 'Visual Studio 2022 CMake generator is unavailable.' }
 
       - name: Configure CMake (VS 2022 x64 Release)
         working-directory: native
@@ -21,7 +37,7 @@ jobs:
         working-directory: native
         run: >
           cmake --build --preset windows-x64-release --parallel
-          --target syn-plugin-host syn-plugin-scanner syn-plugin-worker syn_test_vst3_gain syn_core_tests
+          --target syn-plugin-host syn-plugin-scanner syn-plugin-worker syn_test_vst3_gain syn_test_vst3_gain_VST3 syn_core_tests
 
       - name: Run CTest Native Core & Worker Isolation Suite
         working-directory: native
@@ -36,6 +52,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: syn-plugin-host-win64-m2
+          if-no-files-found: error
           path: |
             native/build/windows-x64-release/Release/syn-plugin-host.exe
             native/build/windows-x64-release/Release/syn-plugin-scanner.exe

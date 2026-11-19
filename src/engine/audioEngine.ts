@@ -562,7 +562,7 @@ export class SynAudioEngine {
         const enabledBands = p.bands.filter((b) => b.enabled && b.maxCutDb < -0.05);
         if (enabledBands.length > 0) {
           const dynNodes = enabledBands.map((b) => {
-            const bq = this.ctx.createBiquadFilter();
+            const bq = this.ctx!.createBiquadFilter();
             bq.type = 'peaking';
             bq.frequency.value = b.freq;
             bq.Q.value = b.q;

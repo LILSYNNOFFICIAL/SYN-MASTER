@@ -170,21 +170,67 @@ try {
   }
 
   $null = Invoke-HostRpc "host.auth" @{ sessionToken = $Token }
+  $CanonicalScanRoot = $null
   if ($CustomScanDir) {
-    $null = Invoke-HostRpc "catalog.paths.add" @{ path = $CustomScanDir }
+    $PathAddResp = Invoke-HostRpc "catalog.paths.add" @{ path = $CustomScanDir }
+    if (-not $PathAddResp.added) {
+      throw "Host rejected the temporary VST3 scan directory registration."
+    }
+    # SecurityPolicy stores weakly_canonical paths. Use that exact root when
+    # matching catalog entries because Windows TEMP may contain an 8.3 alias.
+    $CanonicalScanRoot = [string]$PathAddResp.added
   }
-  $null = Invoke-HostRpc "catalog.scan" @{ mode = "force" }
+  $ScanResp = Invoke-HostRpc "catalog.scan" @{ mode = "force" }
+  if (-not $ScanResp.started) {
+    throw "Host did not start the forced catalog scan."
+  }
 
-  # Wait up to 15s for catalog.list to include SYN Test Gain and Tilt QA
+  # Scanning is asynchronous. Wait for its history record and plugin catalog
+  # entry. Do not compare raw path strings: the host canonicalizes custom roots,
+  # which can expand Windows 8.3 aliases such as RUNNER~1.
   $PluginRec = $null
-  $ScanWait = (Get-Date).AddSeconds(15)
+  $LatestHistory = $null
+  $ScanWait = (Get-Date).AddSeconds(30)
   while ((Get-Date) -lt $ScanWait) {
     $Cat = Invoke-HostRpc "catalog.list" @{}
-    $PluginRec = $Cat.plugins | Where-Object { $_.bundlePath -eq $ScanTargetVst3 -and $_.status -eq "available" } | Select-Object -First 1
-    if ($PluginRec) { break }
+    $History = Invoke-HostRpc "catalog.history" @{}
+    if ($History.history.Count -gt 0) {
+      $LatestHistory = $History.history[0]
+    }
+
+    $PluginCandidates = @($Cat.plugins | Where-Object {
+      $_.name -eq "SYN Test Gain and Tilt QA" -and
+      $_.manufacturer -eq "SYN MASTER QA" -and
+      $_.status -eq "available" -and
+      (
+        -not $CanonicalScanRoot -or
+        $_.bundlePath.StartsWith($CanonicalScanRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar,
+          [StringComparison]::OrdinalIgnoreCase) -or
+        $_.bundlePath.StartsWith($CanonicalScanRoot.TrimEnd('\', '/') + [IO.Path]::AltDirectorySeparatorChar,
+          [StringComparison]::OrdinalIgnoreCase)
+      )
+    })
+    if ($PluginCandidates.Count -eq 1 -and $LatestHistory -and
+        $LatestHistory.discoveredPlugins -ge 1 -and $LatestHistory.finishedAt -ge $LatestHistory.startedAt) {
+      $PluginRec = $PluginCandidates[0]
+      break
+    }
     Start-Sleep -Milliseconds 250
   }
-  if (-not $PluginRec) { throw "Host catalog scan did not persist QA VST3 plugin record." }
+  if (-not $PluginRec) {
+    $Observed = @($Cat.plugins | Where-Object {
+      $_.name -eq "SYN Test Gain and Tilt QA" -or
+      $_.bundlePath -like "*SYN Test Gain and Tilt QA.vst3*"
+    } | ForEach-Object {
+      "$($_.name) | $($_.status) | $($_.bundlePath) | $($_.statusReason)"
+    }) -join [Environment]::NewLine
+    $HistorySummary = if ($LatestHistory) {
+      "$($LatestHistory.summary) (finishedAt=$($LatestHistory.finishedAt))"
+    } else {
+      "No completed catalog scan history record was returned."
+    }
+    throw "Host catalog did not persist the QA VST3 as available. Scan: $HistorySummary. Matching records: $Observed"
+  }
 
   # Load real VST3 plugin worker
   $Loaded = Invoke-HostRpc "plugin.load" @{

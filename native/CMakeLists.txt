@@ -32,6 +32,13 @@ if(MSVC)
   add_compile_options(/utf-8 /bigobj)
 endif()
 
+# The companion host pumps JUCE message events in bounded intervals while it
+# services IPC and shutdown signals. JUCE 8 disables modal-loop APIs by default;
+# enable the API consistently for both JUCE modules and host translation units.
+if(SYN_USE_JUCE)
+  add_compile_definitions(JUCE_MODAL_LOOPS_PERMITTED=1)
+endif()
+
 include(FetchContent)
 
 if(SYN_FETCH_DEPS)
@@ -264,7 +271,11 @@ add_executable(syn_core_tests
 target_include_directories(syn_core_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/syn_host_core/include"
 )
-if(UNIX)
+if(WIN32)
+  # SecurityPolicy.cpp is compiled directly into this test executable rather
+  # than linked through syn_host_core, so repeat its Windows crypto dependency.
+  target_link_libraries(syn_core_tests PRIVATE bcrypt)
+elseif(UNIX)
   target_link_libraries(syn_core_tests PRIVATE pthread)
 endif()
 add_dependencies(syn_core_tests syn-plugin-worker)
