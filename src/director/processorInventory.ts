@@ -270,16 +270,17 @@ export function validateChainCommand(cmd: ChainCommand): { valid: boolean; reaso
 
   const processorRequired = ['add', 'configure', 'gain-stage', 'wet-dry', 'bypass'].includes(cmd.op);
   const hasOwnProcessorType = Object.prototype.hasOwnProperty.call(cmd, 'processorType');
-  if (processorRequired && !hasOwnProcessorType) {
+  const processorType = 'processorType' in cmd ? cmd.processorType : undefined;
+  if (processorRequired && (!hasOwnProcessorType || processorType === undefined)) {
     return { valid: false, reason: `Command ${cmd.op} requires an own processorType field` };
   }
-  if (hasOwnProcessorType && cmd.processorType !== undefined) {
-    const supported = typeof cmd.processorType === 'string' && (
-      cmd.processorType === 'external-vst3' ||
-      Object.prototype.hasOwnProperty.call(VERIFIED_NATIVE_PROCESSOR_INVENTORY, cmd.processorType)
+  if (hasOwnProcessorType && processorType !== undefined) {
+    const supported = typeof processorType === 'string' && (
+      processorType === 'external-vst3' ||
+      Object.prototype.hasOwnProperty.call(VERIFIED_NATIVE_PROCESSOR_INVENTORY, processorType)
     );
     if (!supported) {
-      return { valid: false, reason: `Unsupported processorType: ${String(cmd.processorType)}` };
+      return { valid: false, reason: `Unsupported processorType: ${String(processorType)}` };
     }
   }
 
