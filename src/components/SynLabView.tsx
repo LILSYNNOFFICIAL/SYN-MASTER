@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import type { AudioAnalysis, LabSubTab, ProcessorModule } from '../types/mastering';
-import type { LiveMeterSnapshot } from '../engine/audioEngine';
 import {
   LoudnessHistoryCanvas,
   SpectrumAndEQCanvas,
@@ -11,7 +10,7 @@ interface Props {
   preAnalysis: AudioAnalysis | null;
   postAnalysis: AudioAnalysis | null;
   chain: ProcessorModule[];
-  liveTelemetry: LiveMeterSnapshot | null;
+  allowLiveTelemetry?: boolean;
   postChannels: Float32Array[] | null;
   sampleRate: number;
 }
@@ -32,7 +31,7 @@ export const SynLabView: React.FC<Props> = ({
   preAnalysis,
   postAnalysis,
   chain,
-  liveTelemetry,
+  allowLiveTelemetry = true,
   postChannels,
   sampleRate,
 }) => {
@@ -93,7 +92,7 @@ export const SynLabView: React.FC<Props> = ({
             preAnalysis={preAnalysis}
             postAnalysis={postAnalysis}
             chain={chain}
-            liveTelemetry={liveTelemetry}
+            allowLiveTelemetry={allowLiveTelemetry}
             sampleRate={sampleRate}
             mode="spectrum"
             heightClass="h-64"
@@ -200,10 +199,7 @@ export const SynLabView: React.FC<Props> = ({
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37] mb-2">
               Goniometer Vectorscope (M/S Phase Polarity)
             </h3>
-            <VectorscopeCanvas
-              liveTelemetry={liveTelemetry}
-              channels={postChannels ?? undefined}
-            />
+            <VectorscopeCanvas channels={postChannels ?? undefined} />
           </div>
           <div className="grid grid-cols-2 gap-3 content-start">
             <MetricCard

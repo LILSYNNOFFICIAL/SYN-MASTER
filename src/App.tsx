@@ -56,7 +56,8 @@ import {
 import { applyStructuredChainCommands } from './director/chainCommands';
 import { inspectPluginInventory } from './director/pluginIntelligence';
 import { encodeWavBlob } from './dsp/wavEncoder';
-import { SynAudioEngine, type AuditionTarget, type LiveMeterSnapshot } from './engine/audioEngine';
+import { SynAudioEngine, type AuditionTarget } from './engine/audioEngine';
+import { telemetryStore } from './engine/telemetryStore';
 import { SynHostBridge, type HostBridgeSnapshot } from './services/hostBridge';
 import {
   listProjects,
@@ -80,11 +81,32 @@ import { PluginManagerView } from './components/PluginManagerView';
 import { ExportModal, SettingsModal } from './components/Modals';
 
 function formatTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  const ms = Math.floor((sec % 1) * 10);
+  const safe = Number.isFinite(sec) ? Math.max(0, sec) : 0;
+  const m = Math.floor(safe / 60);
+  const s = Math.floor(safe % 60);
+  const ms = Math.floor((safe % 1) * 10);
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${ms}`;
 }
+
+const TransportTimeReadout: React.FC<{ durationSec: number; className?: string }> = React.memo(
+  ({ durationSec, className = '' }) => {
+    const spanRef = useRef<HTMLSpanElement | null>(null);
+    useEffect(() => {
+      const update = (sec: number) => {
+        if (spanRef.current) {
+          spanRef.current.textContent = `${formatTime(sec)} / ${formatTime(durationSec)}`;
+        }
+      };
+      update(telemetryStore.getSnapshot().currentTimeSec);
+      return telemetryStore.subscribe((snapshot) => update(snapshot.currentTimeSec));
+    }, [durationSec]);
+    return (
+      <span ref={spanRef} className={`font-mono-tabular text-[#9CA3AF] ${className}`}>
+        00:00.0 / {formatTime(durationSec)}
+      </span>
+    );
+  },
+);
 
 const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   filename: 'SYN_Master_Output',
@@ -163,12 +185,10 @@ export default function App() {
 
   // Playback & monitoring state
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [monitorVolume, setMonitorVolume] = useState(0.85);
   const [auditionTarget, setAuditionTarget] = useState<AuditionTarget>('mastered');
-  const [liveTelemetry, setLiveTelemetry] = useState<LiveMeterSnapshot | null>(null);
 
   // AI, Mastering Director, Iterative, Battle, QC, Export states
   const [operatingMode, setOperatingMode] = useState<DirectorOperatingMode>('autonomous');
@@ -300,23 +320,31 @@ export default function App() {
     engine.setChainBypassed(chainBypassed);
   }, [chain, chainBypassed]);
 
-  // Real-time 30fps meter & playhead animation loop while playing
+  // Publish high-frequency playback telemetry outside React state.
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
     engine.setOnEnded(() => {
       setIsPlaying(false);
-      setCurrentTimeSec(0);
+      telemetryStore.reset();
     });
 
-    if (!isPlaying) return;
+    if (!isPlaying) {
+      telemetryStore.publish({ isPlaying: false, live: null });
+      return;
+    }
+
+    telemetryStore.publish({ isPlaying: true });
     let rafId = 0;
     let lastTick = 0;
     const tick = (now: number) => {
       if (now - lastTick >= 33) {
         lastTick = now;
-        setCurrentTimeSec(engine.getCurrentTimeSec());
-        setLiveTelemetry(engine.getLiveTelemetry());
+        telemetryStore.publish({
+          isPlaying: true,
+          currentTimeSec: engine.getCurrentTimeSec(),
+          live: engine.getLiveTelemetry(),
+        });
       }
       rafId = requestAnimationFrame(tick);
     };
@@ -767,7 +795,7 @@ export default function App() {
       sourceChannelsRef.current = channels;
       engine.setSourceChannels(channels, sampleRate);
       setIsPlaying(false);
-      setCurrentTimeSec(0);
+      telemetryStore.reset();
       setAuditionTarget('mastered');
 
       const analysis = analyzeAudioBuffer(channels, sampleRate);
@@ -895,9 +923,11 @@ export default function App() {
     if (isPlaying) {
       engine.pause();
       setIsPlaying(false);
+      telemetryStore.publish({ isPlaying: false, currentTimeSec: engine.getCurrentTimeSec(), live: null });
     } else {
       engine.play();
       setIsPlaying(true);
+      telemetryStore.publish({ isPlaying: true, currentTimeSec: engine.getCurrentTimeSec() });
     }
   }, [activeTrack, isPlaying]);
 
@@ -1583,7 +1613,7 @@ export default function App() {
                   </span>
                   <span className="text-[#6B7280]" aria-hidden="true">·</span>
                   <span className="font-mono-tabular text-[#9CA3AF]">
-                    {formatTime(currentTimeSec)} / {formatTime(activeTrack.durationSec)}
+                    <TransportTimeReadout durationSec={activeTrack.durationSec} />
                   </span>
                 </div>
 
@@ -1631,14 +1661,13 @@ export default function App() {
                 prePeaks={activeTrack.peaks}
                 postPeaks={postPeaks}
                 durationSec={activeTrack.durationSec}
-                currentTimeSec={currentTimeSec}
                 loopEnabled={loopEnabled}
                 loopStartSec={0}
                 loopEndSec={activeTrack.durationSec}
                 showPostOverlay={auditionTarget !== 'original' && !chainBypassed}
                 onSeek={(sec) => {
                   engineRef.current!.seek(sec);
-                  setCurrentTimeSec(sec);
+                  telemetryStore.publish({ currentTimeSec: sec });
                 }}
               />
 
@@ -1660,7 +1689,7 @@ export default function App() {
                     onClick={() => {
                       engineRef.current!.stop();
                       setIsPlaying(false);
-                      setCurrentTimeSec(0);
+                      telemetryStore.publish({ isPlaying: false, currentTimeSec: 0, live: null });
                     }}
                     className="p-1.5 rounded bg-[#181A22] border border-[#2B2E3A] text-[#F7F8FA] hover:border-[#D4AF37]"
                   >
@@ -1741,7 +1770,7 @@ export default function App() {
                   onClick={() => {
                     engineRef.current!.stop();
                     setIsPlaying(false);
-                    setCurrentTimeSec(0);
+                    telemetryStore.publish({ isPlaying: false, currentTimeSec: 0, live: null });
                   }}
                   className="p-1 rounded bg-[#181A22] border border-[#2B2E3A] text-[#F7F8FA] hover:border-[#D4AF37] shrink-0"
                 >
@@ -1751,7 +1780,7 @@ export default function App() {
                   {activeTrack.name}
                 </span>
                 <span className="text-[11px] font-mono-tabular text-[#9CA3AF] whitespace-nowrap">
-                  {formatTime(currentTimeSec)} / {formatTime(activeTrack.durationSec)}
+                  <TransportTimeReadout durationSec={activeTrack.durationSec} />
                 </span>
               </div>
 
@@ -1859,7 +1888,7 @@ export default function App() {
                 postAnalysis={postAnalysis}
                 referenceAnalysis={referenceTrack?.analysis ?? null}
                 chain={chainBypassed ? [] : chain}
-                liveTelemetry={isPlaying ? liveTelemetry : null}
+                allowLiveTelemetry={isPlaying}
                 sampleRate={activeTrack.sampleRate}
                 mode={spectrumMode}
                 heightClass="h-64"
@@ -1872,7 +1901,7 @@ export default function App() {
               preAnalysis={activeTrack?.analysis ?? null}
               postAnalysis={postAnalysis}
               chain={chainBypassed ? [] : chain}
-              liveTelemetry={isPlaying ? liveTelemetry : null}
+              allowLiveTelemetry={isPlaying}
               postChannels={postChannelsRef.current}
               sampleRate={activeTrack?.sampleRate ?? 44100}
             />
@@ -2078,8 +2107,6 @@ export default function App() {
       {/* Bottom Meter Bridge */}
       <MeterBridge
         postAnalysis={auditionTarget === 'original' ? activeTrack?.analysis ?? null : postAnalysis}
-        liveTelemetry={isPlaying ? liveTelemetry : null}
-        isPlaying={isPlaying}
         qcReport={qcReport}
         monitorVolume={monitorVolume}
         auditionLabel={auditionTarget.toUpperCase()}
