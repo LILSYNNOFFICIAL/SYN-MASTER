@@ -271,7 +271,11 @@ add_executable(syn_core_tests
 target_include_directories(syn_core_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/syn_host_core/include"
 )
-if(UNIX)
+if(WIN32)
+  # SecurityPolicy.cpp is compiled directly into this test executable rather
+  # than linked through syn_host_core, so repeat its Windows crypto dependency.
+  target_link_libraries(syn_core_tests PRIVATE bcrypt)
+elseif(UNIX)
   target_link_libraries(syn_core_tests PRIVATE pthread)
 endif()
 add_dependencies(syn_core_tests syn-plugin-worker)
