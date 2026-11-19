@@ -1,0 +1,44 @@
+name: Windows x64 Native Plugin Host Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native/**'
+      - '.github/workflows/windows-x64-build.yml'
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake (VS 2022 x64 Release)
+        working-directory: native
+        run: cmake --preset windows-x64-release
+
+      - name: Build Host, Scanner, Worker, QA VST3, and Core Tests
+        working-directory: native
+        run: >
+          cmake --build --preset windows-x64-release --parallel
+          --target syn-plugin-host syn-plugin-scanner syn-plugin-worker syn_test_vst3_gain syn_core_tests
+
+      - name: Run CTest Native Core & Worker Isolation Suite
+        working-directory: native
+        run: ctest --test-dir build/windows-x64-release -C Release --output-on-failure
+
+      - name: Run Real Compiled VST3 Discovery, Hosting, DSP & Fault Isolation Verification
+        working-directory: native
+        shell: pwsh
+        run: ./scripts/validate_windows_vst3.ps1 -BuildDir build/windows-x64-release -SkipSystemInstall -SkipAudioHardware
+
+      - name: Upload Windows x64 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: syn-plugin-host-win64-m2
+          path: |
+            native/build/windows-x64-release/Release/syn-plugin-host.exe
+            native/build/windows-x64-release/Release/syn-plugin-scanner.exe
+            native/build/windows-x64-release/Release/syn-plugin-worker.exe
+            native/build/windows-x64-release/Release/syn_core_tests.exe
+            native/build/windows-x64-release/syn_test_vst3_gain_artefacts/Release/VST3/*.vst3/**
