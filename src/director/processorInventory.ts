@@ -255,20 +255,54 @@ export function validateChainAgainstInventory(rawChain: unknown): InventoryValid
 }
 
 export function validateChainCommand(cmd: ChainCommand): { valid: boolean; reason?: string } {
+  if (!cmd || typeof cmd !== 'object') {
+    return { valid: false, reason: 'Command must be an object' };
+  }
+
   const errs: string[] = [];
   hasNonFiniteNumeric(cmd, 'command', errs);
   if (errs.length > 0) return { valid: false, reason: errs[0] };
-  if ('processorType' in cmd && cmd.processorType) {
-    if (
-      typeof cmd.processorType !== 'string' ||
-      !(cmd.processorType === 'external-vst3' ||
-        Object.prototype.hasOwnProperty.call(VERIFIED_NATIVE_PROCESSOR_INVENTORY, cmd.processorType))
-    ) {
+
+  const allowedOps = new Set(['add', 'remove', 'reorder', 'configure', 'gain-stage', 'wet-dry', 'bypass']);
+  if (!allowedOps.has(cmd.op)) {
+    return { valid: false, reason: `Unsupported chain command operation: ${String(cmd.op)}` };
+  }
+
+  const processorRequired = ['add', 'configure', 'gain-stage', 'wet-dry', 'bypass'].includes(cmd.op);
+  const hasOwnProcessorType = Object.prototype.hasOwnProperty.call(cmd, 'processorType');
+  if (processorRequired && !hasOwnProcessorType) {
+    return { valid: false, reason: `Command ${cmd.op} requires an own processorType field` };
+  }
+  if (hasOwnProcessorType && cmd.processorType !== undefined) {
+    const supported = typeof cmd.processorType === 'string' && (
+      cmd.processorType === 'external-vst3' ||
+      Object.prototype.hasOwnProperty.call(VERIFIED_NATIVE_PROCESSOR_INVENTORY, cmd.processorType)
+    );
+    if (!supported) {
       return { valid: false, reason: `Unsupported processorType: ${String(cmd.processorType)}` };
     }
   }
-  if (cmd.op === 'add' && !createDefaultParams(cmd.processorType)) {
-    return { valid: false, reason: `Cannot construct defaults for ${cmd.processorType}` };
+
+  if (cmd.op === 'add') {
+    const defaults = createDefaultParams(cmd.processorType);
+    if (!defaults) {
+      return { valid: false, reason: `Cannot construct defaults for ${String(cmd.processorType)}` };
+    }
+  }
+  if (cmd.op === 'reorder' && (
+    !Array.isArray(cmd.order) ||
+    cmd.order.length > 12 ||
+    cmd.order.some((type) => typeof type !== 'string' || !(
+      type === 'external-vst3' ||
+      Object.prototype.hasOwnProperty.call(VERIFIED_NATIVE_PROCESSOR_INVENTORY, type)
+    ))
+  )) {
+    return { valid: false, reason: 'Reorder command contains unsupported processor types' };
+  }
+  if (cmd.op === 'configure' && (
+    !cmd.paramsPatch || typeof cmd.paramsPatch !== 'object' || Array.isArray(cmd.paramsPatch)
+  )) {
+    return { valid: false, reason: 'Configure command paramsPatch must be an object' };
   }
   return { valid: true };
 }

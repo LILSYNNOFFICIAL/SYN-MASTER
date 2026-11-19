@@ -53,6 +53,22 @@ test('rejects non-finite parameters and chains longer than twelve stages', () =>
   assert.ok(tooLong.errors.some((message) => message.includes('exceeds 12-stage limit')));
 });
 
+test('rejects missing processor types and malformed structured commands', () => {
+  const missingType = validateChainCommand({ op: 'add' } as never);
+  assert.equal(missingType.valid, false);
+  assert.ok(missingType.reason?.includes('requires an own processorType'));
+
+  const malformedOrder = validateChainCommand({ op: 'reorder', order: 'limiter' } as never);
+  assert.equal(malformedOrder.valid, false);
+
+  const malformedPatch = validateChainCommand({
+    op: 'configure',
+    processorType: 'limiter',
+    paramsPatch: [],
+  } as never);
+  assert.equal(malformedPatch.valid, false);
+});
+
 test('rejects malformed chains and invalid AI commands', () => {
   assert.equal(validateChainAgainstInventory('not-an-array').valid, false);
   assert.equal(validateChainAgainstInventory([]).valid, false);
