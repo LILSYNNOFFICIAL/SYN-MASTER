@@ -20,8 +20,8 @@ if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0 && trustedProxyHo
   app.set('trust proxy', trustedProxyHops);
 }
 
-app.use(express.json({ limit: '4mb' }));
-
+// Apply the AI limiter before parsing request bodies. This ensures repeated
+// oversized or malformed requests cannot consume JSON parsing work indefinitely.
 const allowAiRequest = createRateLimiter({ limit: 20, windowMs: 60_000 });
 app.use('/api/ai', (req, res, next) => {
   const key = req.ip || req.socket.remoteAddress || 'unknown';
@@ -33,6 +33,8 @@ app.use('/api/ai', (req, res, next) => {
   }
   next();
 });
+
+app.use(express.json({ limit: '4mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({
