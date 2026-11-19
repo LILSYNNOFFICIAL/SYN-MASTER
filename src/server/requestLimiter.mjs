@@ -22,9 +22,15 @@ export function createRateLimiter({ limit = 20, windowMs = 60_000, now = Date.no
             buckets.delete(entryKey);
           }
         }
+        // Never evict an active client's bucket to make room for a new key.
+        // Otherwise an attacker rotating source IPs could erase earlier limits.
         if (buckets.size >= maxKeys) {
-          const oldestKey = buckets.keys().next().value;
-          if (oldestKey !== undefined) buckets.delete(oldestKey);
+          const earliestExpiry = Math.min(...Array.from(buckets.values(), entry => entry.startedAt + windowMs));
+          return {
+            allowed: false,
+            remaining: 0,
+            retryAfterMs: Math.max(1, earliestExpiry - currentTime),
+          };
         }
       }
       bucket = { startedAt: currentTime, count: 0 };
