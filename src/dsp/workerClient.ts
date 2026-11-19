@@ -65,7 +65,7 @@ function makeError(reason: unknown, fallback: string): Error {
  */
 export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
   const workerFactory = options.workerFactory ?? defaultWorkerFactory;
-  const workerTimeoutMs = Math.max(100, Math.min(120_000, options.workerTimeoutMs ?? 45_000));
+  const workerTimeoutMs = Math.max(1, Math.min(120_000, options.workerTimeoutMs ?? 45_000));
   let worker: DspWorkerLike | null = null;
   let nextJobId = 1;
   const pendingJobs = new Map<number, PendingJob>();

@@ -104,7 +104,7 @@ test('SYN-ANALYZE: noiseFloorDb measurement & artistic choice vs technical probl
   assert.ok(darkAnalysis.noiseFloorDb < -50, `Expected low noise floor, got ${darkAnalysis.noiseFloorDb}`);
   assert.ok(
     darkDiag.findings.some((f) => f.kind === 'artistic-choice' && f.id === 'diag-dark-artistic'),
-    'Warm dark tilt without mud should be classified as artistic-choice',
+    `Warm dark tilt without mud should be classified as artistic-choice (slope=${darkAnalysis.spectralSlopeDbPerOct.toFixed(2)}, bass-mid=${(darkAnalysis.zoneEnergyDb.bass - darkAnalysis.zoneEnergyDb.mid).toFixed(2)}, lowmid-mid=${(darkAnalysis.zoneEnergyDb.lowMid - darkAnalysis.zoneEnergyDb.mid).toFixed(2)}, highmid-mid=${(darkAnalysis.zoneEnergyDb.highMid - darkAnalysis.zoneEnergyDb.mid).toFixed(2)}, findings=${darkDiag.findings.map((f) => f.id).join(',')})`,
   );
   assert.equal(
     darkDiag.findings.filter((f) => f.kind === 'technical-problem').length,
@@ -230,13 +230,16 @@ test('SYN-QC Expansion & Failure Feedback Remediation', () => {
   assert.ok(commands.length > 0, 'QC failures must generate targeted ChainCommands');
 
   // Execute commands and verify stereo/noise/balance actually improve after processing
-  const refined = applyStructuredChainCommands(plan.chain, commands).chain;
+  const applied = applyStructuredChainCommands(plan.chain, commands);
+  const refined = applied.chain;
+  const initialImagerDb = (plan.chain.find((m) => m.type === 'stereo-imager')?.params as { lrBalanceDb?: number } | undefined)?.lrBalanceDb;
+  const finalImagerDb = (refined.find((m) => m.type === 'stereo-imager')?.params as { lrBalanceDb?: number } | undefined)?.lrBalanceDb;
   const rendered = processChainOffline([probL, probR], SR, refined);
   const after = analyzeAudioBuffer(rendered.channels, SR);
   assert.ok(after.lowEndCorrelation > post.lowEndCorrelation, 'Refined stereo focus must improve low-end phase correlation');
   assert.ok(
     Math.abs(after.lrBalanceDb) < Math.abs(post.lrBalanceDb),
-    `Refined L/R balance must move closer to 0 dB (before=${post.lrBalanceDb.toFixed(2)}, after=${after.lrBalanceDb.toFixed(2)})`,
+    `Refined L/R balance must move closer to 0 dB (before=${post.lrBalanceDb.toFixed(2)}, after=${after.lrBalanceDb.toFixed(2)}, initialImager=${initialImagerDb}, finalImager=${finalImagerDb}, commands=${JSON.stringify(commands)}, applied=${applied.appliedCount}, skipped=${applied.skippedReasons.join('|')})`,
   );
 });
 

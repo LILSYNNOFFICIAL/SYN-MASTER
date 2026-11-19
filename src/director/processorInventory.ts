@@ -190,21 +190,24 @@ export interface InventoryValidationResult {
   sanitizedChain: ProcessorModule[];
 }
 
-function hasNonFiniteNumeric(value: unknown, path: string, errors: string[]): void {
+function hasNonFiniteNumeric(
+  value: unknown,
+  path: string,
+  errors: string[],
+  seen: WeakSet<object> = new WeakSet(),
+): void {
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      errors.push(`Non-finite numeric value at ${path}`);
-    }
+    if (!Number.isFinite(value)) errors.push(`Non-finite numeric value at ${path}`);
     return;
   }
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
   if (Array.isArray(value)) {
-    value.forEach((item, idx) => hasNonFiniteNumeric(item, `${path}[${idx}]`, errors));
+    value.forEach((item, idx) => hasNonFiniteNumeric(item, `${path}[${idx}]`, errors, seen));
     return;
   }
-  if (value && typeof value === 'object') {
-    for (const [k, v] of Object.entries(value)) {
-      hasNonFiniteNumeric(v, `${path}.${k}`, errors);
-    }
+  for (const [key, child] of Object.entries(value)) {
+    hasNonFiniteNumeric(child, `${path}.${key}`, errors, seen);
   }
 }
 
@@ -232,7 +235,11 @@ export function validateChainAgainstInventory(rawChain: unknown): InventoryValid
     }
     const obj = item as Record<string, unknown>;
     const type = obj.type as ProcessorType;
-    if (type !== 'external-vst3' && !(type in VERIFIED_NATIVE_PROCESSOR_INVENTORY)) {
+    if (
+      !Object.prototype.hasOwnProperty.call(obj, 'type') ||
+      typeof type !== 'string' ||
+      !(type === 'external-vst3' || Object.prototype.hasOwnProperty.call(VERIFIED_NATIVE_PROCESSOR_INVENTORY, type))
+    ) {
       errors.push(`Unsupported processor type "${String(obj.type)}" at stage ${i}`);
       continue;
     }
@@ -253,10 +260,11 @@ export function validateChainCommand(cmd: ChainCommand): { valid: boolean; reaso
   if (errs.length > 0) return { valid: false, reason: errs[0] };
   if ('processorType' in cmd && cmd.processorType) {
     if (
-      cmd.processorType !== 'external-vst3' &&
-      !(cmd.processorType in VERIFIED_NATIVE_PROCESSOR_INVENTORY)
+      typeof cmd.processorType !== 'string' ||
+      !(cmd.processorType === 'external-vst3' ||
+        Object.prototype.hasOwnProperty.call(VERIFIED_NATIVE_PROCESSOR_INVENTORY, cmd.processorType))
     ) {
-      return { valid: false, reason: `Unsupported processorType: ${cmd.processorType}` };
+      return { valid: false, reason: `Unsupported processorType: ${String(cmd.processorType)}` };
     }
   }
   if (cmd.op === 'add' && !createDefaultParams(cmd.processorType)) {

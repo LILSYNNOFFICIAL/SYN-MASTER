@@ -21,9 +21,10 @@ import type {
   ReferenceComparisonReport,
   ResolvedObjectiveTarget,
 } from '../types/mastering';
-import { analyzeAudioBuffer } from '../dsp/analyzer';
 import { createProcessorModule, validateChain } from '../dsp/chainValidation';
-import { renderMixedChain, type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
+import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
+import { renderAndAnalyzeOffThread } from '../dsp/workerClient';
+import { validateChainAgainstInventory } from './processorInventory';
 import { QC_TARGET_PROFILES, runQualityControl } from '../dsp/qc';
 import { analyzeTrackIntelligence } from './analyzeIntelligence';
 import { applyStructuredChainCommands } from './chainCommands';
@@ -1271,8 +1272,14 @@ export async function runAutonomousDirectorLoop(
     return !opts.shouldStop?.();
   };
 
-  // Phase 1: Baseline Analysis
-  const preAnalysis = analyzeAudioBuffer(opts.sourceChannels, opts.sampleRate);
+  // Phase 1: Baseline Analysis on the DSP worker when available.
+  const baselineRender = await renderAndAnalyzeOffThread({
+    sourceChannels: opts.sourceChannels,
+    sampleRate: opts.sampleRate,
+    chain: [],
+    externalProcessor: opts.externalProcessor,
+  });
+  const preAnalysis = baselineRender.analysis;
   const objective = resolveObjectiveTarget(opts.objectiveId, opts.customSpec, opts.referenceAnalysis);
   const qcProfile: QCTargetProfile = opts.qcProfile ?? {
     ...QC_TARGET_PROFILES[0],
@@ -1406,13 +1413,13 @@ export async function runAutonomousDirectorLoop(
     }
 
     emit('SYN-RENDER', pass, undefined, undefined, workingChain);
-    const rendered = await renderMixedChain(
-      opts.sourceChannels,
-      opts.sampleRate,
-      workingChain,
-      opts.externalProcessor,
-    );
-    const post = analyzeAudioBuffer(rendered.channels, opts.sampleRate);
+    const rendered = await renderAndAnalyzeOffThread({
+      sourceChannels: opts.sourceChannels,
+      sampleRate: opts.sampleRate,
+      chain: workingChain,
+      externalProcessor: opts.externalProcessor,
+    });
+    const post = rendered.analysis;
     const qcReport = runQualityControl(preAnalysis, post, qcProfile, opts.exportConfig);
     const multiObjective = evaluateMultiObjectiveMetrics(
       preAnalysis,
@@ -1518,8 +1525,27 @@ export async function runAutonomousDirectorLoop(
         }
       }
 
+      let acceptedAiChain: ProcessorModule[] | null = null;
       if (nextChainFromAi && nextChainFromAi.length > 0) {
-        workingChain = validateChain(nextChainFromAi);
+        const inventoryCheck = validateChainAgainstInventory(nextChainFromAi);
+        if (inventoryCheck.valid && inventoryCheck.sanitizedChain.length > 0) {
+          acceptedAiChain = inventoryCheck.sanitizedChain;
+        } else {
+          emit(
+            'Gemini Refine Rejected',
+            pass,
+            makeActivity(
+              pass,
+              'refine',
+              'warning',
+              `Rejected cloud Gemini refinement that failed processor inventory validation (${inventoryCheck.errors[0] ?? 'empty chain'}); using deterministic remediation.`,
+            ),
+          );
+        }
+      }
+
+      if (acceptedAiChain) {
+        workingChain = acceptedAiChain;
         emit(
           'SYN-REFINE (Gemini)',
           pass,
