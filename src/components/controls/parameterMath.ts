@@ -233,7 +233,8 @@ export function formatParameterValue(value: number, opts: FormatParameterOptions
   }
 
   const decimals = opts.precision ?? getStepDecimals(opts.step ?? 0.1);
-  const safeVal = Math.abs(value) < Math.pow(10, -(decimals + 2)) ? 0 : value;
+  const zeroThreshold = 0.5 * Math.pow(10, -decimals);
+  const safeVal = Math.abs(value) < zeroThreshold || Object.is(value, -0) ? 0 : value;
   const sign = opts.signed && safeVal > 0 ? '+' : '';
   const numStr = `${sign}${safeVal.toFixed(decimals)}`;
 

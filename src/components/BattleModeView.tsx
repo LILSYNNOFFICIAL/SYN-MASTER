@@ -246,7 +246,6 @@ export const BattleModeView: React.FC<Props> = ({
                 preAnalysis={preAnalysis}
                 postAnalysis={focusedCandidate.postAnalysis}
                 chain={focusedCandidate.chain as ProcessorModule[]}
-                liveTelemetry={null}
                 sampleRate={sampleRate}
                 mode="spectrum"
                 heightClass="h-48"

@@ -5,9 +5,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRateLimiter } from './src/server/requestLimiter.mjs';
 import {
+  AiConfigError,
+  AiTimeoutError,
   generateGeminiMasterStrategy,
   refineGeminiIteration,
 } from './src/server/aiMastering.ts';
+import { validateChainAgainstInventory } from './src/director/processorInventory.ts';
+import { isValidAnalysisPayload, sanitizeAvailablePlugins } from './src/server/aiPayloadValidation.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -56,21 +60,23 @@ app.post('/api/ai/master', async (req, res) => {
       referenceAnalysis,
       availablePlugins,
     } = req.body ?? {};
-    if (
-      !analysis ||
-      typeof analysis !== 'object' ||
-      typeof analysis.integratedLufs !== 'number' ||
-      !Number.isFinite(analysis.integratedLufs)
-    ) {
-      res.status(400).json({ error: 'Valid audio analysis telemetry is required.' });
+    if (!isValidAnalysisPayload(analysis)) {
+      res.status(400).json({ error: 'Valid complete audio analysis telemetry is required.' });
       return;
     }
-    if (targetLufs !== undefined && (typeof targetLufs !== 'number' || !Number.isFinite(targetLufs))) {
-      res.status(400).json({ error: 'targetLufs must be a finite number.' });
+    if (referenceAnalysis !== undefined && referenceAnalysis !== null && !isValidAnalysisPayload(referenceAnalysis)) {
+      res.status(400).json({ error: 'Invalid reference analysis telemetry.' });
       return;
     }
-    if (availablePlugins !== undefined && (!Array.isArray(availablePlugins) || availablePlugins.length > 128)) {
-      res.status(400).json({ error: 'availablePlugins must be an array of at most 128 entries.' });
+    if (targetLufs !== undefined && (
+      typeof targetLufs !== 'number' || !Number.isFinite(targetLufs) || targetLufs < -30 || targetLufs > -3
+    )) {
+      res.status(400).json({ error: 'targetLufs must be a finite number between -30 and -3.' });
+      return;
+    }
+    const pluginResult = sanitizeAvailablePlugins(availablePlugins);
+    if (!pluginResult.valid) {
+      res.status(400).json({ error: pluginResult.error });
       return;
     }
 
@@ -81,12 +87,20 @@ app.post('/api/ai/master', async (req, res) => {
       customObjective,
       operatingMode,
       targetLufs,
-      userGenreOverride,
+      userGenreOverride: typeof userGenreOverride === 'string' ? userGenreOverride.slice(0, 60) : undefined,
       referenceAnalysis,
-      availablePlugins,
+      availablePlugins: pluginResult.value,
     });
     res.json({ strategy });
   } catch (err) {
+    if (err instanceof AiConfigError) {
+      res.status(503).json({ error: 'AI mastering is not configured on this server.' });
+      return;
+    }
+    if (err instanceof AiTimeoutError) {
+      res.status(504).json({ error: 'AI mastering timed out. Please try again.' });
+      return;
+    }
     console.error('[SYN MASTER] AI mastering request failed:', err);
     res.status(502).json({ error: 'AI mastering is temporarily unavailable. Please try again.' });
   }
@@ -104,10 +118,8 @@ app.post('/api/ai/refine', async (req, res) => {
       qcReport,
     } = req.body ?? {};
     if (
-      !preAnalysis ||
-      typeof preAnalysis !== 'object' ||
-      !postAnalysis ||
-      typeof postAnalysis !== 'object' ||
+      !isValidAnalysisPayload(preAnalysis) ||
+      !isValidAnalysisPayload(postAnalysis) ||
       !Array.isArray(currentChain) ||
       currentChain.length > 12
     ) {
@@ -115,17 +127,24 @@ app.post('/api/ai/refine', async (req, res) => {
       return;
     }
     if (
-      (targetLufs !== undefined && (typeof targetLufs !== 'number' || !Number.isFinite(targetLufs))) ||
-      (targetTruePeakDb !== undefined && (typeof targetTruePeakDb !== 'number' || !Number.isFinite(targetTruePeakDb)))
+      (targetLufs !== undefined && (typeof targetLufs !== 'number' || !Number.isFinite(targetLufs) || targetLufs < -30 || targetLufs > -3)) ||
+      (targetTruePeakDb !== undefined && (typeof targetTruePeakDb !== 'number' || !Number.isFinite(targetTruePeakDb) || targetTruePeakDb < -6 || targetTruePeakDb > 0))
     ) {
-      res.status(400).json({ error: 'Mastering targets must be finite numbers.' });
+      res.status(400).json({ error: 'Mastering targets are outside the supported loudness / true-peak range.' });
+      return;
+    }
+    const chainValidation = currentChain.length > 0
+      ? validateChainAgainstInventory(currentChain)
+      : { valid: true, errors: [], sanitizedChain: [] };
+    if (!chainValidation.valid) {
+      res.status(400).json({ error: chainValidation.errors[0] || 'Invalid mastering chain.' });
       return;
     }
 
     const refined = await refineGeminiIteration({
       preAnalysis,
       postAnalysis,
-      currentChain,
+      currentChain: chainValidation.sanitizedChain,
       targetLufs: targetLufs ?? -14,
       targetTruePeakDb: targetTruePeakDb ?? -1.0,
       preserveDynamics: preserveDynamics !== false,
@@ -133,6 +152,14 @@ app.post('/api/ai/refine', async (req, res) => {
     });
     res.json({ refined });
   } catch (err) {
+    if (err instanceof AiConfigError) {
+      res.status(503).json({ error: 'AI mastering is not configured on this server.' });
+      return;
+    }
+    if (err instanceof AiTimeoutError) {
+      res.status(504).json({ error: 'AI refinement timed out. Please try again.' });
+      return;
+    }
     console.error('[SYN MASTER] AI refinement request failed:', err);
     res.status(502).json({ error: 'AI refinement is temporarily unavailable. Please try again.' });
   }

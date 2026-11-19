@@ -566,19 +566,24 @@ function applyStereoImager(
 
   const monoSubHp = params.monoBassBelowHz > 15 ? designHighPass(params.monoBassBelowHz, bwQ, sampleRate) : null;
   const monoSubState = createBiquadState();
+  let inputSqL = 0;
+  let inputSqR = 0;
+  let outputSqL = 0;
+  let outputSqR = 0;
 
   const wLow = 1 + ((params.lowWidth / 100 - 1) * intensityScale);
   const wMid = 1 + ((params.midWidth / 100 - 1) * intensityScale);
   const wHigh = 1 + ((params.highWidth / 100 - 1) * intensityScale);
   const sideGainOffset = dbToLinear(params.midSideGainDb * intensityScale);
-  const balL = params.lrBalanceDb < 0 ? 1 : dbToLinear(-params.lrBalanceDb * intensityScale);
-  const balR = params.lrBalanceDb > 0 ? 1 : dbToLinear(params.lrBalanceDb * intensityScale);
-
   const s = Array.from({ length: 18 }, () => createBiquadState());
 
   for (let i = 0; i < n; i++) {
-    const l = left[i] * balL;
-    const r = right[i] * balR;
+    // Apply L/R balance after the M/S matrix, matching the live Web Audio graph.
+    // Pre-matrix gain can be partially undone by width reconstruction on asymmetric material.
+    const l = left[i];
+    const r = right[i];
+    inputSqL += l * l;
+    inputSqR += r * r;
 
     const lLowRaw = processBiquadSample(processBiquadSample(l, lpLow, s[0]), lpLow, s[1]);
     const rLowRaw = processBiquadSample(processBiquadSample(r, lpLow, s[2]), lpLow, s[3]);
@@ -609,8 +614,28 @@ function applyStereoImager(
       totalS = rawS * (1 - intensityScale) + hpS * intensityScale;
     }
 
-    left[i] = totalM + totalS;
-    right[i] = totalM - totalS;
+    const outputL = totalM + totalS;
+    const outputR = totalM - totalS;
+    outputSqL += outputL * outputL;
+    outputSqR += outputR * outputR;
+    left[i] = outputL;
+    right[i] = outputR;
+  }
+
+  // Set the requested balance relative to the input, compensating for M/S crossover
+  // reconstruction changing channel energy. Only attenuate the louder side.
+  if (n > 0) {
+    const inputBalanceDb = linearToDb(Math.sqrt(inputSqR / n)) - linearToDb(Math.sqrt(inputSqL / n));
+    const outputBalanceDb = linearToDb(Math.sqrt(outputSqR / n)) - linearToDb(Math.sqrt(outputSqL / n));
+    const targetBalanceDb = inputBalanceDb + params.lrBalanceDb * intensityScale;
+    const correctionDb = targetBalanceDb - outputBalanceDb;
+    if (correctionDb > 0.01) {
+      const gain = dbToLinear(-correctionDb);
+      for (let i = 0; i < n; i++) left[i] *= gain;
+    } else if (correctionDb < -0.01) {
+      const gain = dbToLinear(correctionDb);
+      for (let i = 0; i < n; i++) right[i] *= gain;
+    }
   }
 }
 

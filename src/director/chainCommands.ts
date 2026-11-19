@@ -1,5 +1,6 @@
 import type { ChainCommand, ProcessorModule } from '../types/mastering';
 import { createProcessorModule, validateChain } from '../dsp/chainValidation';
+import { validateChainCommand } from './processorInventory';
 
 function findTargetIndex(
   chain: ProcessorModule[],
@@ -60,6 +61,11 @@ export function applyStructuredChainCommands(
   const skippedReasons: string[] = [];
 
   for (const cmd of commands) {
+    const commandValidation = validateChainCommand(cmd);
+    if (!commandValidation.valid) {
+      skippedReasons.push(commandValidation.reason ?? 'Invalid chain command rejected.');
+      continue;
+    }
     switch (cmd.op) {
       case 'add': {
         const newMod = createProcessorModule(cmd.processorType, {

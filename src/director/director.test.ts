@@ -42,17 +42,33 @@ function makeWarmDarkArtisticMix(durationSec = 1.6): [Float32Array, Float32Array
   const n = Math.floor(SR * durationSec);
   const l = new Float32Array(n);
   const r = new Float32Array(n);
+  let seed = 20261119;
+  let low140 = 0;
+  let low500 = 0;
+  let low2000 = 0;
+  const alpha140 = Math.exp((-2 * Math.PI * 140) / SR);
+  const alpha500 = Math.exp((-2 * Math.PI * 500) / SR);
+  const alpha2000 = Math.exp((-2 * Math.PI * 2000) / SR);
+
+  const random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed / 2147483647) * 2 - 1;
+  };
+
   for (let i = 0; i < n; i++) {
-    const t = i / SR;
-    const env = 0.7 + 0.3 * Math.sin(2 * Math.PI * 2.5 * t);
-    // Warm downward spectral tilt without mud spike or phase issues
-    const mid =
-      0.18 * Math.sin(2 * Math.PI * 95 * t) * env +
-      0.11 * Math.sin(2 * Math.PI * 750 * t) * env +
-      0.025 * Math.sin(2 * Math.PI * 6500 * t) * env;
-    const side = 0.06 * Math.sin(2 * Math.PI * 1200 * t) * env;
-    l[i] = mid + side;
-    r[i] = mid - side;
+    const cyclePhase = (i % Math.floor(SR * 0.4)) / (SR * 0.4);
+    // Include low-level quiet passages so the noise estimator has genuine room-tone frames.
+    const env = cyclePhase < 0.72 ? 0.7 + 0.3 * Math.sin((2 * Math.PI * 2.5 * i) / SR) : 0.00035;
+    const white = random();
+    low140 = alpha140 * low140 + (1 - alpha140) * white;
+    low500 = alpha500 * low500 + (1 - alpha500) * white;
+    low2000 = alpha2000 * low2000 + (1 - alpha2000) * white;
+
+    // Broadband, non-tonal warm spectrum: avoid narrow sine peaks and keep bass/mid tilt controlled.
+    const midBand = low2000 - low500;
+    const sample = (0.05 * white + 0.4 * low140 + 0.1 * midBand) * env;
+    l[i] = sample;
+    r[i] = sample;
   }
   return [l, r];
 }
@@ -102,7 +118,7 @@ test('SYN-ANALYZE: noiseFloorDb measurement & artistic choice vs technical probl
   assert.ok(darkAnalysis.noiseFloorDb < -50, `Expected low noise floor, got ${darkAnalysis.noiseFloorDb}`);
   assert.ok(
     darkDiag.findings.some((f) => f.kind === 'artistic-choice' && f.id === 'diag-dark-artistic'),
-    'Warm dark tilt without mud should be classified as artistic-choice',
+    `Warm dark tilt without mud should be classified as artistic-choice (slope=${darkAnalysis.spectralSlopeDbPerOct.toFixed(2)}, bass-mid=${(darkAnalysis.zoneEnergyDb.bass - darkAnalysis.zoneEnergyDb.mid).toFixed(2)}, lowmid-mid=${(darkAnalysis.zoneEnergyDb.lowMid - darkAnalysis.zoneEnergyDb.mid).toFixed(2)}, highmid-mid=${(darkAnalysis.zoneEnergyDb.highMid - darkAnalysis.zoneEnergyDb.mid).toFixed(2)}, findings=${darkDiag.findings.map((f) => f.id).join(',')})`,
   );
   assert.equal(
     darkDiag.findings.filter((f) => f.kind === 'technical-problem').length,
@@ -130,7 +146,11 @@ test('SYN-MASTER Planner: distinct Mastering Objectives produce genuinely distin
 
   const pTrans = buildExplainableMasterPlan({ analysis, objectiveId: 'transparent' });
   const pPunchy = buildExplainableMasterPlan({ analysis, objectiveId: 'punchy' });
-  const pWarm = buildExplainableMasterPlan({ analysis, objectiveId: 'warm' });
+  const clean = new Float32Array(Math.floor(SR * 1.8));
+  for (let i = 0; i < clean.length; i++) clean[i] = 0.18 * Math.sin((2 * Math.PI * 440 * i) / SR);
+  const cleanAnalysis = analyzeAudioBuffer([clean, new Float32Array(clean)], SR);
+  assert.ok(cleanAnalysis.thdEstimatePercent < 1.8, `Warm saturation fixture must be clean, THD=${cleanAnalysis.thdEstimatePercent}%`);
+  const pWarm = buildExplainableMasterPlan({ analysis: cleanAnalysis, objectiveId: 'warm' });
   const pCustom = buildExplainableMasterPlan({
     analysis,
     objectiveId: 'custom',
@@ -224,11 +244,17 @@ test('SYN-QC Expansion & Failure Feedback Remediation', () => {
   assert.ok(commands.length > 0, 'QC failures must generate targeted ChainCommands');
 
   // Execute commands and verify stereo/noise/balance actually improve after processing
-  const refined = applyStructuredChainCommands(plan.chain, commands).chain;
+  const applied = applyStructuredChainCommands(plan.chain, commands);
+  const refined = applied.chain;
+  const initialImagerDb = (plan.chain.find((m) => m.type === 'stereo-imager')?.params as { lrBalanceDb?: number } | undefined)?.lrBalanceDb;
+  const finalImagerDb = (refined.find((m) => m.type === 'stereo-imager')?.params as { lrBalanceDb?: number } | undefined)?.lrBalanceDb;
   const rendered = processChainOffline([probL, probR], SR, refined);
   const after = analyzeAudioBuffer(rendered.channels, SR);
   assert.ok(after.lowEndCorrelation > post.lowEndCorrelation, 'Refined stereo focus must improve low-end phase correlation');
-  assert.ok(Math.abs(after.lrBalanceDb) < Math.abs(post.lrBalanceDb), 'Refined L/R balance must move closer to 0 dB');
+  assert.ok(
+    Math.abs(after.lrBalanceDb) < Math.abs(post.lrBalanceDb),
+    `Refined L/R balance must move closer to 0 dB (before=${post.lrBalanceDb.toFixed(2)}, after=${after.lrBalanceDb.toFixed(2)}, initialImager=${initialImagerDb}, finalImager=${finalImagerDb}, commands=${JSON.stringify(commands)}, applied=${applied.appliedCount}, skipped=${applied.skippedReasons.join('|')})`,
+  );
 });
 
 test('SYN-ITERATE Rollback Safeguard: preserves best checkpoint if forced degradation occurs', async () => {

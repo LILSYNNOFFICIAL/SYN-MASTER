@@ -39,13 +39,11 @@ import type {
 } from './types/mastering';
 import { analyzeAudioBuffer, extractWaveformPeaks } from './dsp/analyzer';
 import { createProcessorModule, validateChain } from './dsp/chainValidation';
+import { validateChainAgainstInventory } from './director/processorInventory';
 import { generateDemoMasterStem } from './dsp/demoAudio';
-import {
-  chainHasActiveExternalPlugins,
-  renderMixedChain,
-  type ExternalPluginProcessCallback,
-} from './dsp/mixedChainRenderer';
-import { processChainOffline, type ProcessorMeterTelemetry } from './dsp/offlineDsp';
+import { type ExternalPluginProcessCallback } from './dsp/mixedChainRenderer';
+import { type ProcessorMeterTelemetry } from './dsp/offlineDsp';
+import { renderAndAnalyzeOffThread } from './dsp/workerClient';
 import { MASTERING_PRESETS } from './dsp/presets';
 import { QC_TARGET_PROFILES, runQualityControl } from './dsp/qc';
 import {
@@ -58,7 +56,8 @@ import {
 import { applyStructuredChainCommands } from './director/chainCommands';
 import { inspectPluginInventory } from './director/pluginIntelligence';
 import { encodeWavBlob } from './dsp/wavEncoder';
-import { SynAudioEngine, type AuditionTarget, type LiveMeterSnapshot } from './engine/audioEngine';
+import { SynAudioEngine, type AuditionTarget } from './engine/audioEngine';
+import { telemetryStore } from './engine/telemetryStore';
 import { SynHostBridge, type HostBridgeSnapshot } from './services/hostBridge';
 import {
   listProjects,
@@ -82,11 +81,32 @@ import { PluginManagerView } from './components/PluginManagerView';
 import { ExportModal, SettingsModal } from './components/Modals';
 
 function formatTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  const ms = Math.floor((sec % 1) * 10);
+  const safe = Number.isFinite(sec) ? Math.max(0, sec) : 0;
+  const m = Math.floor(safe / 60);
+  const s = Math.floor(safe % 60);
+  const ms = Math.floor((safe % 1) * 10);
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${ms}`;
 }
+
+const TransportTimeReadout: React.FC<{ durationSec: number; className?: string }> = React.memo(
+  ({ durationSec, className = '' }) => {
+    const spanRef = useRef<HTMLSpanElement | null>(null);
+    useEffect(() => {
+      const update = (sec: number) => {
+        if (spanRef.current) {
+          spanRef.current.textContent = `${formatTime(sec)} / ${formatTime(durationSec)}`;
+        }
+      };
+      update(telemetryStore.getSnapshot().currentTimeSec);
+      return telemetryStore.subscribe((snapshot) => update(snapshot.currentTimeSec));
+    }, [durationSec]);
+    return (
+      <span ref={spanRef} className={`font-mono-tabular text-[#9CA3AF] ${className}`}>
+        00:00.0 / {formatTime(durationSec)}
+      </span>
+    );
+  },
+);
 
 const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   filename: 'SYN_Master_Output',
@@ -165,12 +185,10 @@ export default function App() {
 
   // Playback & monitoring state
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [monitorVolume, setMonitorVolume] = useState(0.85);
   const [auditionTarget, setAuditionTarget] = useState<AuditionTarget>('mastered');
-  const [liveTelemetry, setLiveTelemetry] = useState<LiveMeterSnapshot | null>(null);
 
   // AI, Mastering Director, Iterative, Battle, QC, Export states
   const [operatingMode, setOperatingMode] = useState<DirectorOperatingMode>('autonomous');
@@ -251,7 +269,7 @@ export default function App() {
     [],
   );
 
-  // Recompute offline DSP analysis whenever chain or bypass changes (debounced 120ms)
+  // Recompute the mastering preview off the UI thread when the native DSP path is available.
   useEffect(() => {
     const src = sourceChannelsRef.current;
     const track = activeTrack;
@@ -260,30 +278,30 @@ export default function App() {
     let cancelled = false;
     const timer = window.setTimeout(() => {
       const effectiveChain = chainBypassed ? [] : chain;
-      if (!chainHasActiveExternalPlugins(effectiveChain)) {
-        const result = processChainOffline(src, track.sampleRate, effectiveChain);
-        if (cancelled) return;
-        postChannelsRef.current = result.channels;
-        setStageTelemetry(result.telemetry);
-        setPostPeaks(extractWaveformPeaks(result.channels, 400));
-        setPostAnalysis(analyzeAudioBuffer(result.channels, track.sampleRate));
-        engineRef.current!.clearOverrideBuffer('mastered-external');
-        return;
-      }
-
       void (async () => {
         try {
-          const result = await renderMixedChain(src, track.sampleRate, effectiveChain, processExternalStage);
+          const result = await renderAndAnalyzeOffThread({
+            sourceChannels: src,
+            sampleRate: track.sampleRate,
+            chain: effectiveChain,
+            includePeaks: true,
+            peakBins: 400,
+            externalProcessor: processExternalStage,
+          });
           if (cancelled) return;
           postChannelsRef.current = result.channels;
           setStageTelemetry(result.telemetry);
-          setPostPeaks(extractWaveformPeaks(result.channels, 400));
-          setPostAnalysis(analyzeAudioBuffer(result.channels, track.sampleRate));
-          engineRef.current!.setOverrideBuffer('mastered-external', result.channels, track.sampleRate);
+          setPostPeaks(result.peaks ?? null);
+          setPostAnalysis(result.analysis);
+          if (result.usedExternalHost) {
+            engineRef.current!.setOverrideBuffer('mastered-external', result.channels, track.sampleRate);
+          } else {
+            engineRef.current!.clearOverrideBuffer('mastered-external');
+          }
         } catch (err) {
           if (cancelled) return;
           engineRef.current!.clearOverrideBuffer('mastered-external');
-          setStatusNotice(err instanceof Error ? err.message : 'External plugin audio processing failed.');
+          setStatusNotice(err instanceof Error ? err.message : 'Audio chain analysis failed.');
         }
       })();
     }, 120);
@@ -292,7 +310,7 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [chain, chainBypassed, activeTrack, hostSnapshot.status, processExternalStage]);
+  }, [chain, chainBypassed, activeTrack, processExternalStage]);
 
   // Sync live Web Audio chain
   useEffect(() => {
@@ -302,23 +320,31 @@ export default function App() {
     engine.setChainBypassed(chainBypassed);
   }, [chain, chainBypassed]);
 
-  // Real-time 30fps meter & playhead animation loop while playing
+  // Publish high-frequency playback telemetry outside React state.
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
     engine.setOnEnded(() => {
       setIsPlaying(false);
-      setCurrentTimeSec(0);
+      telemetryStore.reset();
     });
 
-    if (!isPlaying) return;
+    if (!isPlaying) {
+      telemetryStore.publish({ isPlaying: false, live: null });
+      return;
+    }
+
+    telemetryStore.publish({ isPlaying: true });
     let rafId = 0;
     let lastTick = 0;
     const tick = (now: number) => {
       if (now - lastTick >= 33) {
         lastTick = now;
-        setCurrentTimeSec(engine.getCurrentTimeSec());
-        setLiveTelemetry(engine.getLiveTelemetry());
+        telemetryStore.publish({
+          isPlaying: true,
+          currentTimeSec: engine.getCurrentTimeSec(),
+          live: engine.getLiveTelemetry(),
+        });
       }
       rafId = requestAnimationFrame(tick);
     };
@@ -718,11 +744,18 @@ export default function App() {
       if (!src || !activeTrack) {
         throw new Error('Load an audio track before starting native WASAPI audition.');
       }
+      const track = activeTrack;
       const effectiveChain = chainBypassed ? [] : chain;
-      const rendered = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage);
+      const rendered = await renderAndAnalyzeOffThread({
+        sourceChannels: src,
+        sampleRate: track.sampleRate,
+        chain: effectiveChain,
+        externalProcessor: processExternalStage,
+      });
+      if (activeTrack?.id !== track.id) return;
       const status = await hostBridgeRef.current!.startWasapiAudition(
         rendered.channels,
-        activeTrack.sampleRate,
+        track.sampleRate,
         deviceId,
         true,
       );
@@ -762,7 +795,7 @@ export default function App() {
       sourceChannelsRef.current = channels;
       engine.setSourceChannels(channels, sampleRate);
       setIsPlaying(false);
-      setCurrentTimeSec(0);
+      telemetryStore.reset();
       setAuditionTarget('mastered');
 
       const analysis = analyzeAudioBuffer(channels, sampleRate);
@@ -890,9 +923,11 @@ export default function App() {
     if (isPlaying) {
       engine.pause();
       setIsPlaying(false);
+      telemetryStore.publish({ isPlaying: false, currentTimeSec: engine.getCurrentTimeSec(), live: null });
     } else {
       engine.play();
       setIsPlaying(true);
+      telemetryStore.publish({ isPlaying: true, currentTimeSec: engine.getCurrentTimeSec() });
     }
   }, [activeTrack, isPlaying]);
 
@@ -1040,6 +1075,7 @@ export default function App() {
         const res = await fetch('/api/ai/master', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(30_000),
           body: JSON.stringify({
             analysis: activeTrack.analysis,
             mode,
@@ -1058,10 +1094,15 @@ export default function App() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server responded ${res.status}`);
         const strat = data.strategy as AIMasteringStrategy;
-        strat.chain = validateChain(strat.chain);
-        if (strat.chain.length > 0) {
+        const inventoryCheck = validateChainAgainstInventory(strat?.chain);
+        if (inventoryCheck.valid && inventoryCheck.sanitizedChain.length > 0) {
+          strat.chain = inventoryCheck.sanitizedChain;
           geminiInitialChain = strat.chain;
           setAiStrategy(strat);
+        } else {
+          setAiError(
+            `Cloud AI response failed processor inventory validation (${inventoryCheck.errors[0] ?? 'empty chain'}); using the local DSP planner.`,
+          );
         }
       } catch (err) {
         setAiError(err instanceof Error ? err.message : 'Cloud Gemini request failed');
@@ -1094,6 +1135,7 @@ export default function App() {
                 const res = await fetch('/api/ai/refine', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
+                  signal: AbortSignal.timeout(30_000),
                   body: JSON.stringify(ctx),
                 });
                 const data = await res.json();
@@ -1150,31 +1192,44 @@ export default function App() {
     }
   };
 
-  const handleGenerateBattle = () => {
+  const handleGenerateBattle = async () => {
     const src = sourceChannelsRef.current;
-    if (!src || !activeTrack) return;
+    const track = activeTrack;
+    if (!src || !track) return;
     setBattleGenerating(true);
 
-    const specs = buildBattleCandidatesIntelligent(activeTrack.analysis);
-
-    const built: BattleCandidate[] = specs.map((s) => {
-      const res = processChainOffline(src, activeTrack.sampleRate, s.chain);
-      const post = analyzeAudioBuffer(res.channels, activeTrack.sampleRate);
-      engineRef.current!.setOverrideBuffer(`candidate-${s.id.toLowerCase()}`, res.channels, activeTrack.sampleRate);
-      return {
-        id: s.id,
-        blindLabel: `Candidate ${s.id}`,
-        title: s.title,
-        philosophy: s.philosophy,
-        chain: s.chain,
-        postAnalysis: post,
-        loudnessTrimDb: Number((-14.0 - post.integratedLufs).toFixed(2)),
-      };
-    });
-
-    setBattleCandidates(built);
-    setBattleGenerating(false);
-    setStatusNotice('Generated 3 objective-calibrated Battle Mode masters ready for blind A/B/C auditioning.');
+    try {
+      const specs = buildBattleCandidatesIntelligent(track.analysis);
+      const built: BattleCandidate[] = [];
+      for (const candidate of specs) {
+        const result = await renderAndAnalyzeOffThread({
+          sourceChannels: src,
+          sampleRate: track.sampleRate,
+          chain: candidate.chain,
+        });
+        if (activeTrack?.id !== track.id) return;
+        engineRef.current!.setOverrideBuffer(
+          `candidate-${candidate.id.toLowerCase()}`,
+          result.channels,
+          track.sampleRate,
+        );
+        built.push({
+          id: candidate.id,
+          blindLabel: `Candidate ${candidate.id}`,
+          title: candidate.title,
+          philosophy: candidate.philosophy,
+          chain: candidate.chain,
+          postAnalysis: result.analysis,
+          loudnessTrimDb: Number((-14.0 - result.analysis.integratedLufs).toFixed(2)),
+        });
+      }
+      setBattleCandidates(built);
+      setStatusNotice('Generated 3 objective-calibrated Battle Mode masters ready for blind A/B/C auditioning.');
+    } catch (err) {
+      setStatusNotice(err instanceof Error ? err.message : 'Battle candidate generation failed.');
+    } finally {
+      setBattleGenerating(false);
+    }
   };
 
   const handleMatchReference = () => {
@@ -1233,9 +1288,16 @@ export default function App() {
     if (!src || !activeTrack) return;
     setRenderingExport(true);
     try {
+      const track = activeTrack;
       const effectiveChain = chainBypassed ? [] : chain;
-      const processed = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage);
-      const blob = encodeWavBlob(processed.channels, activeTrack.sampleRate, exportConfig);
+      const processed = await renderAndAnalyzeOffThread({
+        sourceChannels: src,
+        sampleRate: track.sampleRate,
+        chain: effectiveChain,
+        externalProcessor: processExternalStage,
+      });
+      if (activeTrack?.id !== track.id) return;
+      const blob = encodeWavBlob(processed.channels, track.sampleRate, exportConfig);
       if (exportDownloadUrl) URL.revokeObjectURL(exportDownloadUrl);
       const url = URL.createObjectURL(blob);
       const safeName = (exportConfig.filename.trim() || 'SYN_Master') + '.wav';
@@ -1551,7 +1613,7 @@ export default function App() {
                   </span>
                   <span className="text-[#6B7280]" aria-hidden="true">·</span>
                   <span className="font-mono-tabular text-[#9CA3AF]">
-                    {formatTime(currentTimeSec)} / {formatTime(activeTrack.durationSec)}
+                    <TransportTimeReadout durationSec={activeTrack.durationSec} />
                   </span>
                 </div>
 
@@ -1599,14 +1661,13 @@ export default function App() {
                 prePeaks={activeTrack.peaks}
                 postPeaks={postPeaks}
                 durationSec={activeTrack.durationSec}
-                currentTimeSec={currentTimeSec}
                 loopEnabled={loopEnabled}
                 loopStartSec={0}
                 loopEndSec={activeTrack.durationSec}
                 showPostOverlay={auditionTarget !== 'original' && !chainBypassed}
                 onSeek={(sec) => {
                   engineRef.current!.seek(sec);
-                  setCurrentTimeSec(sec);
+                  telemetryStore.publish({ currentTimeSec: sec });
                 }}
               />
 
@@ -1628,7 +1689,7 @@ export default function App() {
                     onClick={() => {
                       engineRef.current!.stop();
                       setIsPlaying(false);
-                      setCurrentTimeSec(0);
+                      telemetryStore.publish({ isPlaying: false, currentTimeSec: 0, live: null });
                     }}
                     className="p-1.5 rounded bg-[#181A22] border border-[#2B2E3A] text-[#F7F8FA] hover:border-[#D4AF37]"
                   >
@@ -1709,7 +1770,7 @@ export default function App() {
                   onClick={() => {
                     engineRef.current!.stop();
                     setIsPlaying(false);
-                    setCurrentTimeSec(0);
+                    telemetryStore.publish({ isPlaying: false, currentTimeSec: 0, live: null });
                   }}
                   className="p-1 rounded bg-[#181A22] border border-[#2B2E3A] text-[#F7F8FA] hover:border-[#D4AF37] shrink-0"
                 >
@@ -1719,7 +1780,7 @@ export default function App() {
                   {activeTrack.name}
                 </span>
                 <span className="text-[11px] font-mono-tabular text-[#9CA3AF] whitespace-nowrap">
-                  {formatTime(currentTimeSec)} / {formatTime(activeTrack.durationSec)}
+                  <TransportTimeReadout durationSec={activeTrack.durationSec} />
                 </span>
               </div>
 
@@ -1827,7 +1888,7 @@ export default function App() {
                 postAnalysis={postAnalysis}
                 referenceAnalysis={referenceTrack?.analysis ?? null}
                 chain={chainBypassed ? [] : chain}
-                liveTelemetry={isPlaying ? liveTelemetry : null}
+                allowLiveTelemetry={isPlaying}
                 sampleRate={activeTrack.sampleRate}
                 mode={spectrumMode}
                 heightClass="h-64"
@@ -1840,7 +1901,7 @@ export default function App() {
               preAnalysis={activeTrack?.analysis ?? null}
               postAnalysis={postAnalysis}
               chain={chainBypassed ? [] : chain}
-              liveTelemetry={isPlaying ? liveTelemetry : null}
+              allowLiveTelemetry={isPlaying}
               postChannels={postChannelsRef.current}
               sampleRate={activeTrack?.sampleRate ?? 44100}
             />
@@ -1895,11 +1956,17 @@ export default function App() {
                 setStatusNotice('Loaded Mastering Director chain into Mastering Rack.');
               }}
               onApplyRecommendation={handleApplyRecommendation}
-              onAuditionCheckpoint={(cp) => {
+              onAuditionCheckpoint={async (cp) => {
                 const src = sourceChannelsRef.current;
-                if (!src || !activeTrack) return;
-                const res = processChainOffline(src, activeTrack.sampleRate, cp.chain);
-                engineRef.current!.setOverrideBuffer('iteration', res.channels, activeTrack.sampleRate);
+                const track = activeTrack;
+                if (!src || !track) return;
+                const res = await renderAndAnalyzeOffThread({
+                  sourceChannels: src,
+                  sampleRate: track.sampleRate,
+                  chain: cp.chain,
+                });
+                if (activeTrack?.id !== track.id) return;
+                engineRef.current!.setOverrideBuffer('iteration', res.channels, track.sampleRate);
                 switchAuditionTarget('iteration', settings.loudnessMatchAB ? -14 - cp.analysis.integratedLufs : 0);
                 if (!isPlaying) {
                   engineRef.current!.play();
@@ -2040,8 +2107,6 @@ export default function App() {
       {/* Bottom Meter Bridge */}
       <MeterBridge
         postAnalysis={auditionTarget === 'original' ? activeTrack?.analysis ?? null : postAnalysis}
-        liveTelemetry={isPlaying ? liveTelemetry : null}
-        isPlaying={isPlaying}
         qcReport={qcReport}
         monitorVolume={monitorVolume}
         auditionLabel={auditionTarget.toUpperCase()}
