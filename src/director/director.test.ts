@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeAudioBuffer } from '../dsp/analyzer';
+import { analyzeStemSet } from '../dsp/stemAnalysis';
 import { createProcessorModule } from '../dsp/chainValidation';
 import { runQualityControl, QC_TARGET_PROFILES } from '../dsp/qc';
 import type { AiChainLifecycleState, MasteringObjectiveId } from '../types/mastering';
@@ -372,4 +373,46 @@ test('Anti-oscillation step damping reduces LUFS step magnitude when sign revers
   ]);
   assert.equal(badRes.appliedCount, 0);
   assert.equal(badRes.skippedReasons.length, 1);
+});
+
+test('Director consumes stem intelligence, exposes evidence, and keeps stem corrections advisory', async () => {
+  const sampleRate = SR;
+  const makeTone = (hz: number, seconds = 1) => {
+    const data = new Float32Array(Math.floor(sampleRate * seconds));
+    for (let i = 0; i < data.length; i++) data[i] = 0.18 * Math.sin((2 * Math.PI * hz * i) / sampleRate);
+    return data;
+  };
+  const stemAnalysis = analyzeStemSet([
+    { id: 'bass-stem', name: 'Bass', role: 'bass', sampleRate, channels: [makeTone(110)] },
+    { id: 'synth-stem', name: 'Synth', role: 'instruments', sampleRate, channels: [makeTone(115)] },
+  ], sampleRate);
+
+  const source = makeBalancedStereo(1, 0.16);
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: source,
+    sampleRate,
+    operatingMode: 'manual',
+    objectiveId: 'streaming',
+    stemAnalysis,
+  });
+
+  assert.equal(report.stemIntelligence?.stemCount, 2);
+  assert.equal(report.stemIntelligence?.overlaps.length, stemAnalysis.overlaps.length);
+  assert.ok(report.diagnosis.findings.some((finding) => finding.id.startsWith('diag-stem-overlap-')));
+  const stemRecommendations = report.recommendations.filter((recommendation) => recommendation.id.startsWith('rec-diag-stem-overlap-'));
+  assert.ok(stemRecommendations.length > 0);
+  assert.ok(stemRecommendations.every((recommendation) => recommendation.commands.length === 0));
+  assert.ok(stemRecommendations.every((recommendation) => /stem-routed processing/i.test(recommendation.proposedParamsSummary)));
+  assert.equal(report.finalChain.some((module) => module.name.includes('Stem Interaction')), false);
+});
+
+test('Director without stem input preserves the existing report contract', async () => {
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: makeBalancedStereo(0.5, 0.16),
+    sampleRate: SR,
+    operatingMode: 'manual',
+    objectiveId: 'streaming',
+  });
+  assert.equal(report.stemIntelligence, undefined);
+  assert.equal(report.diagnosis.findings.some((finding) => finding.id.startsWith('diag-stem-overlap-')), false);
 });
