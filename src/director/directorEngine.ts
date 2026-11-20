@@ -1765,6 +1765,15 @@ export async function runAutonomousDirectorLoop(
       );
     }
 
+    // A user stop request takes priority over convergence. The progress callback above
+    // may set shouldStop after receiving this checkpoint.
+    if (opts.shouldStop?.()) {
+      finalStatus = 'stopped-by-user';
+      stopReason = `Stopped by engineer override after pass ${pass}.`;
+      emit('Stopped', pass, makeActivity(pass, 'halted', 'warning', stopReason), undefined, undefined, 'Stopped');
+      break;
+    }
+
     // Check convergence / early stop
     const lufsOk = Math.abs(post.integratedLufs - objective.targetLufs) <= 0.65;
     const tpOk = post.truePeakDb <= objective.maxTruePeakDb + 0.05;

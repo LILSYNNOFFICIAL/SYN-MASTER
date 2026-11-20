@@ -31,7 +31,8 @@ export function computeRegionEnergyDb(
     }
   }
   if (count === 0) return null;
-  return 10 * Math.log10(Math.max(1e-12, powerSum / count));
+  // Match analyzer.ts's -130 dB spectral floor so quiet bands remain comparable.
+  return 10 * Math.log10(Math.max(1e-13, powerSum / count));
 }
 
 /**
@@ -292,6 +293,14 @@ export function analyzeTrackIntelligence(
     bassMidDiff > thresholds.bassMidDiffLimit &&
     (lowMidBuildup > 2.6 || subExcess > thresholds.subExcessLimit);
   const hasHeavyMud = lowMidMasking || excessiveLowEndOverflow;
+  const mudEvidenceCount = [
+    lowMidBuildup > thresholds.lowMidBuildupLimit,
+    region150To400VsMid !== null &&
+      region150To400VsMid > thresholds.region150To400VsMidLimit,
+    excessiveLowEndOverflow,
+  ].filter(Boolean).length;
+  const mudEvidenceStrength =
+    mudEvidenceCount >= 3 ? 'convergent' : mudEvidenceCount === 2 ? 'multiple' : 'single';
 
   if (hasHeavyMud) {
     const regionStr =
@@ -302,7 +311,7 @@ export function analyzeTrackIntelligence(
       id: 'diag-mud',
       kind: 'technical-problem',
       category: 'Spectral',
-      title: 'Low-Mid / Sub-Bass Buildup Masking Midrange',
+      title: 'Potential Low-Mid / Sub-Bass Masking',
       severity:
         lowMidBuildup > 6.0 ||
         bassMidDiff > 13 ||
@@ -327,8 +336,10 @@ export function analyzeTrackIntelligence(
         ...(region150To400VsMid !== null ? { region150To400VsMid } : {}),
       },
       explanation:
-        'Excessive 150–400 Hz energy clouds vocal/snare clarity and forces the limiter to pump on bass notes.',
-      recommendedAction: 'Apply surgical 260–340 Hz bell cut and subsonic 28 Hz high-pass filter.',
+        'Measured low-mid/sub-bass energy is elevated relative to the midrange. This is a tonal-balance warning; spectral ratios alone cannot confirm audible masking or limiter pumping. Confirm by listening in context or comparing stems.',
+      recommendedAction:
+        'Audition 150–400 Hz against vocal/snare. If masking is audible, try a small dynamic EQ reduction, then reanalyze the rendered audio.',
+      evidenceStrength: mudEvidenceStrength,
     });
   } else if (bassMidDiff > 7.5 && lowMidBuildup <= thresholds.lowMidBuildupLimit) {
     findings.push({

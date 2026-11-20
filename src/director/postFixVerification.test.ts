@@ -645,3 +645,48 @@ test('14. Short zero-padded FFT preserves calibrated 1 kHz amplitude & LPF mid-c
     'Mid-collapsing LPF must never mark diag-mud RESOLVED',
   );
 });
+
+
+test('15. Spectral zone levels and Director region levels share one log-frequency power estimator', () => {
+  const analysis = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const zones = [
+    ['sub', 20, 60],
+    ['bass', 60, 250],
+    ['lowMid', 250, 500],
+    ['mid', 500, 2000],
+    ['highMid', 2000, 6000],
+    ['presence', 6000, 12000],
+  ] as const;
+
+  for (const [key, lowHz, highHz] of zones) {
+    const directorLevel = computeRegionEnergyDb(analysis, lowHz, highHz);
+    assert.notEqual(directorLevel, null, `Expected log-band samples for ${key}`);
+    assert.ok(
+      Math.abs(analysis.zoneEnergyDb[key] - directorLevel!) <= 0.011,
+      `${key} zone (${analysis.zoneEnergyDb[key]} dB) must match Director region (${directorLevel} dB)`,
+    );
+  }
+
+  const bassCenterHz = Math.sqrt(60 * 250);
+  const presenceCenterHz = Math.sqrt(6000 * 12000);
+  const expectedSlope =
+    (analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.bass) /
+    Math.log2(presenceCenterHz / bassCenterHz);
+  assert.ok(
+    Math.abs(analysis.spectralSlopeDbPerOct - expectedSlope) <= 0.011,
+    'Spectral slope must use the actual octave distance between representative band centers',
+  );
+});
+
+test('16. Low-mid diagnosis reports evidence strength and does not claim unmeasured limiter pumping', () => {
+  const analysis = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const diagnosis = analyzeTrackIntelligence(analysis, 'streaming');
+  const mud = diagnosis.findings.find((finding) => finding.id === 'diag-mud');
+
+  assert.ok(mud, 'The deliberately low-mid-heavy fixture should produce a diagnostic hypothesis');
+  assert.equal(mud.evidenceStrength, 'convergent');
+  assert.match(mud.title, /Potential/i);
+  assert.match(mud.explanation, /cannot confirm audible masking/i);
+  assert.doesNotMatch(mud.explanation, /forces the limiter to pump/i);
+  assert.match(mud.recommendedAction ?? '', /audition/i);
+});
