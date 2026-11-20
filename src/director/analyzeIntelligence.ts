@@ -31,7 +31,8 @@ export function computeRegionEnergyDb(
     }
   }
   if (count === 0) return null;
-  return 10 * Math.log10(Math.max(1e-12, powerSum / count));
+  // Match analyzer.ts's -130 dB spectral floor so quiet bands remain comparable.
+  return 10 * Math.log10(Math.max(1e-13, powerSum / count));
 }
 
 /**
