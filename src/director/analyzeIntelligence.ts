@@ -64,8 +64,8 @@ export function analyzeTrackIntelligence(
     });
   }
 
-  // 3. Elevated Broadband Noise Floor (Technical problem)
-  if (nf > -48 && analysis.rmsDb > -40) {
+  // 3. Elevated Broadband Noise Floor (Technical problem when quiet frames separate >=12 dB from program RMS)
+  if (nf > -48 && analysis.rmsDb > -40 && analysis.rmsDb - nf >= 12) {
     findings.push({
       id: 'diag-noise',
       kind: 'technical-problem',
@@ -81,7 +81,11 @@ export function analyzeTrackIntelligence(
       recommendedAction: 'Insert conservative SYN-Restore cleanup prior to dynamics & maximization.',
     });
   } else {
-    workingWell.push(`Low background noise floor (${nf.toFixed(1)} dBFS).`);
+    workingWell.push(
+      analysis.rmsDb - nf < 12
+        ? 'Continuous sustained program without exposed noise floor.'
+        : `Low background noise floor (${nf.toFixed(1)} dBFS).`,
+    );
   }
 
   // 4. Low-End Stereo Phase & Mono Compatibility (Technical problem vs Intentional wide mix)

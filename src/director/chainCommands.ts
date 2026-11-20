@@ -61,11 +61,12 @@ export function applyStructuredChainCommands(
   const skippedReasons: string[] = [];
 
   for (const cmd of commands) {
-    const commandValidation = validateChainCommand(cmd);
-    if (!commandValidation.valid) {
-      skippedReasons.push(commandValidation.reason ?? 'Invalid chain command rejected.');
+    const check = validateChainCommand(cmd);
+    if (!check.valid) {
+      skippedReasons.push(check.reason ?? 'Invalid command rejected by inventory validator.');
       continue;
     }
+
     switch (cmd.op) {
       case 'add': {
         const newMod = createProcessorModule(cmd.processorType, {

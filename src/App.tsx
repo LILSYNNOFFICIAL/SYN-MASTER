@@ -14,6 +14,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import type {
+  AiChainLifecycleState,
   AIMasteringStrategy,
   AppSettings,
   AudioAnalysis,
@@ -39,9 +40,11 @@ import type {
 } from './types/mastering';
 import { analyzeAudioBuffer, extractWaveformPeaks } from './dsp/analyzer';
 import { createProcessorModule, validateChain } from './dsp/chainValidation';
-import { validateChainAgainstInventory } from './director/processorInventory';
 import { generateDemoMasterStem } from './dsp/demoAudio';
-import { type ExternalPluginProcessCallback } from './dsp/mixedChainRenderer';
+import {
+  renderMixedChain,
+  type ExternalPluginProcessCallback,
+} from './dsp/mixedChainRenderer';
 import { type ProcessorMeterTelemetry } from './dsp/offlineDsp';
 import { renderAndAnalyzeOffThread } from './dsp/workerClient';
 import { MASTERING_PRESETS } from './dsp/presets';
@@ -55,6 +58,7 @@ import {
 } from './director/directorEngine';
 import { applyStructuredChainCommands } from './director/chainCommands';
 import { inspectPluginInventory } from './director/pluginIntelligence';
+import { validateChainAgainstInventory } from './director/processorInventory';
 import { encodeWavBlob } from './dsp/wavEncoder';
 import { SynAudioEngine, type AuditionTarget } from './engine/audioEngine';
 import { telemetryStore } from './engine/telemetryStore';
@@ -81,10 +85,9 @@ import { PluginManagerView } from './components/PluginManagerView';
 import { ExportModal, SettingsModal } from './components/Modals';
 
 function formatTime(sec: number): string {
-  const safe = Number.isFinite(sec) ? Math.max(0, sec) : 0;
-  const m = Math.floor(safe / 60);
-  const s = Math.floor(safe % 60);
-  const ms = Math.floor((safe % 1) * 10);
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  const ms = Math.floor((sec % 1) * 10);
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${ms}`;
 }
 
@@ -98,8 +101,9 @@ const TransportTimeReadout: React.FC<{ durationSec: number; className?: string }
         }
       };
       update(telemetryStore.getSnapshot().currentTimeSec);
-      return telemetryStore.subscribe((snapshot) => update(snapshot.currentTimeSec));
+      return telemetryStore.subscribe((snap) => update(snap.currentTimeSec));
     }, [durationSec]);
+
     return (
       <span ref={spanRef} className={`font-mono-tabular text-[#9CA3AF] ${className}`}>
         00:00.0 / {formatTime(durationSec)}
@@ -183,7 +187,7 @@ export default function App() {
   const [redoStack, setRedoStack] = useState<ProcessorModule[][]>([]);
   const [chainBypassed, setChainBypassed] = useState(false);
 
-  // Playback & monitoring state
+  // Playback & monitoring state (high-frequency meters/time live in telemetryStore, NOT React state)
   const [isPlaying, setIsPlaying] = useState(false);
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
@@ -212,8 +216,15 @@ export default function App() {
   const [directorPaused, setDirectorPaused] = useState(false);
   const [directorStage, setDirectorStage] = useState('');
   const [directorPass, setDirectorPass] = useState(0);
+  const [aiLifecycleState, setAiLifecycleState] = useState<AiChainLifecycleState>('Ready');
+  const [preAiChainSnapshot, setPreAiChainSnapshot] = useState<ProcessorModule[] | null>(null);
+  const [aiChainAccepted, setAiChainAccepted] = useState<boolean | null>(null);
   const directorPauseRef = useRef(false);
   const directorStopRef = useRef(false);
+  const directorRunningRef = useRef(false);
+  const directorRunIdRef = useRef(0);
+  const activeTrackIdRef = useRef<string | null>(null);
+  const offlineRenderSeqRef = useRef(0);
 
   const [aiStrategy, setAiStrategy] = useState<AIMasteringStrategy | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -269,13 +280,14 @@ export default function App() {
     [],
   );
 
-  // Recompute the mastering preview off the UI thread when the native DSP path is available.
+  // Recompute offline DSP analysis off the main UI thread (debounced 120ms)
   useEffect(() => {
     const src = sourceChannelsRef.current;
     const track = activeTrack;
     if (!src || !track) return;
 
     let cancelled = false;
+    const seq = ++offlineRenderSeqRef.current;
     const timer = window.setTimeout(() => {
       const effectiveChain = chainBypassed ? [] : chain;
       void (async () => {
@@ -288,7 +300,7 @@ export default function App() {
             peakBins: 400,
             externalProcessor: processExternalStage,
           });
-          if (cancelled) return;
+          if (cancelled || offlineRenderSeqRef.current !== seq) return;
           postChannelsRef.current = result.channels;
           setStageTelemetry(result.telemetry);
           setPostPeaks(result.peaks ?? null);
@@ -299,7 +311,7 @@ export default function App() {
             engineRef.current!.clearOverrideBuffer('mastered-external');
           }
         } catch (err) {
-          if (cancelled) return;
+          if (cancelled || offlineRenderSeqRef.current !== seq) return;
           engineRef.current!.clearOverrideBuffer('mastered-external');
           setStatusNotice(err instanceof Error ? err.message : 'Audio chain analysis failed.');
         }
@@ -310,7 +322,7 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [chain, chainBypassed, activeTrack, processExternalStage]);
+  }, [chain, chainBypassed, activeTrack, hostSnapshot.status, processExternalStage]);
 
   // Sync live Web Audio chain
   useEffect(() => {
@@ -320,13 +332,13 @@ export default function App() {
     engine.setChainBypassed(chainBypassed);
   }, [chain, chainBypassed]);
 
-  // Publish high-frequency playback telemetry outside React state.
+  // Real-time 30fps meter & playhead animation loop writing to external telemetryStore (zero React re-renders)
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
     engine.setOnEnded(() => {
       setIsPlaying(false);
-      telemetryStore.reset();
+      telemetryStore.publish({ isPlaying: false, currentTimeSec: 0, live: null });
     });
 
     if (!isPlaying) {
@@ -744,18 +756,11 @@ export default function App() {
       if (!src || !activeTrack) {
         throw new Error('Load an audio track before starting native WASAPI audition.');
       }
-      const track = activeTrack;
       const effectiveChain = chainBypassed ? [] : chain;
-      const rendered = await renderAndAnalyzeOffThread({
-        sourceChannels: src,
-        sampleRate: track.sampleRate,
-        chain: effectiveChain,
-        externalProcessor: processExternalStage,
-      });
-      if (activeTrack?.id !== track.id) return;
+      const rendered = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage);
       const status = await hostBridgeRef.current!.startWasapiAudition(
         rendered.channels,
-        track.sampleRate,
+        activeTrack.sampleRate,
         deviceId,
         true,
       );
@@ -791,6 +796,19 @@ export default function App() {
 
   const loadChannelsAsSource = useCallback(
     (channels: Float32Array[], sampleRate: number, name: string, fileSizeBytes: number, format: string, isDemo = false) => {
+      // Cancel any in-flight CHAIN WITH AI run targeting the previous source track
+      if (directorRunningRef.current) {
+        directorStopRef.current = true;
+        directorPauseRef.current = false;
+        directorRunningRef.current = false;
+      }
+      directorRunIdRef.current += 1;
+      setDirectorRunning(false);
+      setDirectorPaused(false);
+      setAiLifecycleState('Ready');
+      setPreAiChainSnapshot(null);
+      setAiChainAccepted(null);
+
       const engine = engineRef.current!;
       sourceChannelsRef.current = channels;
       engine.setSourceChannels(channels, sampleRate);
@@ -800,8 +818,10 @@ export default function App() {
 
       const analysis = analyzeAudioBuffer(channels, sampleRate);
       const peaks = extractWaveformPeaks(channels, 400);
+      const trackId = `trk-${Date.now()}`;
+      activeTrackIdRef.current = trackId;
       const asset: AudioTrackAsset = {
-        id: `trk-${Date.now()}`,
+        id: trackId,
         name,
         fileSizeBytes,
         format,
@@ -923,11 +943,18 @@ export default function App() {
     if (isPlaying) {
       engine.pause();
       setIsPlaying(false);
-      telemetryStore.publish({ isPlaying: false, currentTimeSec: engine.getCurrentTimeSec(), live: null });
+      telemetryStore.publish({
+        isPlaying: false,
+        currentTimeSec: engine.getCurrentTimeSec(),
+        live: null,
+      });
     } else {
       engine.play();
       setIsPlaying(true);
-      telemetryStore.publish({ isPlaying: true, currentTimeSec: engine.getCurrentTimeSec() });
+      telemetryStore.publish({
+        isPlaying: true,
+        currentTimeSec: engine.getCurrentTimeSec(),
+      });
     }
   }, [activeTrack, isPlaying]);
 
@@ -1036,18 +1063,42 @@ export default function App() {
     [chain, updateChainWithHistory],
   );
 
-  const handleRunMasterDirector = async () => {
-    const src = sourceChannelsRef.current;
-    if (!src || !activeTrack) return;
+  const handleAcceptAiChain = useCallback(() => {
+    if (directorReport?.finalChain && directorReport.finalChain.length > 0) {
+      updateChainWithHistory(structuredClone(directorReport.finalChain));
+    }
+    setAiChainAccepted(true);
+    setStatusNotice('Accepted AI-optimized mastering chain in Mastering Rack.');
+  }, [directorReport, updateChainWithHistory]);
 
+  const handleRestorePreAiChain = useCallback(() => {
+    if (!preAiChainSnapshot) return;
+    updateChainWithHistory(structuredClone(preAiChainSnapshot));
+    setAiChainAccepted(false);
+    switchAuditionTarget('mastered', 0);
+    setStatusNotice('Restored previous mastering chain from before CHAIN WITH AI run.');
+  }, [preAiChainSnapshot, updateChainWithHistory, switchAuditionTarget]);
+
+  const handleRunMasterDirector = useCallback(async () => {
+    const src = sourceChannelsRef.current;
+    if (!src || !activeTrack || directorRunningRef.current) return;
+
+    const runId = ++directorRunIdRef.current;
+    const sourceTrackId = activeTrack.id;
+    const isStale = () => directorRunIdRef.current !== runId || activeTrackIdRef.current !== sourceTrackId;
+
+    directorRunningRef.current = true;
     setAiError(null);
+    setAiChainAccepted(null);
+    setPreAiChainSnapshot(structuredClone(chain));
     setDirectorRunning(true);
     setDirectorPaused(false);
     directorPauseRef.current = false;
     directorStopRef.current = false;
     setDirectorActivityLog([]);
     setDirectorCheckpoints([]);
-    setDirectorStage('SYN-ANALYZE');
+    setAiLifecycleState('Analyzing');
+    setDirectorStage('Analyzing');
     setDirectorPass(0);
 
     const plan = buildExplainableMasterPlan({
@@ -1058,6 +1109,7 @@ export default function App() {
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });
+    if (isStale()) return;
     setDirectorPlan(plan);
     setAiStrategy(plan.strategy);
 
@@ -1065,6 +1117,7 @@ export default function App() {
     let geminiInitialChain: ProcessorModule[] | undefined;
     if (useGeminiCloud && operatingMode !== 'manual') {
       setAiLoading(true);
+      setAiLifecycleState('Planning');
       try {
         const pluginSummary = inspectPluginInventory(
           hostSnapshot.plugins,
@@ -1075,7 +1128,7 @@ export default function App() {
         const res = await fetch('/api/ai/master', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.timeout(12_000),
           body: JSON.stringify({
             analysis: activeTrack.analysis,
             mode,
@@ -1093,21 +1146,24 @@ export default function App() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server responded ${res.status}`);
+        if (isStale()) return;
         const strat = data.strategy as AIMasteringStrategy;
-        const inventoryCheck = validateChainAgainstInventory(strat?.chain);
-        if (inventoryCheck.valid && inventoryCheck.sanitizedChain.length > 0) {
-          strat.chain = inventoryCheck.sanitizedChain;
+        const invCheck = validateChainAgainstInventory(strat.chain);
+        if (invCheck.valid && invCheck.sanitizedChain.length > 0) {
+          strat.chain = invCheck.sanitizedChain;
           geminiInitialChain = strat.chain;
           setAiStrategy(strat);
         } else {
           setAiError(
-            `Cloud AI response failed processor inventory validation (${inventoryCheck.errors[0] ?? 'empty chain'}); using the local DSP planner.`,
+            `Cloud AI response failed inventory validation (${invCheck.errors[0] ?? 'empty chain'}); using local DSP planner.`,
           );
         }
       } catch (err) {
-        setAiError(err instanceof Error ? err.message : 'Cloud Gemini request failed');
+        if (!isStale()) {
+          setAiError(err instanceof Error ? err.message : 'Cloud Gemini request failed');
+        }
       } finally {
-        setAiLoading(false);
+        if (!isStale()) setAiLoading(false);
       }
     }
 
@@ -1128,14 +1184,14 @@ export default function App() {
         maxIterations,
         convergenceThreshold,
         isPaused: () => directorPauseRef.current,
-        shouldStop: () => directorStopRef.current,
+        shouldStop: () => directorStopRef.current || isStale(),
         aiRefineCallback:
           useGeminiCloud && operatingMode === 'autonomous'
             ? async (ctx) => {
                 const res = await fetch('/api/ai/refine', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  signal: AbortSignal.timeout(30_000),
+                  signal: AbortSignal.timeout(12_000),
                   body: JSON.stringify(ctx),
                 });
                 const data = await res.json();
@@ -1144,6 +1200,8 @@ export default function App() {
               }
             : undefined,
         onProgress: (upd) => {
+          if (isStale()) return;
+          if (upd.lifecycle) setAiLifecycleState(upd.lifecycle);
           setDirectorStage(upd.stage);
           setDirectorPass(upd.passNumber);
           if (upd.activityEntry) {
@@ -1155,9 +1213,12 @@ export default function App() {
         },
       });
 
+      if (isStale()) return;
+
       setDirectorReport(report);
       setDirectorCheckpoints(report.checkpoints);
       setDirectorActivityLog(report.activityLog);
+      setAiLifecycleState(report.status === 'stopped-by-user' ? 'Stopped' : 'Completed');
 
       if (operatingMode !== 'manual' && report.finalChain.length > 0) {
         updateChainWithHistory(structuredClone(report.finalChain));
@@ -1181,18 +1242,41 @@ export default function App() {
       setStatusNotice(
         operatingMode === 'manual'
           ? 'Manual Mode: Explainable mastering plan generated without altering rack.'
-          : `Director ${report.status}: Best Pass #${report.bestPassNumber} (${report.postAnalysis.integratedLufs.toFixed(1)} LUFS, QC ${report.qcReport.overallStatus.toUpperCase()}).`,
+          : `CHAIN WITH AI ${report.status}: Best Pass #${report.bestPassNumber} (${report.postAnalysis.integratedLufs.toFixed(1)} LUFS, QC ${report.qcReport.overallStatus.toUpperCase()}).`,
       );
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'Mastering Director execution failed');
+      if (!isStale()) {
+        setAiLifecycleState('Failed');
+        setAiError(err instanceof Error ? err.message : 'Mastering Director execution failed');
+      }
     } finally {
-      setDirectorRunning(false);
-      setDirectorPaused(false);
-      directorPauseRef.current = false;
+      if (directorRunIdRef.current === runId) {
+        directorRunningRef.current = false;
+        setDirectorRunning(false);
+        setDirectorPaused(false);
+        directorPauseRef.current = false;
+      }
     }
-  };
+  }, [
+    activeTrack,
+    chain,
+    objectiveId,
+    customObjective,
+    referenceTrack,
+    hostSnapshot.plugins,
+    hostSnapshot.status,
+    useGeminiCloud,
+    operatingMode,
+    mode,
+    activeQcProfile,
+    exportConfig,
+    processExternalStage,
+    maxIterations,
+    convergenceThreshold,
+    updateChainWithHistory,
+  ]);
 
-  const handleGenerateBattle = async () => {
+  const handleGenerateBattle = useCallback(async () => {
     const src = sourceChannelsRef.current;
     const track = activeTrack;
     if (!src || !track) return;
@@ -1201,28 +1285,25 @@ export default function App() {
     try {
       const specs = buildBattleCandidatesIntelligent(track.analysis);
       const built: BattleCandidate[] = [];
-      for (const candidate of specs) {
-        const result = await renderAndAnalyzeOffThread({
+      for (const s of specs) {
+        const res = await renderAndAnalyzeOffThread({
           sourceChannels: src,
           sampleRate: track.sampleRate,
-          chain: candidate.chain,
+          chain: s.chain,
         });
-        if (activeTrack?.id !== track.id) return;
-        engineRef.current!.setOverrideBuffer(
-          `candidate-${candidate.id.toLowerCase()}`,
-          result.channels,
-          track.sampleRate,
-        );
+        if (activeTrackIdRef.current !== track.id) return;
+        engineRef.current!.setOverrideBuffer(`candidate-${s.id.toLowerCase()}`, res.channels, track.sampleRate);
         built.push({
-          id: candidate.id,
-          blindLabel: `Candidate ${candidate.id}`,
-          title: candidate.title,
-          philosophy: candidate.philosophy,
-          chain: candidate.chain,
-          postAnalysis: result.analysis,
-          loudnessTrimDb: Number((-14.0 - result.analysis.integratedLufs).toFixed(2)),
+          id: s.id,
+          blindLabel: `Candidate ${s.id}`,
+          title: s.title,
+          philosophy: s.philosophy,
+          chain: s.chain,
+          postAnalysis: res.analysis,
+          loudnessTrimDb: Number((-14.0 - res.analysis.integratedLufs).toFixed(2)),
         });
       }
+
       setBattleCandidates(built);
       setStatusNotice('Generated 3 objective-calibrated Battle Mode masters ready for blind A/B/C auditioning.');
     } catch (err) {
@@ -1230,7 +1311,7 @@ export default function App() {
     } finally {
       setBattleGenerating(false);
     }
-  };
+  }, [activeTrack]);
 
   const handleMatchReference = () => {
     if (!activeTrack || !referenceTrack) return;
@@ -1288,16 +1369,9 @@ export default function App() {
     if (!src || !activeTrack) return;
     setRenderingExport(true);
     try {
-      const track = activeTrack;
       const effectiveChain = chainBypassed ? [] : chain;
-      const processed = await renderAndAnalyzeOffThread({
-        sourceChannels: src,
-        sampleRate: track.sampleRate,
-        chain: effectiveChain,
-        externalProcessor: processExternalStage,
-      });
-      if (activeTrack?.id !== track.id) return;
-      const blob = encodeWavBlob(processed.channels, track.sampleRate, exportConfig);
+      const processed = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage);
+      const blob = encodeWavBlob(processed.channels, activeTrack.sampleRate, exportConfig);
       if (exportDownloadUrl) URL.revokeObjectURL(exportDownloadUrl);
       const url = URL.createObjectURL(blob);
       const safeName = (exportConfig.filename.trim() || 'SYN_Master') + '.wav';
@@ -1310,6 +1384,79 @@ export default function App() {
       setRenderingExport(false);
     }
   };
+
+  const handleApplyPreset = useCallback(
+    (p: MasteringPreset) => {
+      updateChainWithHistory(structuredClone(p.chain));
+      setStatusNotice(`Loaded preset "${p.name}".`);
+    },
+    [updateChainWithHistory],
+  );
+
+  const handleApplySavedChain = useCallback(
+    (c: SavedChainRecord) => {
+      updateChainWithHistory(structuredClone(c.chain));
+      setStatusNotice(`Loaded chain "${c.name}".`);
+    },
+    [updateChainWithHistory],
+  );
+
+  const handleDeleteSavedChain = useCallback(async (id: string) => {
+    await removeChainRecord(id);
+    setSavedChains(await listSavedChains());
+  }, []);
+
+  const handleOpenProject = useCallback((proj: ProjectRecord) => {
+    setProjectId(proj.id);
+    setProjectName(proj.name);
+    setMode(proj.mode);
+    const validated = validateChain(proj.chain).map((m) =>
+      m.type === 'external-vst3'
+        ? {
+            ...m,
+            params: {
+              ...(m.params as ExternalVST3Params),
+              instanceId: null,
+              status: 'unloaded' as const,
+              editorOpen: false,
+            },
+          }
+        : m,
+    );
+    setChain(validated);
+    setAiStrategy(proj.aiStrategy ?? null);
+    setIterations(proj.iterations ?? []);
+    setQcTargetId(proj.qcTargetId ?? 'streaming');
+    setStatusNotice(`Opened project "${proj.name}".`);
+  }, []);
+
+  const handleDeleteProject = useCallback(async (id: string) => {
+    await removeProject(id);
+    setProjects(await listProjects());
+  }, []);
+
+  const handleToggleChainBypass = useCallback(() => setChainBypassed((b) => !b), []);
+
+  const handleSaveChainPreset = useCallback(
+    async (name: string) => {
+      await saveChainRecord({
+        id: `chain-${Date.now()}`,
+        name,
+        createdAt: Date.now(),
+        chain: structuredClone(chainRef.current),
+      });
+      setSavedChains(await listSavedChains());
+      setStatusNotice(`Saved chain "${name}".`);
+    },
+    [],
+  );
+
+  const handleResetChain = useCallback(() => updateChainWithHistory(createStarterChain()), [updateChainWithHistory]);
+
+  const handleChangeMonitorVolume = useCallback((v: number) => {
+    setMonitorVolume(v);
+    engineRef.current!.setMonitorVolume(v);
+  }, []);
 
   return (
     <div className="min-h-screen lg:h-screen w-full flex flex-col bg-[#070709] text-[#F7F8FA] lg:overflow-hidden">
@@ -1495,45 +1642,11 @@ export default function App() {
             onUploadReferenceFile={handleUploadReferenceFile}
             onLoadDemoSource={handleLoadDemoSource}
             onLoadDemoReference={handleLoadDemoReference}
-            onApplyPreset={(p: MasteringPreset) => {
-              updateChainWithHistory(structuredClone(p.chain));
-              setStatusNotice(`Loaded preset "${p.name}".`);
-            }}
-            onApplySavedChain={(c: SavedChainRecord) => {
-              updateChainWithHistory(structuredClone(c.chain));
-              setStatusNotice(`Loaded chain "${c.name}".`);
-            }}
-            onDeleteSavedChain={async (id) => {
-              await removeChainRecord(id);
-              setSavedChains(await listSavedChains());
-            }}
-            onOpenProject={(proj) => {
-              setProjectId(proj.id);
-              setProjectName(proj.name);
-              setMode(proj.mode);
-              const validated = validateChain(proj.chain).map((m) =>
-                m.type === 'external-vst3'
-                  ? {
-                      ...m,
-                      params: {
-                        ...(m.params as ExternalVST3Params),
-                        instanceId: null,
-                        status: 'unloaded' as const,
-                        editorOpen: false,
-                      },
-                    }
-                  : m,
-              );
-              setChain(validated);
-              setAiStrategy(proj.aiStrategy ?? null);
-              setIterations(proj.iterations ?? []);
-              setQcTargetId(proj.qcTargetId ?? 'streaming');
-              setStatusNotice(`Opened project "${proj.name}".`);
-            }}
-            onDeleteProject={async (id) => {
-              await removeProject(id);
-              setProjects(await listProjects());
-            }}
+            onApplyPreset={handleApplyPreset}
+            onApplySavedChain={handleApplySavedChain}
+            onDeleteSavedChain={handleDeleteSavedChain}
+            onOpenProject={handleOpenProject}
+            onDeleteProject={handleDeleteProject}
           />
         )}
 
@@ -1612,9 +1725,7 @@ export default function App() {
                     {(activeTrack.sampleRate / 1000).toFixed(1)} kHz
                   </span>
                   <span className="text-[#6B7280]" aria-hidden="true">·</span>
-                  <span className="font-mono-tabular text-[#9CA3AF]">
-                    <TransportTimeReadout durationSec={activeTrack.durationSec} />
-                  </span>
+                  <TransportTimeReadout durationSec={activeTrack.durationSec} />
                 </div>
 
                 {/* Original vs Mastered A/B Audition */}
@@ -1779,9 +1890,10 @@ export default function App() {
                 <span className="text-xs font-bold text-[#F7F8FA] truncate max-w-[200px]">
                   {activeTrack.name}
                 </span>
-                <span className="text-[11px] font-mono-tabular text-[#9CA3AF] whitespace-nowrap">
-                  <TransportTimeReadout durationSec={activeTrack.durationSec} />
-                </span>
+                <TransportTimeReadout
+                  durationSec={activeTrack.durationSec}
+                  className="text-[11px] whitespace-nowrap"
+                />
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -1888,7 +2000,6 @@ export default function App() {
                 postAnalysis={postAnalysis}
                 referenceAnalysis={referenceTrack?.analysis ?? null}
                 chain={chainBypassed ? [] : chain}
-                allowLiveTelemetry={isPlaying}
                 sampleRate={activeTrack.sampleRate}
                 mode={spectrumMode}
                 heightClass="h-64"
@@ -1901,7 +2012,6 @@ export default function App() {
               preAnalysis={activeTrack?.analysis ?? null}
               postAnalysis={postAnalysis}
               chain={chainBypassed ? [] : chain}
-              allowLiveTelemetry={isPlaying}
               postChannels={postChannelsRef.current}
               sampleRate={activeTrack?.sampleRate ?? 44100}
             />
@@ -1917,6 +2027,9 @@ export default function App() {
               customObjective={customObjective}
               useGeminiCloud={useGeminiCloud}
               canUndo={undoStack.length > 0}
+              hasPreAiSnapshot={preAiChainSnapshot !== null}
+              aiChainAccepted={aiChainAccepted}
+              aiLifecycleState={aiLifecycleState}
               aiStrategy={aiStrategy}
               directorPlan={directorPlan}
               directorReport={directorReport}
@@ -1951,6 +2064,8 @@ export default function App() {
                 setDirectorPaused(false);
               }}
               onUndoLast={handleUndo}
+              onAcceptAiChain={handleAcceptAiChain}
+              onRestorePreAiChain={handleRestorePreAiChain}
               onApplyChain={(c) => {
                 updateChainWithHistory(structuredClone(c));
                 setStatusNotice('Loaded Mastering Director chain into Mastering Rack.');
@@ -1958,15 +2073,13 @@ export default function App() {
               onApplyRecommendation={handleApplyRecommendation}
               onAuditionCheckpoint={async (cp) => {
                 const src = sourceChannelsRef.current;
-                const track = activeTrack;
-                if (!src || !track) return;
+                if (!src || !activeTrack) return;
                 const res = await renderAndAnalyzeOffThread({
                   sourceChannels: src,
-                  sampleRate: track.sampleRate,
+                  sampleRate: activeTrack.sampleRate,
                   chain: cp.chain,
                 });
-                if (activeTrack?.id !== track.id) return;
-                engineRef.current!.setOverrideBuffer('iteration', res.channels, track.sampleRate);
+                engineRef.current!.setOverrideBuffer('iteration', res.channels, activeTrack.sampleRate);
                 switchAuditionTarget('iteration', settings.loudnessMatchAB ? -14 - cp.analysis.integratedLufs : 0);
                 if (!isPlaying) {
                   engineRef.current!.play();
@@ -2082,19 +2195,14 @@ export default function App() {
             guidedMode={settings.experienceMode === 'guided'}
             externalPlugins={hostSnapshot.plugins}
             hostConnected={hostSnapshot.status === 'connected'}
+            hasTrack={Boolean(activeTrack)}
+            aiRunning={directorRunning}
+            aiLifecycleState={aiLifecycleState}
+            onRunChainWithAi={handleRunMasterDirector}
             onChangeChain={updateChainWithHistory}
-            onToggleChainBypass={() => setChainBypassed((b) => !b)}
-            onSaveChain={async (name) => {
-              await saveChainRecord({
-                id: `chain-${Date.now()}`,
-                name,
-                createdAt: Date.now(),
-                chain: structuredClone(chain),
-              });
-              setSavedChains(await listSavedChains());
-              setStatusNotice(`Saved chain "${name}".`);
-            }}
-            onResetChain={() => updateChainWithHistory(createStarterChain())}
+            onToggleChainBypass={handleToggleChainBypass}
+            onSaveChain={handleSaveChainPreset}
+            onResetChain={handleResetChain}
             onAddExternalPlugin={handleInsertExternalPlugin}
             onLoadExternalInstance={handleLoadExternalInstance}
             onSetExternalParam={handleSetExternalParam}
@@ -2110,10 +2218,7 @@ export default function App() {
         qcReport={qcReport}
         monitorVolume={monitorVolume}
         auditionLabel={auditionTarget.toUpperCase()}
-        onChangeMonitorVolume={(v) => {
-          setMonitorVolume(v);
-          engineRef.current!.setMonitorVolume(v);
-        }}
+        onChangeMonitorVolume={handleChangeMonitorVolume}
       />
 
       {/* Export & Settings Modals */}

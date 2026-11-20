@@ -13,7 +13,7 @@
     "test": "tsx --test src/components/controls/controls.test.ts src/director/director.test.ts src/director/processorInventory.test.ts src/dsp/dsp.audit.test.ts src/dsp/dsp.test.ts src/dsp/dsp.verification.test.ts src/dsp/mixedChain.test.ts src/dsp/workerClient.test.ts src/engine/telemetryStore.test.ts src/services/hostBridge.test.ts src/server/*.test.mjs src/server/aiPayloadValidation.test.ts"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
+    "@google/genai": "^2.32.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "lucide-react": "^0.546.0",

@@ -560,9 +560,10 @@ export class SynAudioEngine {
       } else if (mod.type === 'dynamic-eq') {
         const p = mod.params as DynamicEQParams;
         const enabledBands = p.bands.filter((b) => b.enabled && b.maxCutDb < -0.05);
-        if (enabledBands.length > 0) {
+        const audioCtx = this.ctx;
+        if (enabledBands.length > 0 && audioCtx) {
           const dynNodes = enabledBands.map((b) => {
-            const bq = this.ctx!.createBiquadFilter();
+            const bq = audioCtx.createBiquadFilter();
             bq.type = 'peaking';
             bq.frequency.value = b.freq;
             bq.Q.value = b.q;

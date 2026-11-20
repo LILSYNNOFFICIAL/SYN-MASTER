@@ -540,7 +540,33 @@ export interface WasapiAuditionStatus {
 
 export type DirectorOperatingMode = 'manual' | 'assisted' | 'autonomous';
 
-export type MasteringObjectiveId = 'transparent' | 'punchy' | 'warm' | 'streaming' | 'custom';
+export type MasteringObjectiveId =
+  | 'streaming'
+  | 'commercial-loudness'
+  | 'dynamic'
+  | 'cinematic'
+  | 'electronic'
+  | 'hip-hop'
+  | 'pop'
+  | 'acoustic'
+  | 'vocal-focused'
+  | 'transparent'
+  | 'punchy'
+  | 'warm'
+  | 'custom';
+
+export type AiChainLifecycleState =
+  | 'Ready'
+  | 'Analyzing'
+  | 'Planning'
+  | 'Building chain'
+  | 'Processing'
+  | 'Measuring'
+  | 'Optimizing'
+  | 'Validating'
+  | 'Completed'
+  | 'Stopped'
+  | 'Failed';
 
 export interface CustomObjectiveSpec {
   targetLufs: number;
@@ -728,6 +754,14 @@ export interface DirectorCheckpoint {
   qcReport: QCReport;
   multiObjective: MultiObjectiveEvaluation;
   isBest?: boolean;
+  iterationSummary?: {
+    activeProcessor: string;
+    detectedIssue: string;
+    measuredValue: string;
+    targetValue: string;
+    previousValue?: string;
+    outcome: 'improved' | 'regressed' | 'baseline' | 'converged';
+  };
 }
 
 export interface ReferenceComparisonReport {
@@ -764,5 +798,8 @@ export interface MasterFinalReport {
   activityLog: DirectorActivityEntry[];
   verifiedImprovements: string[];
   remainingTradeoffs: string[];
+  resolvedProblems: string[];
+  partiallyResolvedProblems: string[];
+  preservedCharacteristics: string[];
 }
 

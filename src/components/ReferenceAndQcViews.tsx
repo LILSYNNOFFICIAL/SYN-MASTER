@@ -135,6 +135,7 @@ export const ReferenceMatchView: React.FC<RefProps> = ({
               postAnalysis={activePost}
               referenceAnalysis={referenceTrack.analysis}
               chain={chain}
+              allowLiveTelemetry={false}
               sampleRate={activeTrack?.sampleRate ?? 44100}
               mode="spectrum"
               heightClass="h-56"
