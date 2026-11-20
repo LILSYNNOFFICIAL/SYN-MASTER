@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, AudioLines, FileAudio, Layers3, Loader2, Plus, ScanSearch, Trash2 } from 'lucide-react';
 import { createProcessorModule } from '../dsp/chainValidation';
 import { renderStemBusMix, type StemBusMixResult } from '../dsp/stemBusRenderer';
-import type { ProcessorModule, ProcessorType, ParametricEQParams, CompressorParams } from '../types/mastering';
+import type { ProcessorModule, ProcessorType, ParametricEQParams, CompressorParams, MasterFinalReport, DirectorOperatingMode, MasteringObjectiveId } from '../types/mastering';
+import { runAutonomousDirectorLoop } from '../director/directorEngine';
+import { renderAndAnalyzeOffThread, type OffThreadRenderResult } from '../dsp/workerClient';
 import {
   analyzeStemSet,
   type StemInput,
@@ -54,6 +56,13 @@ export const StemIntelligencePanel: React.FC = () => {
   const [chainsByStemId, setChainsByStemId] = useState<Record<string, ProcessorModule[]>>({});
   const [processedMix, setProcessedMix] = useState<StemBusMixResult | null>(null);
   const [rendering, setRendering] = useState(false);
+  const [directorMode, setDirectorMode] = useState<DirectorOperatingMode>('assisted');
+  const [directorObjective, setDirectorObjective] = useState<MasteringObjectiveId>('streaming');
+  const [directorRunning, setDirectorRunning] = useState(false);
+  const [directorProgress, setDirectorProgress] = useState<{ stage: string; passNumber: number; maxIterations: number } | null>(null);
+  const [directorReport, setDirectorReport] = useState<MasterFinalReport | null>(null);
+  const [directorPreview, setDirectorPreview] = useState<OffThreadRenderResult | null>(null);
+  const directorStopRef = useRef(false);
 
   useEffect(() => () => {
     if (contextRef.current && contextRef.current.state !== 'closed') {
@@ -101,6 +110,8 @@ export const StemIntelligencePanel: React.FC = () => {
     setStems((current) => current.map((stem) => stem.id === id ? { ...stem, ...patch } : stem));
     setAnalysis(null);
     setProcessedMix(null);
+    setDirectorReport(null);
+    setDirectorPreview(null);
   };
 
   const removeStem = (id: string) => {
@@ -108,6 +119,8 @@ export const StemIntelligencePanel: React.FC = () => {
     setChainsByStemId((current) => { const next = { ...current }; delete next[id]; return next; });
     setAnalysis(null);
     setProcessedMix(null);
+    setDirectorReport(null);
+    setDirectorPreview(null);
   };
 
   const addProcessor = (stemId: string, type: ProcessorType) => {
@@ -117,6 +130,8 @@ export const StemIntelligencePanel: React.FC = () => {
       [stemId]: [...(current[stemId] ?? []), module],
     }));
     setProcessedMix(null);
+    setDirectorReport(null);
+    setDirectorPreview(null);
   };
 
   const updateProcessor = (stemId: string, moduleId: string, patch: Partial<ProcessorModule>) => {
@@ -158,6 +173,8 @@ export const StemIntelligencePanel: React.FC = () => {
     setRendering(true);
     setError(null);
     setProcessedMix(null);
+    setDirectorReport(null);
+    setDirectorPreview(null);
     try {
       const sampleRate = stems[0].sampleRate ?? 0;
       const result = await renderStemBusMix(stems, sampleRate, { chainsByStemId });
@@ -167,6 +184,70 @@ export const StemIntelligencePanel: React.FC = () => {
     } finally {
       setRendering(false);
     }
+  };
+
+  const runDirector = async () => {
+    if (stems.length === 0 || directorRunning || rendering) return;
+    directorStopRef.current = false;
+    setDirectorRunning(true);
+    setDirectorProgress({ stage: 'Preparing stem session', passNumber: 0, maxIterations: directorMode === 'assisted' ? 1 : 3 });
+    setDirectorReport(null);
+    setDirectorPreview(null);
+    setError(null);
+    try {
+      const sampleRate = stems[0].sampleRate ?? 0;
+      const report = await runAutonomousDirectorLoop({
+        // The Director builds its canonical source timeline from stemBuses.
+        sourceChannels: stems[0].channels,
+        sampleRate,
+        operatingMode: directorMode,
+        objectiveId: directorObjective,
+        stemBuses: stems,
+        stemChainsById: chainsByStemId,
+        maxIterations: directorMode === 'assisted' ? 1 : 3,
+        shouldStop: () => directorStopRef.current,
+        onProgress: (update) => setDirectorProgress({
+          stage: update.stage,
+          passNumber: update.passNumber,
+          maxIterations: update.maxIterations,
+        }),
+      });
+      setDirectorReport(report);
+      setDirectorProgress({ stage: 'Rendering final preview', passNumber: report.iterationsExecuted, maxIterations: report.iterationsExecuted });
+      const stemRender = await renderStemBusMix(stems, sampleRate, {
+        chainsByStemId: directorMode === 'manual' ? {} : chainsByStemId,
+      });
+      const finalRender = await renderAndAnalyzeOffThread({
+        sourceChannels: stemRender.mixChannels,
+        sampleRate,
+        chain: report.finalChain,
+      });
+      setDirectorPreview(finalRender);
+      setDirectorProgress({ stage: 'Completed', passNumber: report.iterationsExecuted, maxIterations: report.iterationsExecuted });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Director stem workflow failed.');
+    } finally {
+      setDirectorRunning(false);
+    }
+  };
+
+  const stopDirector = () => {
+    directorStopRef.current = true;
+    setDirectorProgress((current) => current ? { ...current, stage: 'Stopping…' } : current);
+  };
+
+  const playDirectorPreview = () => {
+    if (!directorPreview || !contextRef.current) return;
+    const context = contextRef.current;
+    void context.resume();
+    const channels = directorPreview.channels;
+    const buffer = context.createBuffer(2, channels[0].length, directorPreview.analysis.sampleRate);
+    buffer.copyToChannel(new Float32Array(channels[0]), 0);
+    buffer.copyToChannel(new Float32Array(channels[1] ?? channels[0]), 1);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.start();
   };
 
   const playProcessedMix = () => {
@@ -402,6 +483,100 @@ export const StemIntelligencePanel: React.FC = () => {
               );
             })}
           </div>
+        </section>
+      )}
+
+      {stems.length > 0 && (
+        <section className="rounded-lg border border-[#D4AF37]/30 bg-[#111217] p-4">
+          <div className="mb-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">SYN-MASTER Director</h4>
+            <p className="mt-1 text-[10px] text-[#8B93A3]">Run the mastering Director against this exact stem timeline and its independent processing racks.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
+            <label className="text-[10px] text-[#8B93A3]">Operating Mode
+              <select value={directorMode} disabled={directorRunning} onChange={(event) => setDirectorMode(event.target.value as DirectorOperatingMode)} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
+                <option value="manual">Manual · Plan only</option>
+                <option value="assisted">Assisted · One verified pass</option>
+                <option value="autonomous">Autonomous · Iterative refinement</option>
+              </select>
+            </label>
+            <label className="text-[10px] text-[#8B93A3]">Mastering Objective
+              <select value={directorObjective} disabled={directorRunning} onChange={(event) => setDirectorObjective(event.target.value as MasteringObjectiveId)} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
+                <option value="streaming">Streaming</option>
+                <option value="commercial-loudness">Commercial Loudness</option>
+                <option value="dynamic">Dynamic</option>
+                <option value="cinematic">Cinematic</option>
+                <option value="electronic">Electronic</option>
+                <option value="hip-hop">Hip-Hop</option>
+                <option value="pop">Pop</option>
+                <option value="acoustic">Acoustic</option>
+                <option value="vocal-focused">Vocal Focused</option>
+                <option value="transparent">Transparent</option>
+                <option value="punchy">Punchy</option>
+                <option value="warm">Warm</option>
+              </select>
+            </label>
+            <div className="flex items-end">
+              {directorRunning ? (
+                <button type="button" onClick={stopDirector} className="w-full rounded-md border border-red-500/40 px-4 py-2 text-xs font-bold text-red-300 hover:bg-red-500/10">Stop Director</button>
+              ) : (
+                <button type="button" disabled={busy || rendering} onClick={() => void runDirector()} className="w-full rounded-md bg-[#D4AF37] px-4 py-2 text-xs font-bold text-[#08090B] hover:bg-[#E6C65C] disabled:opacity-50">Run Director</button>
+              )}
+            </div>
+          </div>
+          {directorProgress && (
+            <div className="mt-3 flex items-center justify-between rounded border border-[#343A49] bg-[#171A22] p-2 text-[10px]">
+              <span className={directorRunning ? 'text-[#D4AF37]' : 'text-[#9CA3AF]'}>{directorProgress.stage}</span>
+              <span className="font-mono-tabular text-[#AAB2C0]">Pass {directorProgress.passNumber}/{directorProgress.maxIterations}</span>
+            </div>
+          )}
+          {directorReport && (
+            <div className="mt-4 flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                {[
+                  ['Status', directorReport.status],
+                  ['Passes', String(directorReport.iterationsExecuted)],
+                  ['LUFS', `${directorReport.preAnalysis.integratedLufs.toFixed(1)} → ${directorReport.postAnalysis.integratedLufs.toFixed(1)}`],
+                  ['True Peak', `${directorReport.postAnalysis.truePeakDb.toFixed(2)} dBTP`],
+                  ['QC', directorReport.qcReport.pass ? 'PASS' : 'REVIEW'],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded border border-[#292D38] bg-[#171A22] p-2">
+                    <div className="text-[9px] uppercase tracking-wider text-[#8B93A3]">{label}</div>
+                    <div className="mt-1 break-words font-mono-tabular text-xs font-bold text-[#F7F8FA]">{value}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded border border-[#252A35] bg-[#171A22] p-3">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-[#D4AF37]">Director Decision</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-[#D1D5DB]">{directorReport.stopReason}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[#8B93A3]">
+                  <span>Master chain: {directorReport.finalChain.map((module) => module.name).join(' → ') || 'Dry / no master-bus processors'}</span>
+                </div>
+              </div>
+              {directorReport.recommendations.length > 0 && (
+                <div className="rounded border border-[#252A35] bg-[#171A22] p-3">
+                  <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#D4AF37]">Director Recommendations</div>
+                  <div className="flex flex-col gap-2">
+                    {directorReport.recommendations.slice(0, 8).map((recommendation) => (
+                      <div key={recommendation.id} className="border-t border-[#252A35] pt-2 first:border-0 first:pt-0">
+                        <div className="text-[11px] font-semibold text-[#E5E7EB]">{recommendation.characteristic}</div>
+                        <div className="mt-0.5 text-[10px] text-[#9CA3AF]">{recommendation.proposedCorrection}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {directorPreview && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-[#D4AF37]/30 bg-[#171A22] p-3">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#D4AF37]">Director Render Preview</div>
+                    <div className="mt-1 text-[10px] text-[#9CA3AF]">{directorPreview.analysis.integratedLufs.toFixed(1)} LUFS · {directorPreview.analysis.truePeakDb.toFixed(2)} dBTP · {directorPreview.analysis.clippedSamples} clipped samples</div>
+                  </div>
+                  <button type="button" onClick={playDirectorPreview} className="rounded-md border border-[#D4AF37]/40 px-3 py-2 text-xs font-semibold text-[#E5E7EB] hover:bg-[#D4AF37]/10">▶ Preview Director Master</button>
+                </div>
+              )}
+            </div>
+          )}
         </section>
       )}
 
