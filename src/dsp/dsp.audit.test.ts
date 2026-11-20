@@ -437,3 +437,50 @@ test('AUDIT 9: Adversarial Edge Cases (Silence, Near-Silence, Clipped, Inverted 
     assert.ok(Number.isFinite(resExtreme.channels[0][i]), 'Output sample became NaN/Inf');
   }
 });
+
+test('QC preserves intentional bass-heavy baseline and warns only when processing materially worsens tonal balance', () => {
+  const sr = 48000;
+  const n = sr * 2;
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const bass =
+      0.34 * Math.sin(2 * Math.PI * 65 * t) +
+      0.28 * Math.sin(2 * Math.PI * 95 * t) +
+      0.22 * Math.sin(2 * Math.PI * 150 * t);
+    const mids =
+      0.035 * Math.sin(2 * Math.PI * 900 * t) +
+      0.025 * Math.sin(2 * Math.PI * 1500 * t);
+    const high = 0.02 * Math.sin(2 * Math.PI * 3500 * t);
+    left[i] = bass + mids + high;
+    right[i] = bass + mids + high;
+  }
+
+  const baseline = analyzeAudioBuffer([left, right], sr);
+  const baselineBassMid = baseline.zoneEnergyDb.bass - baseline.zoneEnergyDb.mid;
+  assert.ok(baselineBassMid > 11, `Fixture must be intentionally bass-heavy, got ${baselineBassMid.toFixed(1)} dB`);
+
+  const baselineQc = runQualityControl(baseline, baseline, QC_TARGET_PROFILES[0]);
+  const baselineSpectral = baselineQc.checks.find((check) => check.id === 'qc-spectral');
+  assert.equal(
+    baselineSpectral?.status,
+    'pass',
+    'QC must not fail a deliberately bass-heavy profile that processing has not worsened',
+  );
+
+  const bassBoost = createProcessorModule('parametric-eq', {
+    params: {
+      phaseMode: 'minimum',
+      msMode: 'stereo',
+      tiltDb: 0,
+      bands: [{ id: 'bass-boost', enabled: true, shape: 'lowshelf', freq: 100, gain: 6, q: 0.71 }],
+    },
+  });
+  const rendered = processChainOffline([left, right], sr, [bassBoost]);
+  const post = analyzeAudioBuffer(rendered.channels, sr);
+  const postQc = runQualityControl(baseline, post, QC_TARGET_PROFILES[0]);
+  const postSpectral = postQc.checks.find((check) => check.id === 'qc-spectral');
+  assert.equal(postSpectral?.status, 'warning', 'QC must warn when the mastering chain materially adds low-end dominance');
+  assert.match(postSpectral?.explanation ?? '', /increased|added|worsened/i);
+});
