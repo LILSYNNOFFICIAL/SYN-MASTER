@@ -285,3 +285,19 @@ test('Phase 1 Integrity: Wet/Dry blend, Default Reset parameters, Chain Reorder/
   assert.equal(dv.getUint32(24, true), 48000);
   assert.equal(dv.getUint16(34, true), 24);
 });
+
+test('Stereo spectral analysis preserves channel energy when L/R polarity is inverted', () => {
+  const [left, right] = makeSine(1000, 0.75, 0.25, -1);
+  const analysis = analyzeAudioBuffer([left, right], SR);
+
+  assert.ok(analysis.phaseCorrelation < -0.99, 'The fixture must represent fully polarity-inverted stereo');
+  assert.ok(
+    analysis.zoneEnergyDb.mid > -55,
+    `Mid-band energy must remain measurable from independent channel power, got ${analysis.zoneEnergyDb.mid} dB`,
+  );
+  const nearOneKhz = analysis.spectrumBinsDb.filter((_, i) => {
+    const freq = analysis.spectrumBinsFreq[i];
+    return freq >= 800 && freq <= 1250;
+  });
+  assert.ok(nearOneKhz.some((db) => db > -55), 'The spectrum must retain the 1 kHz signal despite L/R cancellation in mono');
+});
