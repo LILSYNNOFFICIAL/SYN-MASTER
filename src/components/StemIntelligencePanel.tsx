@@ -75,7 +75,7 @@ export const StemIntelligencePanel: React.FC = () => {
         );
         imported.push({
           id: makeStemId(),
-          name: file.name.replace(/\\.[^.]+$/, ''),
+          name: file.name.replace(/\.[^.]+$/, ''),
           fileName: file.name,
           role: inferRole(file.name),
           channels,
