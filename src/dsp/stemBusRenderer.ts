@@ -25,6 +25,7 @@ export interface RenderedStemBus {
 }
 
 export interface StemBusMixResult {
+  sourceAnalysis: ReturnType<typeof analyzeStemSet>;
   sampleRate: number;
   timelineSamples: number;
   durationSec: number;
@@ -127,6 +128,7 @@ export async function renderStemBusMix(
   }
 
   return {
+    sourceAnalysis: baseline,
     sampleRate,
     timelineSamples,
     durationSec: timelineSamples / sampleRate,

@@ -880,6 +880,8 @@ export interface StemIntelligenceReport {
     integratedLufs: number;
     truePeakDb: number;
     stereoWidth: number;
+    processed: boolean;
+    processors: string[];
   }>;
   overlaps: Array<{
     stemAId: string;
@@ -889,6 +891,7 @@ export interface StemIntelligenceReport {
     confidence: 'low' | 'moderate';
   }>;
   warnings: string[];
+  processingChains: Record<string, string[]>;
 }
 
 export interface MasterFinalReport {

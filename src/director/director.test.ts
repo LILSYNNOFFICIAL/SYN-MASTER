@@ -416,3 +416,66 @@ test('Director without stem input preserves the existing report contract', async
   assert.equal(report.stemIntelligence, undefined);
   assert.equal(report.diagnosis.findings.some((finding) => finding.id.startsWith('diag-stem-overlap-')), false);
 });
+
+test('Director renders isolated stem chains before applying its master-bus refinement pass', async () => {
+  const makeTone = (hz: number, seconds = 0.6, amplitude = 0.18) => {
+    const data = new Float32Array(Math.floor(SR * seconds));
+    for (let i = 0; i < data.length; i++) data[i] = amplitude * Math.sin((2 * Math.PI * hz * i) / SR);
+    return data;
+  };
+  const stemBuses = [
+    { id: 'bass-bus', name: 'Bass Bus', role: 'bass' as const, channels: [makeTone(110)], sampleRate: SR },
+    { id: 'vocal-bus', name: 'Vocal Bus', role: 'vocals' as const, channels: [makeTone(6000)], sampleRate: SR },
+  ];
+  const eq = createProcessorModule('parametric-eq', {
+    params: {
+      phaseMode: 'minimum',
+      msMode: 'stereo',
+      tiltDb: 0,
+      bands: [{ id: 'vocal-lowpass', enabled: true, shape: 'lowpass', freq: 1200, gain: 0, q: 0.71 }],
+    },
+  });
+  const dryRender = await (await import('../dsp/stemBusRenderer')).renderStemBusMix(stemBuses, SR);
+  const dryAnalysis = dryRender.mixAnalysis;
+  const passInputChannels: Float32Array[][] = [];
+
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: makeBalancedStereo(0.6, 0.1),
+    sampleRate: SR,
+    operatingMode: 'assisted',
+    objectiveId: 'streaming',
+    stemBuses,
+    stemChainsById: { 'vocal-bus': [eq] },
+    renderPassFn: async (channels, sampleRate) => {
+      const analysis = analyzeAudioBuffer(channels, sampleRate);
+      passInputChannels.push(channels);
+      return { channels, analysis };
+    },
+  });
+
+  assert.equal(passInputChannels.length, 1);
+  const passInputAnalysis = analyzeAudioBuffer(passInputChannels[0], SR);
+  assert.ok(passInputAnalysis.rmsDb < dryAnalysis.rmsDb - 2, 'stem EQ should change the Director pass input before the master chain');
+  assert.equal(report.stemIntelligence?.stemCount, 2);
+  assert.deepEqual(report.stemIntelligence?.processingChains['vocal-bus'], ['parametric-eq']);
+  assert.equal(report.stemIntelligence?.stems.find((stem) => stem.id === 'vocal-bus')?.processed, true);
+  assert.ok(report.postFixVerification?.appliedCorrections.some((correction) => correction.processorTypes.includes('parametric-eq')));
+});
+
+test('Manual Director mode reports stem chains without executing them', async () => {
+  const tone = new Float32Array(SR);
+  for (let i = 0; i < tone.length; i++) tone[i] = 0.2 * Math.sin((2 * Math.PI * 6000 * i) / SR);
+  const stemBuses = [{ id: 'vocal-bus', name: 'Vocal', role: 'vocals' as const, channels: [tone], sampleRate: SR }];
+  const eq = createProcessorModule('parametric-eq');
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: makeBalancedStereo(1, 0.12),
+    sampleRate: SR,
+    operatingMode: 'manual',
+    objectiveId: 'streaming',
+    stemBuses,
+    stemChainsById: { 'vocal-bus': [eq] },
+  });
+  assert.equal(report.stemIntelligence?.stems[0].processed, false);
+  assert.deepEqual(report.stemIntelligence?.processingChains['vocal-bus'], ['parametric-eq']);
+});
+
