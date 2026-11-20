@@ -94,11 +94,14 @@ export const StemIntelligencePanel: React.FC = () => {
   const updateStem = (id: string, patch: Partial<Pick<LoadedStem, 'role' | 'offsetSamples'>>) => {
     setStems((current) => current.map((stem) => stem.id === id ? { ...stem, ...patch } : stem));
     setAnalysis(null);
+    setProcessedMix(null);
   };
 
   const removeStem = (id: string) => {
     setStems((current) => current.filter((stem) => stem.id !== id));
+    setChainsByStemId((current) => { const next = { ...current }; delete next[id]; return next; });
     setAnalysis(null);
+    setProcessedMix(null);
   };
 
   const addProcessor = (stemId: string, type: ProcessorType) => {
@@ -163,6 +166,7 @@ export const StemIntelligencePanel: React.FC = () => {
   const playProcessedMix = () => {
     if (!processedMix || !contextRef.current) return;
     const context = contextRef.current;
+    void context.resume();
     const buffer = context.createBuffer(2, processedMix.mixChannels[0].length, processedMix.sampleRate);
     buffer.copyToChannel(processedMix.mixChannels[0], 0);
     buffer.copyToChannel(processedMix.mixChannels[1], 1);
