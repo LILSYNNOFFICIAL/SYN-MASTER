@@ -24,7 +24,7 @@ import type {
   StemIntelligenceReport,
 } from '../types/mastering';
 import { validateChain } from '../dsp/chainValidation';
-import { analyzeStemSet, type StemInput, type StemSetAnalysis } from '../dsp/stemAnalysis';
+import type { StemInput, StemSetAnalysis } from '../dsp/stemAnalysis';
 import { renderStemBusMix } from '../dsp/stemBusRenderer';
 import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
 import { renderAndAnalyzeOffThread } from '../dsp/workerClient';
@@ -1513,7 +1513,7 @@ function buildFinalReportFromState(params: {
             timestamp: bestCheckpoint.timestamp,
             label: `Autonomous Director Pass #${bestCheckpoint.passNumber}`,
             processorTypes: [
-              ...Object.values(params.stemChainsById ?? {}).flat().map((module) => module.type),
+              ...Object.values(params.stemChainsById ?? {}).flat().filter((module) => module.enabled && !module.bypassed && module.wetDry > 0.1).map((module) => module.type),
               ...bestCheckpoint.chain.map((m) => m.type),
             ],
             chainFingerprint: chainFp,
@@ -1638,7 +1638,11 @@ export async function runAutonomousDirectorLoop(
   if (opts.stemBuses && opts.stemBuses.length > 0) {
     const dryStemRender = await renderStemBusMix(opts.stemBuses, opts.sampleRate);
     sourceChannels = dryStemRender.mixChannels;
-    resolvedStemAnalysis = resolvedStemAnalysis ?? dryStemRender.sourceAnalysis;
+    resolvedStemAnalysis = dryStemRender.sourceAnalysis;
+    const knownStemIds = new Set(opts.stemBuses.map((stem) => stem.id));
+    for (const stemId of Object.keys(opts.stemChainsById ?? {})) {
+      if (!knownStemIds.has(stemId)) throw new RangeError(`Stem processor chain references unknown stem "${stemId}"`);
+    }
 
     const hasActiveStemProcessing = opts.operatingMode !== 'manual' &&
       Object.values(opts.stemChainsById ?? {}).some((chain) =>
