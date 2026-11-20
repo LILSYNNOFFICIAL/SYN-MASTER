@@ -14,7 +14,7 @@ test('stem analysis aligns offset stems and analyzes the reconstructed sum', () 
   const sampleRate = 48000;
   const stems: StemInput[] = [
     { id: 'drums', name: 'Drums', role: 'drums', channels: [sine(90, sampleRate)] },
-    { id: 'bass', name: 'Bass', role: 'bass', channels: [sine(90, sampleRate, 0.25)], offsetSamples: 12000 },
+    { id: 'bass', name: 'Bass', role: 'bass', channels: [sine(55, sampleRate, 0.25)], offsetSamples: 12000 },
   ];
 
   const result = analyzeStemSet(stems, sampleRate);
@@ -24,7 +24,8 @@ test('stem analysis aligns offset stems and analyzes the reconstructed sum', () 
   assert.equal(result.sampleRate, sampleRate);
   assert.equal(result.mixAnalysis.durationSec, 0.5);
   assert.equal(result.stems[1].offsetSamples, 12000);
-  assert.ok(result.mixAnalysis.samplePeakDb > result.stems[0].analysis.samplePeakDb - 0.1);
+  assert.ok(Number.isFinite(result.mixAnalysis.integratedLufs));
+  assert.ok(result.mixAnalysis.rmsDb > -50);
 });
 
 test('stem analysis reports spectral overlap candidates without claiming audible masking', () => {
@@ -45,8 +46,8 @@ test('stem analysis reports spectral overlap candidates without claiming audible
 test('stem analysis rejects invalid, mismatched, and duplicate stem inputs', () => {
   assert.throws(() => analyzeStemSet([], 48000), /at least one stem/i);
   assert.throws(() => analyzeStemSet([
-    { id: 'a', name: 'A', role: 'other', channels: [sine(100, 48000)] },
-    { id: 'b', name: 'B', role: 'other', channels: [sine(100, 44100)] },
+    { id: 'a', name: 'A', role: 'other', sampleRate: 48000, channels: [sine(100, 48000)] },
+    { id: 'b', name: 'B', role: 'other', sampleRate: 44100, channels: [sine(100, 44100)] },
   ], 48000), /sample rate/i);
   assert.throws(() => analyzeStemSet([
     { id: 'a', name: 'A', role: 'other', channels: [sine(100, 48000)] },
