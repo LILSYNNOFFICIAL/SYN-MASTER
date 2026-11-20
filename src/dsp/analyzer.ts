@@ -465,27 +465,35 @@ export function analyzeAudioBuffer(
     spectrumBinsDb.push(Number((10 * Math.log10(Math.max(powerSum / Math.max(1, count), 1e-13))).toFixed(2)));
   }
 
-  // Band zone energies (non-overlapping bin intervals)
-  const zoneMeanDb = (f1: number, f2: number): number => {
-    const b1 = Math.max(1, Math.ceil(f1 / binHz));
-    const b2 = Math.min(halfBins - 1, Math.max(b1, Math.floor((f2 - 1e-6) / binHz)));
-    let p = 0;
-    let c = 0;
-    for (let b = b1; b <= b2; b++) {
-      p += avgPower[b];
-      c++;
+  // Band levels use the same log-frequency spectral samples exposed to the Director.
+  // Each stored log band represents an equal interval on the log-frequency axis, so
+  // averaging their linear powers estimates mean spectral density per log-frequency band.
+  // This intentionally differs from integrated band power: it compares tonal balance
+  // without automatically favoring wider frequency ranges.
+  const logBandMeanDb = (f1: number, f2: number): number => {
+    let powerSum = 0;
+    let count = 0;
+    for (let i = 0; i < spectrumBinsFreq.length; i++) {
+      const f = spectrumBinsFreq[i];
+      const db = spectrumBinsDb[i];
+      if (f >= f1 && f <= f2 && Number.isFinite(db)) {
+        powerSum += Math.pow(10, db / 10);
+        count++;
+      }
     }
-    return Number((10 * Math.log10(Math.max(p / Math.max(1, c), 1e-13))).toFixed(2));
+    return count > 0
+      ? Number((10 * Math.log10(Math.max(powerSum / count, 1e-13))).toFixed(2))
+      : -130;
   };
 
   const zoneEnergyDb: SpectralBandEnergy = {
-    sub: zoneMeanDb(20, 60),
-    bass: zoneMeanDb(60, 250),
-    lowMid: zoneMeanDb(250, 500),
-    mid: zoneMeanDb(500, 2000),
-    highMid: zoneMeanDb(2000, 6000),
-    presence: zoneMeanDb(6000, 12000),
-    air: zoneMeanDb(12000, Math.min(20000, sampleRate * 0.48)),
+    sub: logBandMeanDb(20, 60),
+    bass: logBandMeanDb(60, 250),
+    lowMid: logBandMeanDb(250, 500),
+    mid: logBandMeanDb(500, 2000),
+    highMid: logBandMeanDb(2000, 6000),
+    presence: logBandMeanDb(6000, 12000),
+    air: logBandMeanDb(12000, Math.min(20000, sampleRate * 0.48)),
   };
 
   // Spectral Centroid & Slope
@@ -497,7 +505,10 @@ export function analyzeAudioBuffer(
     totalMag += mag;
   }
   const spectralCentroidHz = Math.round(totalMag > 1e-12 ? weightedFreqSum / totalMag : 1000);
-  const spectralSlopeDbPerOct = Number(((zoneEnergyDb.presence - zoneEnergyDb.bass) / 6.5).toFixed(2));
+  const bassCenterHz = Math.sqrt(60 * 250);
+  const presenceCenterHz = Math.sqrt(6000 * 12000);
+  const slopeOctaves = Math.log2(presenceCenterHz / bassCenterHz);
+  const spectralSlopeDbPerOct = Number(((zoneEnergyDb.presence - zoneEnergyDb.bass) / slopeOctaves).toFixed(2));
 
   // Resonance detection across 80 Hz - 10 kHz
   const resonances: ResonancePeak[] = [];
