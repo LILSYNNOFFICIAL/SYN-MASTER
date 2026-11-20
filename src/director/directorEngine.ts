@@ -24,7 +24,8 @@ import type {
   StemIntelligenceReport,
 } from '../types/mastering';
 import { validateChain } from '../dsp/chainValidation';
-import type { StemSetAnalysis } from '../dsp/stemAnalysis';
+import { analyzeStemSet, type StemInput, type StemSetAnalysis } from '../dsp/stemAnalysis';
+import { renderStemBusMix } from '../dsp/stemBusRenderer';
 import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
 import { renderAndAnalyzeOffThread } from '../dsp/workerClient';
 import { QC_TARGET_PROFILES, runQualityControl } from '../dsp/qc';
@@ -1365,6 +1366,8 @@ export interface RunAutonomousDirectorOptions {
   exportConfig?: ExportConfig | null;
   referenceAnalysis?: AudioAnalysis | null;
   stemAnalysis?: StemSetAnalysis | null;
+  stemBuses?: StemInput[];
+  stemChainsById?: Record<string, ProcessorModule[]>;
   externalPlugins?: ExternalPluginRecord[];
   hostConnected?: boolean;
   initialChain?: ProcessorModule[];
@@ -1417,8 +1420,14 @@ function makeActivity(
   };
 }
 
-function toStemIntelligenceReport(stemSet?: StemSetAnalysis | null): StemIntelligenceReport | undefined {
+function toStemIntelligenceReport(
+  stemSet?: StemSetAnalysis | null,
+  chainsByStemId: Record<string, ProcessorModule[]> = {},
+): StemIntelligenceReport | undefined {
   if (!stemSet) return undefined;
+  const processingChains = Object.fromEntries(
+    Object.entries(chainsByStemId).map(([id, chain]) => [id, chain.map((module) => module.type)]),
+  );
   return {
     sampleRate: stemSet.sampleRate,
     durationSec: stemSet.durationSec,
@@ -1431,6 +1440,8 @@ function toStemIntelligenceReport(stemSet?: StemSetAnalysis | null): StemIntelli
       integratedLufs: stem.analysis.integratedLufs,
       truePeakDb: stem.analysis.truePeakDb,
       stereoWidth: stem.analysis.stereoWidth,
+      processed: (chainsByStemId[stem.id] ?? []).some((module) => module.enabled && !module.bypassed && module.wetDry > 0.1),
+      processors: (processingChains[stem.id] ?? []),
     })),
     overlaps: stemSet.overlaps.map((overlap) => ({
       stemAId: overlap.stemAId,
@@ -1440,6 +1451,7 @@ function toStemIntelligenceReport(stemSet?: StemSetAnalysis | null): StemIntelli
       confidence: overlap.confidence,
     })),
     warnings: [...stemSet.warnings],
+    processingChains,
   };
 }
 
@@ -1454,6 +1466,7 @@ function buildFinalReportFromState(params: {
   preAnalysis: AudioAnalysis;
   referenceAnalysis?: AudioAnalysis | null;
   stemAnalysis?: StemSetAnalysis | null;
+  stemChainsById?: Record<string, ProcessorModule[]>;
   diagnosis: DirectorDiagnosisReport;
   recommendations: DirectorRecommendation[];
   pluginSummary: PluginIntelligenceSummary;
@@ -1499,7 +1512,10 @@ function buildFinalReportFromState(params: {
             id: `corr-dir-${bestCheckpoint.passNumber}`,
             timestamp: bestCheckpoint.timestamp,
             label: `Autonomous Director Pass #${bestCheckpoint.passNumber}`,
-            processorTypes: bestCheckpoint.chain.map((m) => m.type),
+            processorTypes: [
+              ...Object.values(params.stemChainsById ?? {}).flat().map((module) => module.type),
+              ...bestCheckpoint.chain.map((m) => m.type),
+            ],
             chainFingerprint: chainFp,
           },
         ]
@@ -1566,7 +1582,7 @@ function buildFinalReportFromState(params: {
     partiallyResolvedProblems,
     preservedCharacteristics,
     postFixVerification,
-    stemIntelligence: toStemIntelligenceReport(params.stemAnalysis),
+    stemIntelligence: toStemIntelligenceReport(params.stemAnalysis, params.stemChainsById),
   };
 }
 
@@ -1613,10 +1629,36 @@ export async function runAutonomousDirectorLoop(
     return !opts.shouldStop?.();
   };
 
+  // Resolve the source timeline. When stem buses are supplied, their explicit
+  // offsets define the canonical mix timeline rather than a potentially stale
+  // stereo bounce passed by the caller.
+  let sourceChannels = opts.sourceChannels;
+  let resolvedStemAnalysis = opts.stemAnalysis ?? null;
+  let stemProcessedChannels: Float32Array[] | null = null;
+  if (opts.stemBuses && opts.stemBuses.length > 0) {
+    const dryStemRender = await renderStemBusMix(opts.stemBuses, opts.sampleRate);
+    sourceChannels = dryStemRender.mixChannels;
+    resolvedStemAnalysis = resolvedStemAnalysis ?? dryStemRender.sourceAnalysis;
+
+    const hasActiveStemProcessing = opts.operatingMode !== 'manual' &&
+      Object.values(opts.stemChainsById ?? {}).some((chain) =>
+        chain.some((module) => module.enabled && !module.bypassed && module.wetDry > 0.1),
+      );
+    if (hasActiveStemProcessing) {
+      const processedStemRender = await renderStemBusMix(opts.stemBuses, opts.sampleRate, {
+        chainsByStemId: opts.stemChainsById,
+        externalProcessor: opts.externalProcessor,
+      });
+      stemProcessedChannels = processedStemRender.mixChannels;
+    }
+  }
+
+  const passSourceChannels = stemProcessedChannels ?? sourceChannels;
+
   // Phase 1: Baseline Analysis (yield cleanly so UI never freezes on trigger)
   emit('Analyzing', 0, undefined, undefined, undefined, 'Analyzing');
   const baselineRendered = await renderAndAnalyzeOffThread({
-    sourceChannels: opts.sourceChannels,
+    sourceChannels,
     sampleRate: opts.sampleRate,
     chain: [],
     externalProcessor: opts.externalProcessor,
@@ -1639,7 +1681,7 @@ export async function runAutonomousDirectorLoop(
     objectiveId: opts.objectiveId,
     customSpec: opts.customSpec,
     referenceAnalysis: opts.referenceAnalysis,
-    stemAnalysis: opts.stemAnalysis,
+    stemAnalysis: resolvedStemAnalysis,
     externalPlugins: opts.externalPlugins,
     hostConnected: opts.hostConnected,
   });
@@ -1720,7 +1762,8 @@ export async function runAutonomousDirectorLoop(
       rolledBack: false,
       preAnalysis,
       referenceAnalysis: opts.referenceAnalysis,
-      stemAnalysis: opts.stemAnalysis,
+      stemAnalysis: resolvedStemAnalysis,
+      stemChainsById: opts.stemChainsById,
       diagnosis: plan.diagnosis,
       recommendations: plan.recommendations,
       pluginSummary: plan.pluginSummary,
@@ -1778,9 +1821,9 @@ export async function runAutonomousDirectorLoop(
 
     emit('Processing', pass, undefined, undefined, workingChain, 'Processing');
     const rendered = opts.renderPassFn
-      ? await opts.renderPassFn(opts.sourceChannels, opts.sampleRate, workingChain)
+      ? await opts.renderPassFn(passSourceChannels, opts.sampleRate, workingChain)
       : await renderAndAnalyzeOffThread({
-          sourceChannels: opts.sourceChannels,
+          sourceChannels: passSourceChannels,
           sampleRate: opts.sampleRate,
           chain: workingChain,
           externalProcessor: opts.externalProcessor,
@@ -2038,7 +2081,8 @@ export async function runAutonomousDirectorLoop(
     rolledBack,
     preAnalysis,
     referenceAnalysis: opts.referenceAnalysis,
-    stemAnalysis: opts.stemAnalysis,
+    stemAnalysis: resolvedStemAnalysis,
+    stemChainsById: opts.stemChainsById,
     diagnosis: plan.diagnosis,
     recommendations: plan.recommendations,
     pluginSummary: plan.pluginSummary,
