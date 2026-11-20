@@ -1,5 +1,5 @@
 import type { AudioAnalysis, ResonancePeak, SpectralBandEnergy } from '../types/mastering';
-import { BiquadCoeffs, designHighPass, designHighShelf, processBiquadBuffer } from './biquad';
+import { BiquadCoeffs, designHighPass, designHighShelf, designLowPass, processBiquadBuffer } from './biquad';
 import { computeMagnitudeSpectrumDb, createHannWindow } from './fft';
 
 export function linearToDb(val: number, floorDb = -120): number {
@@ -253,19 +253,23 @@ export function analyzeAudioBuffer(
   const stereoWidth = Math.min(2.0, (2 * sideRms) / Math.max(midRms + sideRms, 1e-9));
   const lrBalanceDb = linearToDb(rmsR) - linearToDb(rmsL);
 
-  // Low-end (<120Hz) phase correlation via simple 1-pole LPF
-  const lpfCoeff = Math.exp((-2 * Math.PI * 120) / sampleRate);
-  let lpL = 0;
-  let lpR = 0;
+  // Low-end (<120Hz) phase correlation via 2nd-order Butterworth LPF (-12 dB/oct)
+  const lpCoeffs = designLowPass(120, Math.SQRT1_2, sampleRate);
+  const lpBufL = new Float32Array(length);
+  const lpBufR = numChannels > 1 ? new Float32Array(length) : lpBufL;
+  processBiquadBuffer(left, lpBufL, lpCoeffs);
+  if (numChannels > 1) {
+    processBiquadBuffer(right, lpBufR, lpCoeffs);
+  }
   let lpSqL = 0;
   let lpSqR = 0;
   let lpProd = 0;
   for (let i = 0; i < length; i++) {
-    lpL = lpL * lpfCoeff + left[i] * (1 - lpfCoeff);
-    lpR = lpR * lpfCoeff + right[i] * (1 - lpfCoeff);
-    lpSqL += lpL * lpL;
-    lpSqR += lpR * lpR;
-    lpProd += lpL * lpR;
+    const lVal = lpBufL[i];
+    const rVal = lpBufR[i];
+    lpSqL += lVal * lVal;
+    lpSqR += rVal * rVal;
+    lpProd += lVal * rVal;
   }
   const lpDenom = Math.sqrt(lpSqL * lpSqR);
   const lowEndCorrelation = lpDenom > 1e-12 ? Math.max(-1, Math.min(1, lpProd / lpDenom)) : 1;
@@ -402,23 +406,30 @@ export function analyzeAudioBuffer(
   }
   const transientDensity = Math.min(1, transientHits / Math.max(1, durationSec * 6));
 
-  // 5. Spectral Analysis via averaged Hann-windowed 4096-pt FFT
+  // 5. Spectral Analysis via averaged Hann-windowed 4096-pt FFT across full track span
   const fftSize = 4096;
   const halfBins = fftSize >> 1;
   const win = createHannWindow(fftSize);
   const monoForFft = new Float32Array(fftSize);
   const avgPower = new Float64Array(halfBins);
-  const numFrames = Math.min(16, Math.max(1, Math.floor(length / fftSize)));
-  const stride = Math.max(1, Math.floor((length - fftSize) / Math.max(1, numFrames)));
+  const maxOffset = Math.max(0, length - fftSize);
+  const numFrames = length <= fftSize ? 1 : Math.min(48, Math.max(1, Math.floor(length / (fftSize >> 1))));
 
   for (let f = 0; f < numFrames; f++) {
-    const offset = Math.min(Math.max(0, f * stride), Math.max(0, length - fftSize));
+    const offset =
+      numFrames <= 1 || maxOffset === 0
+        ? 0
+        : Math.min(maxOffset, Math.round((f / (numFrames - 1)) * maxOffset));
     const sliceLen = Math.min(fftSize, length - offset);
     monoForFft.fill(0);
     for (let i = 0; i < sliceLen; i++) {
       monoForFft[i] = 0.5 * (left[offset + i] + right[offset + i]);
     }
-    const frameDb = computeMagnitudeSpectrumDb(monoForFft, fftSize, win);
+    const frameDb = computeMagnitudeSpectrumDb(
+      sliceLen < fftSize ? monoForFft.subarray(0, sliceLen) : monoForFft,
+      fftSize,
+      sliceLen < fftSize ? undefined : win,
+    );
     for (let b = 0; b < halfBins; b++) {
       const p = Math.pow(10, frameDb[b] / 10);
       avgPower[b] += p / numFrames;
@@ -454,10 +465,10 @@ export function analyzeAudioBuffer(
     spectrumBinsDb.push(Number((10 * Math.log10(Math.max(powerSum / Math.max(1, count), 1e-13))).toFixed(2)));
   }
 
-  // Band zone energies
+  // Band zone energies (non-overlapping bin intervals)
   const zoneMeanDb = (f1: number, f2: number): number => {
-    const b1 = Math.max(1, Math.floor(f1 / binHz));
-    const b2 = Math.min(halfBins - 1, Math.ceil(f2 / binHz));
+    const b1 = Math.max(1, Math.ceil(f1 / binHz));
+    const b2 = Math.min(halfBins - 1, Math.max(b1, Math.floor((f2 - 1e-6) / binHz)));
     let p = 0;
     let c = 0;
     for (let b = b1; b <= b2; b++) {

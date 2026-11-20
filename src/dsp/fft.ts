@@ -102,15 +102,14 @@ export function computeMagnitudeSpectrumDb(
 ): Float32Array {
   const real = new Float32Array(fftSize);
   const imag = new Float32Array(fftSize);
-  const win = windowFn ?? createHannWindow(fftSize);
   const len = Math.min(samples.length, fftSize);
+  const useSubWindow = !windowFn && len < fftSize && len > 1;
+  const win = useSubWindow ? createHannWindow(len) : (windowFn ?? createHannWindow(fftSize));
 
   let winSum = 0;
-  for (let i = 0; i < fftSize; i++) {
+  for (let i = 0; i < len; i++) {
     winSum += win[i];
-    if (i < len) {
-      real[i] = samples[i] * win[i];
-    }
+    real[i] = samples[i] * win[i];
   }
 
   fftInPlace(real, imag);

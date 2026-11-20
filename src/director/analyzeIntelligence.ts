@@ -7,6 +7,116 @@ import type {
 } from '../types/mastering';
 
 /**
+ * Compute power-averaged spectral energy (dB) across a target frequency window [minHz, maxHz]
+ * directly from real FFT spectrum bins in AudioAnalysis.
+ */
+export function computeRegionEnergyDb(
+  analysis: AudioAnalysis,
+  minHz: number,
+  maxHz: number,
+): number | null {
+  const freqs = analysis.spectrumBinsFreq;
+  const dbs = analysis.spectrumBinsDb;
+  if (!freqs || !dbs || freqs.length === 0 || freqs.length !== dbs.length) {
+    return null;
+  }
+  let powerSum = 0;
+  let count = 0;
+  for (let i = 0; i < freqs.length; i++) {
+    const f = freqs[i];
+    const db = dbs[i];
+    if (f >= minHz && f <= maxHz && Number.isFinite(db)) {
+      powerSum += Math.pow(10, db / 10);
+      count++;
+    }
+  }
+  if (count === 0) return null;
+  return 10 * Math.log10(Math.max(1e-12, powerSum / count));
+}
+
+/**
+ * Verifies that an AudioAnalysis object contains valid, finite, non-corrupted measurements
+ * derived from a real non-silent audio signal.
+ */
+export function isAnalysisMeasurementReliable(
+  analysis: AudioAnalysis | null | undefined,
+): analysis is AudioAnalysis {
+  if (!analysis) return false;
+  const requiredFinite = [
+    analysis.durationSec,
+    analysis.sampleRate,
+    analysis.integratedLufs,
+    analysis.shortTermLufsMax,
+    analysis.rmsDb,
+    analysis.samplePeakDb,
+    analysis.truePeakDb,
+    analysis.dynamicRangeDb,
+    analysis.crestFactorDb,
+    analysis.plrDb,
+    analysis.spectralCentroidHz,
+    analysis.spectralSlopeDbPerOct,
+    analysis.phaseCorrelation,
+    analysis.lowEndCorrelation,
+    analysis.lrBalanceDb,
+    analysis.thdEstimatePercent,
+    analysis.noiseFloorDb,
+    analysis.dcOffset,
+  ];
+  if (requiredFinite.some((v) => !Number.isFinite(v))) return false;
+  if (analysis.durationSec <= 0 || analysis.sampleRate < 8000) return false;
+  if (!analysis.spectrumBinsFreq?.length || !analysis.spectrumBinsDb?.length) return false;
+  if (analysis.rmsDb <= -85 && analysis.samplePeakDb <= -75) return false;
+  return true;
+}
+
+export interface DiagnosisThresholds {
+  bassMidDiffLimit: number;
+  lowMidBuildupLimit: number;
+  region150To400VsMidLimit: number;
+  subExcessLimit: number;
+  harshExcessLimit: number;
+  dynamicRangeMin: number;
+  noiseFloorMax: number;
+  dcOffsetMax: number;
+  phaseCorrMin: number;
+  lowEndCorrMin: number;
+  lrBalanceMax: number;
+  thdMaxPercent: number;
+}
+
+export function getDiagnosisThresholds(
+  objective: MasteringObjectiveId | ResolvedObjectiveTarget,
+): DiagnosisThresholds {
+  const objectiveId = typeof objective === 'string' ? objective : objective.id;
+  const bassHeavyStyle =
+    objectiveId === 'hip-hop' ||
+    objectiveId === 'electronic' ||
+    objectiveId === 'warm' ||
+    objectiveId === 'cinematic' ||
+    objectiveId === 'punchy';
+  const brightStyle = objectiveId === 'pop' || objectiveId === 'electronic';
+  const loudStyle =
+    objectiveId === 'commercial-loudness' ||
+    objectiveId === 'electronic' ||
+    objectiveId === 'hip-hop';
+
+  return {
+    bassMidDiffLimit: bassHeavyStyle ? 14.5 : 11.5,
+    lowMidBuildupLimit: bassHeavyStyle ? 5.2 : 4.8,
+    region150To400VsMidLimit: bassHeavyStyle ? 7.2 : 6.8,
+    subExcessLimit: bassHeavyStyle ? 5.5 : 4.5,
+    harshExcessLimit: brightStyle ? 3.8 : 3.2,
+    dynamicRangeMin: loudStyle ? 4.8 : 5.5,
+    noiseFloorMax: -48,
+    dcOffsetMax: 0.004,
+    phaseCorrMin: 0.1,
+    lowEndCorrMin: 0.35,
+    lrBalanceMax: 0.8,
+    thdMaxPercent: 2.2,
+  };
+}
+
+/**
  * SYN-ANALYZE Intelligence
  * Distinguishes factual observations, intentional artistic characteristics,
  * and genuine technical/mastering problems from real AudioAnalysis telemetry.
@@ -19,11 +129,15 @@ export function analyzeTrackIntelligence(
   const workingWell: string[] = [];
   const findings: AnalysisFinding[] = [];
   const objectiveId = typeof objective === 'string' ? objective : objective.id;
+  const thresholds = getDiagnosisThresholds(objective);
 
   const bassMidDiff = analysis.zoneEnergyDb.bass - analysis.zoneEnergyDb.mid;
   const lowMidBuildup = analysis.zoneEnergyDb.lowMid - analysis.zoneEnergyDb.mid;
   const harshExcess = analysis.zoneEnergyDb.highMid - analysis.zoneEnergyDb.mid;
   const subExcess = analysis.zoneEnergyDb.sub - analysis.zoneEnergyDb.bass;
+  const region150To400Db = computeRegionEnergyDb(analysis, 150, 400);
+  const region150To400VsMid =
+    region150To400Db !== null ? region150To400Db - analysis.zoneEnergyDb.mid : null;
   const nf = analysis.noiseFloorDb ?? -72;
 
   // 1. Digital Clipping & Inter-Sample Peaks (Technical problem)
@@ -39,6 +153,12 @@ export function analyzeTrackIntelligence(
         `True Peak: ${analysis.truePeakDb.toFixed(2)} dBTP`,
         `Inter-Sample Peaks (>0 dBTP): ${analysis.interSamplePeaks}`,
       ],
+      metrics: {
+        clippedSamples: analysis.clippedSamples,
+        truePeakDb: analysis.truePeakDb,
+        samplePeakDb: analysis.samplePeakDb,
+        interSamplePeaks: analysis.interSamplePeaks,
+      },
       explanation:
         'Full-scale clipping or positive inter-sample peaks risk audible digital breakup on D/A converters and lossy streaming codecs.',
       recommendedAction: 'Apply pre-limiter input headroom trim and enforce 4x oversampled True Peak ceiling.',
@@ -50,7 +170,7 @@ export function analyzeTrackIntelligence(
   }
 
   // 2. DC Offset (Technical problem)
-  if (analysis.dcOffset >= 0.004) {
+  if (analysis.dcOffset >= thresholds.dcOffsetMax) {
     findings.push({
       id: 'diag-dc',
       kind: 'technical-problem',
@@ -58,6 +178,9 @@ export function analyzeTrackIntelligence(
       title: 'DC Offset Waveform Asymmetry',
       severity: analysis.dcOffset > 0.01 ? 'high' : 'low',
       evidence: [`DC Offset: ${(analysis.dcOffset * 100).toFixed(3)}%`],
+      metrics: {
+        dcOffsetPercent: analysis.dcOffset * 100,
+      },
       explanation:
         'Asymmetric DC bias wastes limiter headroom and can introduce clicks at edits or low-frequency speaker excursion.',
       recommendedAction: 'Enable SYN-Restore DC Offset removal and subsonic 26–30 Hz high-pass filter.',
@@ -65,7 +188,7 @@ export function analyzeTrackIntelligence(
   }
 
   // 3. Elevated Broadband Noise Floor (Technical problem when quiet frames separate >=12 dB from program RMS)
-  if (nf > -48 && analysis.rmsDb > -40 && analysis.rmsDb - nf >= 12) {
+  if (nf > thresholds.noiseFloorMax && analysis.rmsDb > -40 && analysis.rmsDb - nf >= 12) {
     findings.push({
       id: 'diag-noise',
       kind: 'technical-problem',
@@ -76,6 +199,10 @@ export function analyzeTrackIntelligence(
         `Estimated Noise Floor (5th pct 50ms RMS): ${nf.toFixed(1)} dBFS`,
         `Program RMS: ${analysis.rmsDb.toFixed(1)} dBFS`,
       ],
+      metrics: {
+        noiseFloorDb: nf,
+        rmsDb: analysis.rmsDb,
+      },
       explanation:
         'Bringing up overall loudness via limiting/compression will raise the audibility of steady hiss or mains hum.',
       recommendedAction: 'Insert conservative SYN-Restore cleanup prior to dynamics & maximization.',
@@ -89,7 +216,10 @@ export function analyzeTrackIntelligence(
   }
 
   // 4. Low-End Stereo Phase & Mono Compatibility (Technical problem vs Intentional wide mix)
-  if (analysis.phaseCorrelation < 0.1 || analysis.lowEndCorrelation < 0.35) {
+  if (
+    analysis.phaseCorrelation < thresholds.phaseCorrMin ||
+    analysis.lowEndCorrelation < thresholds.lowEndCorrMin
+  ) {
     findings.push({
       id: 'diag-phase',
       kind: 'technical-problem',
@@ -101,6 +231,11 @@ export function analyzeTrackIntelligence(
         `Sub-120 Hz Low-End Corr: ${analysis.lowEndCorrelation.toFixed(2)}`,
         `Mono Compatibility Score: ${analysis.monoCompatibilityScore}/100`,
       ],
+      metrics: {
+        phaseCorrelation: analysis.phaseCorrelation,
+        lowEndCorrelation: analysis.lowEndCorrelation,
+        monoCompatibilityScore: analysis.monoCompatibilityScore,
+      },
       explanation:
         'Out-of-phase bass energy or excessive mid-band phase cancellation will hollow out on mono club systems and smart speakers.',
       recommendedAction: 'Engage Stereo Imager Mono Bass (<95–115 Hz) and rein in excessive mid/low stereo width.',
@@ -130,7 +265,7 @@ export function analyzeTrackIntelligence(
   }
 
   // 5. L/R Balance Skew
-  if (Math.abs(analysis.lrBalanceDb) > 0.8) {
+  if (Math.abs(analysis.lrBalanceDb) > thresholds.lrBalanceMax) {
     findings.push({
       id: 'diag-lr-skew',
       kind: 'technical-problem',
@@ -138,29 +273,110 @@ export function analyzeTrackIntelligence(
       title: 'Left/Right Channel Energy Skew',
       severity: Math.abs(analysis.lrBalanceDb) > 1.5 ? 'moderate' : 'low',
       evidence: [`L/R Balance: ${analysis.lrBalanceDb >= 0 ? '+' : ''}${analysis.lrBalanceDb.toFixed(2)} dB`],
+      metrics: {
+        lrBalanceAbsDb: Math.abs(analysis.lrBalanceDb),
+        lrBalanceDb: analysis.lrBalanceDb,
+      },
       explanation: 'Persistent channel imbalance pulls the stereo center toward one speaker.',
       recommendedAction: `Trim Stereo Imager L/R Balance by ${(-analysis.lrBalanceDb * 0.7).toFixed(2)} dB.`,
     });
   }
 
-  // 6. Spectral Tilt: Distinguish intentionally dark/warm mix vs genuinely muddy/resonant problem
+  // 6. Spectral Tilt & Low-Mid Buildup:
+  // Distinguish intentionally bass-heavy/dark mix with clean midrange clarity from genuine 150–400 Hz mud masking.
   const isWarmTilt = analysis.spectralSlopeDbPerOct < -1.8 && analysis.spectralSlopeDbPerOct >= -4.2;
-  const hasHeavyMud = lowMidBuildup > 4.2 || bassMidDiff > 10.5;
+  const lowMidMasking =
+    lowMidBuildup > thresholds.lowMidBuildupLimit ||
+    (region150To400VsMid !== null && region150To400VsMid > thresholds.region150To400VsMidLimit);
+  const excessiveLowEndOverflow =
+    bassMidDiff > thresholds.bassMidDiffLimit &&
+    (lowMidBuildup > 2.6 || subExcess > thresholds.subExcessLimit);
+  const hasHeavyMud = lowMidMasking || excessiveLowEndOverflow;
+
   if (hasHeavyMud) {
+    const regionStr =
+      region150To400VsMid !== null
+        ? `150–400 Hz vs Mid delta: ${region150To400VsMid >= 0 ? '+' : ''}${region150To400VsMid.toFixed(1)} dB (${region150To400Db!.toFixed(1)} dB avg)`
+        : 'Problematic region: 150–400 Hz';
     findings.push({
       id: 'diag-mud',
       kind: 'technical-problem',
       category: 'Spectral',
       title: 'Low-Mid / Sub-Bass Buildup Masking Midrange',
-      severity: lowMidBuildup > 6.0 || bassMidDiff > 13 ? 'high' : 'moderate',
+      severity:
+        lowMidBuildup > 6.0 ||
+        bassMidDiff > 13 ||
+        (region150To400VsMid !== null && region150To400VsMid > 7.5)
+          ? 'high'
+          : 'moderate',
       evidence: [
-        `Bass vs Mid delta: +${bassMidDiff.toFixed(1)} dB`,
-        `Low-Mid vs Mid delta: +${lowMidBuildup.toFixed(1)} dB`,
-        `Sub vs Bass delta: ${subExcess.toFixed(1)} dB`,
+        `Bass vs Mid delta: ${bassMidDiff >= 0 ? '+' : ''}${bassMidDiff.toFixed(1)} dB`,
+        `Low-Mid vs Mid delta: ${lowMidBuildup >= 0 ? '+' : ''}${lowMidBuildup.toFixed(1)} dB`,
+        `Sub vs Bass delta: ${subExcess >= 0 ? '+' : ''}${subExcess.toFixed(1)} dB`,
+        regionStr,
       ],
+      metrics: {
+        bassMidDiff,
+        lowMidBuildup,
+        subExcess,
+        subDb: analysis.zoneEnergyDb.sub,
+        bassDb: analysis.zoneEnergyDb.bass,
+        lowMidDb: analysis.zoneEnergyDb.lowMid,
+        midDb: analysis.zoneEnergyDb.mid,
+        ...(region150To400Db !== null ? { region150To400Db } : {}),
+        ...(region150To400VsMid !== null ? { region150To400VsMid } : {}),
+      },
       explanation:
         'Excessive 150–400 Hz energy clouds vocal/snare clarity and forces the limiter to pump on bass notes.',
       recommendedAction: 'Apply surgical 260–340 Hz bell cut and subsonic 28 Hz high-pass filter.',
+    });
+  } else if (bassMidDiff > 7.5 && lowMidBuildup <= thresholds.lowMidBuildupLimit) {
+    findings.push({
+      id: 'diag-bass-heavy-clean',
+      kind: 'artistic-choice',
+      category: 'Spectral',
+      title: 'Naturally Bass-Heavy Foundation (Clean Midrange Separation)',
+      severity: 'info',
+      evidence: [
+        `Bass vs Mid delta: +${bassMidDiff.toFixed(1)} dB`,
+        `Low-Mid vs Mid delta: ${lowMidBuildup >= 0 ? '+' : ''}${lowMidBuildup.toFixed(1)} dB`,
+        ...(region150To400VsMid !== null
+          ? [`150–400 Hz vs Mid: ${region150To400VsMid >= 0 ? '+' : ''}${region150To400VsMid.toFixed(1)} dB`]
+          : []),
+      ],
+      explanation:
+        'Low-frequency weight sits cleanly below the 150–400 Hz mud region without masking vocal/snare midrange articulation. Avoid unnecessary bass attenuation.',
+    });
+  } else if (
+    lowMidBuildup < -4.8 &&
+    (region150To400VsMid === null || region150To400VsMid < -3.5) &&
+    bassMidDiff < 4.0
+  ) {
+    findings.push({
+      id: 'diag-hollow-lowmid',
+      kind: 'technical-problem',
+      category: 'Spectral',
+      title: 'Over-Cut Low-Mid / Hollow Tonal Imbalance',
+      severity:
+        lowMidBuildup < -7.0 || (region150To400VsMid !== null && region150To400VsMid < -5.5)
+          ? 'high'
+          : 'moderate',
+      evidence: [
+        `Low-Mid vs Mid delta: ${lowMidBuildup.toFixed(1)} dB`,
+        ...(region150To400VsMid !== null
+          ? [`150–400 Hz vs Mid delta: ${region150To400VsMid.toFixed(1)} dB`]
+          : []),
+        `Bass vs Mid delta: ${bassMidDiff >= 0 ? '+' : ''}${bassMidDiff.toFixed(1)} dB`,
+      ],
+      metrics: {
+        lowMidBuildup,
+        bassMidDiff,
+        ...(region150To400VsMid !== null ? { region150To400VsMid } : {}),
+      },
+      explanation:
+        'Excessive attenuation across 150–450 Hz strips vocal body, snare weight, and warm harmonic glue, leaving a thin or scooped tonal balance.',
+      recommendedAction:
+        'Reduce 150–400 Hz EQ cut depth by 3–6 dB or narrow filter Q to restore natural midrange body.',
     });
   } else if (isWarmTilt && harshExcess < 2.0) {
     findings.push({
@@ -181,8 +397,9 @@ export function analyzeTrackIntelligence(
     });
   }
 
-  if (harshExcess > 3.2 || analysis.resonances.some((r) => r.freqHz >= 2000 && r.excessDb >= 6.5)) {
-    const topRes = analysis.resonances[0];
+  const upperResonance = analysis.resonances.find((r) => r.freqHz >= 2000 && r.excessDb >= 6.5);
+  if (harshExcess > thresholds.harshExcessLimit || upperResonance) {
+    const topRes = upperResonance ?? analysis.resonances[0];
     findings.push({
       id: 'diag-harsh',
       kind: 'technical-problem',
@@ -190,9 +407,16 @@ export function analyzeTrackIntelligence(
       title: 'Upper-Mid Harshness or Narrow Resonance Peaks',
       severity: harshExcess > 5.0 || (topRes?.excessDb ?? 0) > 8.0 ? 'high' : 'moderate',
       evidence: [
-        `High-Mid vs Mid delta: +${harshExcess.toFixed(1)} dB`,
+        `High-Mid vs Mid delta: ${harshExcess >= 0 ? '+' : ''}${harshExcess.toFixed(1)} dB`,
         ...(topRes ? [`Peak Resonance: ${topRes.freqHz} Hz (+${topRes.excessDb} dB)`] : []),
       ],
+      metrics: {
+        harshExcess,
+        highMidDb: analysis.zoneEnergyDb.highMid,
+        midDb: analysis.zoneEnergyDb.mid,
+        topResonanceExcessDb: topRes?.excessDb ?? 0,
+        topResonanceFreqHz: topRes?.freqHz ?? 0,
+      },
       explanation:
         'Concentrated upper-mid spikes cause listener fatigue and exaggerate harshness when brought up to commercial loudness.',
       recommendedAction: 'Use Dynamic EQ on resonant peak bands so attenuation only engages during harsh transients.',
@@ -202,7 +426,7 @@ export function analyzeTrackIntelligence(
   }
 
   // 7. Dynamics & Transients (Observation vs Over-compressed vs Punchy artistic choice)
-  if (analysis.dynamicRangeDb < 5.5) {
+  if (analysis.dynamicRangeDb < thresholds.dynamicRangeMin) {
     findings.push({
       id: 'diag-overcompressed',
       kind: 'technical-problem',
@@ -214,6 +438,11 @@ export function analyzeTrackIntelligence(
         `Crest Factor: ${analysis.crestFactorDb.toFixed(1)} dB`,
         `LRA: ${analysis.loudnessRangeLu.toFixed(1)} LU`,
       ],
+      metrics: {
+        dynamicRangeDb: analysis.dynamicRangeDb,
+        crestFactorDb: analysis.crestFactorDb,
+        loudnessRangeLu: analysis.loudnessRangeLu,
+      },
       explanation:
         'Source already exhibits dense compression. Heavy additional bus compression or brickwall limiting will crush micro-dynamics.',
       recommendedAction: 'Skip heavy bus compression; favor transient-preserving maximization or gentle upward polish.',
@@ -241,7 +470,7 @@ export function analyzeTrackIntelligence(
   }
 
   // 8. Harmonic Distortion Observation
-  if (analysis.thdEstimatePercent > 2.2) {
+  if (analysis.thdEstimatePercent > thresholds.thdMaxPercent) {
     findings.push({
       id: 'diag-thd',
       kind: 'technical-problem',
@@ -249,6 +478,9 @@ export function analyzeTrackIntelligence(
       title: 'Elevated Pre-Existing Harmonic Distortion',
       severity: analysis.thdEstimatePercent > 5 ? 'high' : 'moderate',
       evidence: [`Estimated THD: ${analysis.thdEstimatePercent.toFixed(2)}%`],
+      metrics: {
+        thdEstimatePercent: analysis.thdEstimatePercent,
+      },
       explanation: 'Source already contains noticeable harmonic saturation; avoid stacking aggressive saturation stages.',
       recommendedAction: 'Omit heavy saturation stages and prioritize clean surgical EQ/limiting.',
     });
@@ -284,3 +516,4 @@ export function analyzeTrackIntelligence(
     findings,
   };
 }
+

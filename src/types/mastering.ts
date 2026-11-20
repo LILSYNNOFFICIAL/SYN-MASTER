@@ -594,12 +594,101 @@ export interface AnalysisFinding {
   evidence: string[];
   explanation: string;
   recommendedAction?: string;
+  metrics?: Record<string, number>;
 }
 
 export interface DirectorDiagnosisReport {
   workingWell: string[];
   artisticProfile: string;
   findings: AnalysisFinding[];
+}
+
+export type FindingVerificationStatus =
+  | 'ACTIVE'
+  | 'RESOLVED'
+  | 'IMPROVED'
+  | 'PARTIALLY_RESOLVED'
+  | 'UNRESOLVED'
+  | 'UNVERIFIED';
+
+export interface FindingMetricComparison {
+  key: string;
+  label: string;
+  unit: string;
+  beforeValue: number | null;
+  afterValue: number | null;
+  delta: number | null;
+  beforeFormatted: string;
+  afterFormatted: string;
+  thresholdFormatted?: string;
+  improved: boolean | null;
+  meetsThreshold: boolean | null;
+}
+
+export interface AppliedCorrectionRecord {
+  id: string;
+  timestamp: number;
+  label: string;
+  findingId?: string;
+  processorTypes: ProcessorType[];
+  chainFingerprint: string;
+}
+
+export interface VerifiedFindingState {
+  findingId: string;
+  originalFinding: AnalysisFinding;
+  postFinding: AnalysisFinding | null;
+  status: FindingVerificationStatus;
+  updatedSeverity: AnalysisFinding['severity'] | 'none';
+  beforeMeasurements: FindingMetricComparison[];
+  afterMeasurements: FindingMetricComparison[];
+  verificationSummary: string;
+  remainingDeviation?: string;
+  nextRecommendedAction?: string;
+  appliedCorrections: string[];
+  measurementReliable: boolean;
+}
+
+export interface PostFixVerificationReport {
+  id: string;
+  timestamp: number;
+  chainFingerprint: string;
+  baselineAnalysisId: string;
+  postAnalysisId: string;
+  baselineAnalysis: AudioAnalysis;
+  postAnalysis: AudioAnalysis | null;
+  analysisFresh: boolean;
+  verificationError?: string;
+  appliedCorrections: AppliedCorrectionRecord[];
+  activeFindings: VerifiedFindingState[];
+  resolvedFindings: VerifiedFindingState[];
+  artisticAndObservations: AnalysisFinding[];
+  newlyIntroducedFindings: AnalysisFinding[];
+  postDiagnosis: DirectorDiagnosisReport | null;
+  affectedMetricsSummary: {
+    integratedLufsBefore: number;
+    integratedLufsAfter: number | null;
+    shortTermLufsMaxBefore: number;
+    shortTermLufsMaxAfter: number | null;
+    rmsDbBefore: number;
+    rmsDbAfter: number | null;
+    samplePeakDbBefore: number;
+    samplePeakDbAfter: number | null;
+    truePeakDbBefore: number;
+    truePeakDbAfter: number | null;
+    crestFactorDbBefore: number;
+    crestFactorDbAfter: number | null;
+    plrDbBefore: number;
+    plrDbAfter: number | null;
+    dynamicRangeDbBefore: number;
+    dynamicRangeDbAfter: number | null;
+    spectralSlopeBefore: number;
+    spectralSlopeAfter: number | null;
+    spectralCentroidBefore: number;
+    spectralCentroidAfter: number | null;
+    region150To400DbBefore: number | null;
+    region150To400DbAfter: number | null;
+  };
 }
 
 export type ChainCommand =
@@ -801,5 +890,6 @@ export interface MasterFinalReport {
   resolvedProblems: string[];
   partiallyResolvedProblems: string[];
   preservedCharacteristics: string[];
+  postFixVerification?: PostFixVerificationReport;
 }
 

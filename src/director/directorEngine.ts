@@ -30,6 +30,7 @@ import { analyzeTrackIntelligence } from './analyzeIntelligence';
 import { applyStructuredChainCommands } from './chainCommands';
 import { inspectPluginInventory } from './pluginIntelligence';
 import { validateChainAgainstInventory } from './processorInventory';
+import { computeChainFingerprint, verifyPostFixAnalysis } from './postFixVerification';
 
 export function resolveObjectiveTarget(
   objectiveId: MasteringObjectiveId,
@@ -354,11 +355,18 @@ export function buildExplainableMasterPlan(input: {
 
   const eqReasons: string[] = [];
   let eqBassGain = 0;
+  const eqBassLimit =
+    objective.id === 'hip-hop' ||
+    objective.id === 'electronic' ||
+    objective.id === 'warm' ||
+    objective.id === 'cinematic'
+      ? 13.5
+      : 11.0;
   if (referenceAnalysis) {
     eqBassGain = Number(Math.max(-3.0, Math.min(3.0, (referenceAnalysis.zoneEnergyDb.bass - analysis.zoneEnergyDb.bass) * 0.45)).toFixed(1));
     eqReasons.push(`Reference bass delta: ${(referenceAnalysis.zoneEnergyDb.bass - analysis.zoneEnergyDb.bass).toFixed(1)} dB (45% weighted)`);
-  } else if (bassMidDiff > 10.0) {
-    eqBassGain = Number(Math.max(-3.0, -(bassMidDiff - 9.0) * 0.55).toFixed(1));
+  } else if (bassMidDiff > eqBassLimit && (lowMidBuildup > 2.6 || analysis.zoneEnergyDb.sub - analysis.zoneEnergyDb.bass > 4.5)) {
+    eqBassGain = Number(Math.max(-3.0, -(bassMidDiff - (eqBassLimit - 1.5)) * 0.55).toFixed(1));
     eqReasons.push(`Bass-to-Mid excess: +${bassMidDiff.toFixed(1)} dB`);
   } else if (bassMidDiff < 2.0 && objective.id !== 'transparent' && objective.id !== 'dynamic' && objective.id !== 'acoustic') {
     eqBassGain = objective.id === 'hip-hop' || objective.id === 'electronic' ? 1.5 : 1.1;
@@ -1347,6 +1355,7 @@ function buildFinalReportFromState(params: {
   bestCheckpoint: DirectorCheckpoint;
   rolledBack: boolean;
   preAnalysis: AudioAnalysis;
+  referenceAnalysis?: AudioAnalysis | null;
   diagnosis: DirectorDiagnosisReport;
   recommendations: DirectorRecommendation[];
   pluginSummary: PluginIntelligenceSummary;
@@ -1372,43 +1381,48 @@ function buildFinalReportFromState(params: {
     `Stereo & Phase: Corr ${postAnalysis.phaseCorrelation.toFixed(2)} (Low ${postAnalysis.lowEndCorrelation.toFixed(2)}), L/R ${postAnalysis.lrBalanceDb.toFixed(2)} dB`,
   );
 
-  // Classify detected technical problems into resolved vs partially resolved
-  const postQcMap = new Map(bestCheckpoint.qcReport.checks.map((c) => [c.id, c]));
+  // Evidence-based post-fix reanalysis against baseline findings
+  const hasExecutedProcessing = params.iterationsExecuted > 0 && bestCheckpoint.passNumber > 0;
+  const chainFp = computeChainFingerprint(bestCheckpoint.chain);
+  const postFixVerification = verifyPostFixAnalysis({
+    baselineAnalysis: preAnalysis,
+    baselineDiagnosis: diagnosis,
+    postAnalysis: hasExecutedProcessing ? postAnalysis : null,
+    objective: params.objective,
+    referenceAnalysis: params.referenceAnalysis,
+    baselineAnalysisId: 'baseline',
+    postAnalysisId: hasExecutedProcessing ? bestCheckpoint.id : 'baseline',
+    currentChainFingerprint: chainFp,
+    postChainFingerprint: hasExecutedProcessing ? chainFp : undefined,
+    postProcessingStatus: hasExecutedProcessing ? 'ready' : 'idle',
+    appliedCorrections: hasExecutedProcessing
+      ? [
+          {
+            id: `corr-dir-${bestCheckpoint.passNumber}`,
+            timestamp: bestCheckpoint.timestamp,
+            label: `Autonomous Director Pass #${bestCheckpoint.passNumber}`,
+            processorTypes: bestCheckpoint.chain.map((m) => m.type),
+            chainFingerprint: chainFp,
+          },
+        ]
+      : [],
+  });
+
+  for (const resolved of postFixVerification.resolvedFindings) {
+    resolvedProblems.push(`${resolved.originalFinding.title} — ${resolved.verificationSummary}`);
+  }
+  for (const active of postFixVerification.activeFindings) {
+    partiallyResolvedProblems.push(
+      `${active.originalFinding.title} [${active.status}]: ${active.remainingDeviation ?? active.verificationSummary}`,
+    );
+  }
+  for (const newly of postFixVerification.newlyIntroducedFindings) {
+    remainingTradeoffs.push(`Newly detected after processing: ${newly.title} (${newly.evidence.join(', ')})`);
+  }
+
   for (const finding of diagnosis.findings) {
     if (finding.kind === 'artistic-choice') {
       preservedCharacteristics.push(`${finding.title}: ${finding.explanation}`);
-      continue;
-    }
-    if (finding.kind !== 'technical-problem') continue;
-    if (finding.id === 'diag-clipping') {
-      if (postAnalysis.clippedSamples === 0 && postAnalysis.truePeakDb <= params.objective.maxTruePeakDb + 0.05) {
-        resolvedProblems.push(`Cleared clipping & enforced ${postAnalysis.truePeakDb.toFixed(2)} dBTP ceiling.`);
-      } else {
-        partiallyResolvedProblems.push(`Peak headroom tightened to ${postAnalysis.truePeakDb.toFixed(2)} dBTP (${postAnalysis.clippedSamples} clipped).`);
-      }
-    } else if (finding.id === 'diag-phase' || finding.id === 'diag-lr-skew') {
-      const phaseQc = postQcMap.get('qc-phase');
-      const lrQc = postQcMap.get('qc-lr-balance');
-      if (phaseQc?.status === 'pass' && lrQc?.status === 'pass') {
-        resolvedProblems.push(`Corrected stereo phase & L/R balance (${postAnalysis.lowEndCorrelation.toFixed(2)} low corr, ${postAnalysis.lrBalanceDb.toFixed(2)} dB L/R).`);
-      } else {
-        partiallyResolvedProblems.push(`Stereo coherence adjusted (Corr ${postAnalysis.phaseCorrelation.toFixed(2)}, Low ${postAnalysis.lowEndCorrelation.toFixed(2)}).`);
-      }
-    } else if (finding.id === 'diag-mud' || finding.id === 'diag-harsh') {
-      const specQc = postQcMap.get('qc-spectral');
-      if (specQc?.status === 'pass') {
-        resolvedProblems.push(`Balanced ${finding.title.toLowerCase()} cleanly within surgical EQ bounds.`);
-      } else {
-        partiallyResolvedProblems.push(`${finding.title}: mitigated without dulling tonal character.`);
-      }
-    } else if (finding.id === 'diag-noise' || finding.id === 'diag-dc') {
-      if ((postAnalysis.noiseFloorDb ?? -72) < (preAnalysis.noiseFloorDb ?? -72) - 1.5 || postAnalysis.dcOffset < 0.002) {
-        resolvedProblems.push(`Reduced background noise/DC bias (DC ${(postAnalysis.dcOffset * 100).toFixed(3)}%).`);
-      } else {
-        partiallyResolvedProblems.push(`Noise floor managed conservatively (${(postAnalysis.noiseFloorDb ?? -72).toFixed(1)} dBFS).`);
-      }
-    } else {
-      partiallyResolvedProblems.push(finding.title);
     }
   }
 
@@ -1453,6 +1467,7 @@ function buildFinalReportFromState(params: {
     resolvedProblems,
     partiallyResolvedProblems,
     preservedCharacteristics,
+    postFixVerification,
   };
 }
 
@@ -1604,6 +1619,7 @@ export async function runAutonomousDirectorLoop(
       bestCheckpoint: baseCheckpoint,
       rolledBack: false,
       preAnalysis,
+      referenceAnalysis: opts.referenceAnalysis,
       diagnosis: plan.diagnosis,
       recommendations: plan.recommendations,
       pluginSummary: plan.pluginSummary,
@@ -1911,6 +1927,7 @@ export async function runAutonomousDirectorLoop(
     bestCheckpoint,
     rolledBack,
     preAnalysis,
+    referenceAnalysis: opts.referenceAnalysis,
     diagnosis: plan.diagnosis,
     recommendations: plan.recommendations,
     pluginSummary: plan.pluginSummary,

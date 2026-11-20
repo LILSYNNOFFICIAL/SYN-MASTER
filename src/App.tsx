@@ -16,6 +16,7 @@ import {
 import type {
   AiChainLifecycleState,
   AIMasteringStrategy,
+  AppliedCorrectionRecord,
   AppSettings,
   AudioAnalysis,
   AudioTrackAsset,
@@ -53,9 +54,12 @@ import {
   buildBattleCandidatesIntelligent,
   buildExplainableMasterPlan,
   compareReferenceIntelligent,
+  resolveObjectiveTarget,
   runAutonomousDirectorLoop,
   type ExplainableMasterPlan,
 } from './director/directorEngine';
+import { analyzeTrackIntelligence } from './director/analyzeIntelligence';
+import { computeChainFingerprint, verifyPostFixAnalysis } from './director/postFixVerification';
 import { applyStructuredChainCommands } from './director/chainCommands';
 import { inspectPluginInventory } from './director/pluginIntelligence';
 import { validateChainAgainstInventory } from './director/processorInventory';
@@ -178,6 +182,20 @@ export default function App() {
   const [activeTrack, setActiveTrack] = useState<AudioTrackAsset | null>(null);
   const [referenceTrack, setReferenceTrack] = useState<AudioTrackAsset | null>(null);
   const [postAnalysis, setPostAnalysis] = useState<AudioAnalysis | null>(null);
+  const [postAnalysisState, setPostAnalysisState] = useState<{
+    status: 'idle' | 'processing' | 'ready' | 'failed';
+    analysisId: string;
+    chainFingerprint: string;
+    error: string | null;
+    timestamp: number;
+  }>({
+    status: 'idle',
+    analysisId: 'none',
+    chainFingerprint: 'dry:0',
+    error: null,
+    timestamp: 0,
+  });
+  const [appliedCorrections, setAppliedCorrections] = useState<AppliedCorrectionRecord[]>([]);
   const [postPeaks, setPostPeaks] = useState<number[] | null>(null);
   const [stageTelemetry, setStageTelemetry] = useState<ProcessorMeterTelemetry[]>([]);
 
@@ -288,6 +306,13 @@ export default function App() {
 
     let cancelled = false;
     const seq = ++offlineRenderSeqRef.current;
+    const targetFp = computeChainFingerprint(chain, chainBypassed);
+    setPostAnalysisState((prev) => ({
+      ...prev,
+      status: 'processing',
+      error: null,
+    }));
+
     const timer = window.setTimeout(() => {
       const effectiveChain = chainBypassed ? [] : chain;
       void (async () => {
@@ -305,6 +330,13 @@ export default function App() {
           setStageTelemetry(result.telemetry);
           setPostPeaks(result.peaks ?? null);
           setPostAnalysis(result.analysis);
+          setPostAnalysisState({
+            status: 'ready',
+            analysisId: `post-${seq}-${Date.now()}`,
+            chainFingerprint: targetFp,
+            error: null,
+            timestamp: Date.now(),
+          });
           if (result.usedExternalHost) {
             engineRef.current!.setOverrideBuffer('mastered-external', result.channels, track.sampleRate);
           } else {
@@ -312,8 +344,19 @@ export default function App() {
           }
         } catch (err) {
           if (cancelled || offlineRenderSeqRef.current !== seq) return;
+          const errMsg = err instanceof Error ? err.message : 'Audio chain analysis failed.';
+          postChannelsRef.current = null;
+          setPostAnalysis(null);
+          setPostPeaks(null);
+          setPostAnalysisState({
+            status: 'failed',
+            analysisId: `failed-${seq}`,
+            chainFingerprint: targetFp,
+            error: errMsg,
+            timestamp: Date.now(),
+          });
           engineRef.current!.clearOverrideBuffer('mastered-external');
-          setStatusNotice(err instanceof Error ? err.message : 'Audio chain analysis failed.');
+          setStatusNotice(errMsg);
         }
       })();
     }, 120);
@@ -364,8 +407,37 @@ export default function App() {
     return () => cancelAnimationFrame(rafId);
   }, [isPlaying]);
 
+  const recordCorrection = useCallback(
+    (
+      label: string,
+      targetChain: ProcessorModule[],
+      opts?: { findingId?: string; bypassed?: boolean; coalesceManual?: boolean },
+    ) => {
+      const fp = computeChainFingerprint(targetChain, opts?.bypassed ?? chainBypassed);
+      const types = targetChain.filter((m) => m.enabled && !m.bypassed).map((m) => m.type);
+      const entry: AppliedCorrectionRecord = {
+        id: `corr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: Date.now(),
+        label,
+        findingId: opts?.findingId,
+        processorTypes: types,
+        chainFingerprint: fp,
+      };
+      setAppliedCorrections((prev) => {
+        if (opts?.coalesceManual && prev.length > 0 && prev[prev.length - 1].id.startsWith('manual-')) {
+          return [...prev.slice(0, -1), { ...entry, id: `manual-${Date.now()}` }];
+        }
+        return [
+          ...prev.slice(-14),
+          opts?.coalesceManual ? { ...entry, id: `manual-${Date.now()}` } : entry,
+        ];
+      });
+    },
+    [chainBypassed],
+  );
+
   const updateChainWithHistory = useCallback(
-    (nextChain: ProcessorModule[]) => {
+    (nextChain: ProcessorModule[], correctionLabel?: string) => {
       const bridge = hostBridgeRef.current;
       if (bridge && bridge.getSnapshot().status === 'connected') {
         const remainingIds = new Set(
@@ -399,8 +471,11 @@ export default function App() {
       setUndoStack((u) => [...u.slice(-24), undoSnapshot]);
       setRedoStack([]);
       setChain(nextChain);
+      if (correctionLabel) {
+        recordCorrection(correctionLabel, nextChain);
+      }
     },
-    [chain],
+    [chain, recordCorrection],
   );
 
   // External VST3 Plugin Instance Handlers (Milestone 2)
@@ -834,6 +909,16 @@ export default function App() {
         isDemo,
       };
       setActiveTrack(asset);
+      setPostAnalysis(null);
+      setPostPeaks(null);
+      setAppliedCorrections([]);
+      setPostAnalysisState({
+        status: 'idle',
+        analysisId: 'none',
+        chainFingerprint: 'dry:0',
+        error: null,
+        timestamp: 0,
+      });
       setDirectorPlan(null);
       setDirectorReport(null);
       setDirectorActivityLog([]);
@@ -1012,9 +1097,59 @@ export default function App() {
   );
 
   const qcReport = useMemo(() => {
-    if (!activeTrack || !postAnalysis) return null;
+    if (!activeTrack || !postAnalysis || postAnalysisState.status === 'failed') return null;
     return runQualityControl(activeTrack.analysis, postAnalysis, activeQcProfile, exportConfig);
-  }, [activeTrack, postAnalysis, activeQcProfile, exportConfig]);
+  }, [activeTrack, postAnalysis, postAnalysisState.status, activeQcProfile, exportConfig]);
+
+  const currentChainFingerprint = useMemo(
+    () => computeChainFingerprint(chain, chainBypassed),
+    [chain, chainBypassed],
+  );
+
+  const baselineDiagnosis = useMemo(() => {
+    if (!activeTrack) return null;
+    return (
+      directorPlan?.diagnosis ??
+      analyzeTrackIntelligence(
+        activeTrack.analysis,
+        objectiveId,
+        referenceTrack?.analysis ?? null,
+      )
+    );
+  }, [activeTrack, directorPlan, objectiveId, referenceTrack]);
+
+  const postFixVerification = useMemo(() => {
+    if (!activeTrack) return null;
+    const objectiveTarget = resolveObjectiveTarget(
+      objectiveId,
+      customObjective,
+      referenceTrack?.analysis ?? null,
+    );
+    return verifyPostFixAnalysis({
+      baselineAnalysis: activeTrack.analysis,
+      baselineDiagnosis,
+      postAnalysis: postAnalysisState.status === 'ready' ? postAnalysis : null,
+      objective: objectiveTarget,
+      referenceAnalysis: referenceTrack?.analysis ?? null,
+      baselineAnalysisId: activeTrack.id,
+      postAnalysisId: postAnalysisState.analysisId,
+      currentChainFingerprint,
+      postChainFingerprint: postAnalysisState.chainFingerprint,
+      postProcessingStatus: postAnalysisState.status,
+      postProcessingError: postAnalysisState.error,
+      appliedCorrections,
+    });
+  }, [
+    activeTrack,
+    baselineDiagnosis,
+    postAnalysis,
+    postAnalysisState,
+    objectiveId,
+    customObjective,
+    referenceTrack,
+    currentChainFingerprint,
+    appliedCorrections,
+  ]);
 
   const referenceComparison = useMemo(() => {
     if (!activeTrack || !referenceTrack) return null;
@@ -1047,7 +1182,20 @@ export default function App() {
     (rec: DirectorRecommendation) => {
       if (rec.commands.length === 0) return;
       const res = applyStructuredChainCommands(chain, rec.commands);
+      const findingMap: Record<string, string> = {
+        'rec-eq': 'diag-mud',
+        'rec-dyn-eq': 'diag-harsh',
+        'rec-restore': 'diag-noise',
+        'rec-imager': 'diag-phase',
+        'rec-maximizer': 'diag-clipping',
+        'rec-limiter': 'diag-clipping',
+      };
       updateChainWithHistory(res.chain);
+      recordCorrection(
+        `Applied Stage: ${rec.pluginName ?? rec.selectedProcessor} (${rec.proposedParamsSummary})`,
+        res.chain,
+        { findingId: findingMap[rec.id] },
+      );
       setDirectorPlan((prev) =>
         prev
           ? {
@@ -1058,9 +1206,9 @@ export default function App() {
             }
           : prev,
       );
-      setStatusNotice(`Applied recommendation: ${rec.pluginName ?? rec.selectedProcessor}.`);
+      setStatusNotice(`Applied recommendation: ${rec.pluginName ?? rec.selectedProcessor}. Reanalyzing resulting audio...`);
     },
-    [chain, updateChainWithHistory],
+    [chain, updateChainWithHistory, recordCorrection],
   );
 
   const handleAcceptAiChain = useCallback(() => {
@@ -1222,6 +1370,10 @@ export default function App() {
 
       if (operatingMode !== 'manual' && report.finalChain.length > 0) {
         updateChainWithHistory(structuredClone(report.finalChain));
+        recordCorrection(
+          `CHAIN WITH AI (${report.objective.label} · Pass #${report.bestPassNumber})`,
+          report.finalChain,
+        );
       }
 
       const passHistory: IterationPass[] = report.checkpoints
@@ -1274,6 +1426,7 @@ export default function App() {
     maxIterations,
     convergenceThreshold,
     updateChainWithHistory,
+    recordCorrection,
   ]);
 
   const handleGenerateBattle = useCallback(async () => {
@@ -1326,7 +1479,7 @@ export default function App() {
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });
-    updateChainWithHistory(plan.chain);
+    updateChainWithHistory(plan.chain, 'Applied Reference Match Chain');
     setStatusNotice('Applied weighted EQ contour, stereo focus, and loudness calibration from reference track.');
   };
 
@@ -1360,7 +1513,8 @@ export default function App() {
         }
       }
     }
-    updateChainWithHistory(validateChain(next));
+    const validated = validateChain(next);
+    updateChainWithHistory(validated, `Applied SYN-QC Auto-Fix (${activeQcProfile.name})`);
     setStatusNotice(`Adjusted chain ceiling & loudness targets for ${activeQcProfile.name}.`);
   };
 
@@ -1387,7 +1541,7 @@ export default function App() {
 
   const handleApplyPreset = useCallback(
     (p: MasteringPreset) => {
-      updateChainWithHistory(structuredClone(p.chain));
+      updateChainWithHistory(structuredClone(p.chain), `Loaded preset "${p.name}"`);
       setStatusNotice(`Loaded preset "${p.name}".`);
     },
     [updateChainWithHistory],
@@ -1395,7 +1549,7 @@ export default function App() {
 
   const handleApplySavedChain = useCallback(
     (c: SavedChainRecord) => {
-      updateChainWithHistory(structuredClone(c.chain));
+      updateChainWithHistory(structuredClone(c.chain), `Loaded saved chain "${c.name}"`);
       setStatusNotice(`Loaded chain "${c.name}".`);
     },
     [updateChainWithHistory],
@@ -1424,6 +1578,9 @@ export default function App() {
         : m,
     );
     setChain(validated);
+    setAppliedCorrections([]);
+    setDirectorPlan(null);
+    setDirectorReport(null);
     setAiStrategy(proj.aiStrategy ?? null);
     setIterations(proj.iterations ?? []);
     setQcTargetId(proj.qcTargetId ?? 'streaming');
@@ -1435,7 +1592,15 @@ export default function App() {
     setProjects(await listProjects());
   }, []);
 
-  const handleToggleChainBypass = useCallback(() => setChainBypassed((b) => !b), []);
+  const handleToggleChainBypass = useCallback(() => {
+    setChainBypassed((b) => {
+      const next = !b;
+      recordCorrection(next ? 'Master Chain Bypassed (Dry)' : 'Master Chain Engaged', chainRef.current, {
+        bypassed: next,
+      });
+      return next;
+    });
+  }, [recordCorrection]);
 
   const handleSaveChainPreset = useCallback(
     async (name: string) => {
@@ -2021,6 +2186,10 @@ export default function App() {
             <AiMasterView
               preAnalysis={activeTrack?.analysis ?? null}
               postAnalysis={postAnalysis}
+              postAnalysisStatus={postAnalysisState.status}
+              postAnalysisError={postAnalysisState.error}
+              baselineDiagnosis={baselineDiagnosis}
+              postFixVerification={postFixVerification}
               referenceAnalysis={referenceTrack?.analysis ?? null}
               operatingMode={operatingMode}
               objectiveId={objectiveId}
@@ -2067,8 +2236,9 @@ export default function App() {
               onAcceptAiChain={handleAcceptAiChain}
               onRestorePreAiChain={handleRestorePreAiChain}
               onApplyChain={(c) => {
-                updateChainWithHistory(structuredClone(c));
-                setStatusNotice('Loaded Mastering Director chain into Mastering Rack.');
+                const cloned = structuredClone(c);
+                updateChainWithHistory(cloned, 'Applied Explainable Mastering Plan');
+                setStatusNotice('Loaded Mastering Director chain into Mastering Rack. Reanalyzing audio...');
               }}
               onApplyRecommendation={handleApplyRecommendation}
               onAuditionCheckpoint={async (cp) => {
@@ -2199,7 +2369,10 @@ export default function App() {
             aiRunning={directorRunning}
             aiLifecycleState={aiLifecycleState}
             onRunChainWithAi={handleRunMasterDirector}
-            onChangeChain={updateChainWithHistory}
+            onChangeChain={(next) => {
+              updateChainWithHistory(next);
+              recordCorrection('Manual Mastering Rack Edit', next, { coalesceManual: true });
+            }}
             onToggleChainBypass={handleToggleChainBypass}
             onSaveChain={handleSaveChainPreset}
             onResetChain={handleResetChain}

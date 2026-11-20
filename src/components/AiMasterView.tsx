@@ -23,19 +23,27 @@ import type {
   CustomObjectiveSpec,
   DirectorActivityEntry,
   DirectorCheckpoint,
+  DirectorDiagnosisReport,
   DirectorOperatingMode,
   DirectorRecommendation,
+  FindingVerificationStatus,
   IterationPass,
   MasterFinalReport,
   MasteringObjectiveId,
+  PostFixVerificationReport,
   ProcessorModule,
   QCReport,
 } from '../types/mastering';
 import type { ExplainableMasterPlan } from '../director/directorEngine';
+import { computeRegionEnergyDb } from '../director/analyzeIntelligence';
 
 interface Props {
   preAnalysis: AudioAnalysis | null;
   postAnalysis: AudioAnalysis | null;
+  postAnalysisStatus?: 'idle' | 'processing' | 'ready' | 'failed';
+  postAnalysisError?: string | null;
+  baselineDiagnosis?: DirectorDiagnosisReport | null;
+  postFixVerification?: PostFixVerificationReport | null;
   referenceAnalysis: AudioAnalysis | null;
   operatingMode: DirectorOperatingMode;
   objectiveId: MasteringObjectiveId;
@@ -101,9 +109,30 @@ const OBJECTIVE_LABELS: Array<{ id: MasteringObjectiveId; label: string }> = [
   { id: 'custom', label: 'Custom' },
 ];
 
+function verificationBadgeClass(status: FindingVerificationStatus): string {
+  switch (status) {
+    case 'RESOLVED':
+      return 'bg-[#10B981]/20 text-[#34D399] border border-[#10B981]/40';
+    case 'IMPROVED':
+      return 'bg-[#38BDF8]/20 text-[#38BDF8] border border-[#38BDF8]/40';
+    case 'PARTIALLY_RESOLVED':
+      return 'bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/40';
+    case 'UNVERIFIED':
+      return 'bg-[#9CA3AF]/20 text-[#E5E7EB] border border-[#6B7280]/50';
+    case 'UNRESOLVED':
+    case 'ACTIVE':
+    default:
+      return 'bg-[#EF4444]/20 text-[#FCA5A5] border border-[#EF4444]/40';
+  }
+}
+
 export const AiMasterView: React.FC<Props> = ({
   preAnalysis,
   postAnalysis,
+  postAnalysisStatus = 'idle',
+  postAnalysisError = null,
+  baselineDiagnosis = null,
+  postFixVerification = null,
   referenceAnalysis,
   operatingMode,
   objectiveId,
@@ -158,11 +187,27 @@ export const AiMasterView: React.FC<Props> = ({
     );
   }
 
-  const activeDiagnosis = directorReport?.diagnosis ?? directorPlan?.diagnosis ?? null;
+  const activeDiagnosis =
+    baselineDiagnosis ?? directorReport?.diagnosis ?? directorPlan?.diagnosis ?? null;
   const activeRecommendations = directorReport?.recommendations ?? directorPlan?.recommendations ?? [];
   const activePluginSummary = directorReport?.pluginSummary ?? directorPlan?.pluginSummary ?? null;
   const activeEval = directorReport?.multiObjective ?? null;
-  const effectivePost = directorReport?.postAnalysis ?? postAnalysis ?? preAnalysis;
+  const effectiveVerification = postFixVerification ?? directorReport?.postFixVerification ?? null;
+  const effectivePost: AudioAnalysis | null = effectiveVerification
+    ? effectiveVerification.analysisFresh && effectiveVerification.postAnalysis
+      ? effectiveVerification.postAnalysis
+      : null
+    : postAnalysisStatus === 'ready' && postAnalysis
+      ? postAnalysis
+      : null;
+  const preRegion150To400 = computeRegionEnergyDb(preAnalysis, 150, 400);
+  const postRegion150To400 = effectivePost ? computeRegionEnergyDb(effectivePost, 150, 400) : null;
+  const postFallbackLabel =
+    postAnalysisStatus === 'processing'
+      ? 'REANALYZING...'
+      : postAnalysisStatus === 'failed' || effectiveVerification?.verificationError
+        ? 'UNVERIFIED'
+        : '—';
 
   return (
     <div className="flex flex-col gap-4">
@@ -488,21 +533,73 @@ export const AiMasterView: React.FC<Props> = ({
         )}
       </div>
 
-      {/* Section 1: SYN-ANALYZE Intelligence + SYN-PLUGIN Inventory */}
+      {/* Section 1: SYN-ANALYZE Intelligence + Post-Fix Verification + SYN-PLUGIN Inventory */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">
-              SYN-ANALYZE Track Diagnosis
-            </h3>
+        <div
+          data-testid="syn-analyze-verification-panel"
+          className="lg:col-span-2 p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">
+                SYN-ANALYZE Track Diagnosis &amp; Post-Fix Verification
+              </h3>
+              <span
+                data-testid="analysis-freshness-badge"
+                className={`px-2 py-0.5 rounded text-[10px] font-mono-tabular font-bold uppercase border ${
+                  postAnalysisStatus === 'processing'
+                    ? 'bg-[#38BDF8]/15 border-[#38BDF8]/40 text-[#38BDF8]'
+                    : postAnalysisStatus === 'failed' || (effectiveVerification && !effectiveVerification.analysisFresh && effectiveVerification.verificationError)
+                      ? 'bg-[#EF4444]/15 border-[#EF4444]/40 text-[#FCA5A5]'
+                      : effectiveVerification?.analysisFresh
+                        ? 'bg-[#10B981]/15 border-[#10B981]/40 text-[#34D399]'
+                        : 'bg-[#181A22] border-[#2B2E3A] text-[#C5CDD8]'
+                }`}
+              >
+                {postAnalysisStatus === 'processing'
+                  ? 'REANALYZING PROCESSED AUDIO...'
+                  : postAnalysisStatus === 'failed'
+                    ? 'UNVERIFIED — ANALYSIS FAILED'
+                    : effectiveVerification?.analysisFresh
+                      ? 'VERIFIED CURRENT AUDIO'
+                      : 'BASELINE SOURCE ANALYSIS'}
+              </span>
+            </div>
             <span className="text-[11px] font-mono-tabular text-[#9CA3AF]">
-              {activeDiagnosis?.artisticProfile ?? 'Click Analyze to inspect audio profile'}
+              {(effectiveVerification?.postDiagnosis ?? activeDiagnosis)?.artisticProfile ??
+                'Click Analyze to inspect audio profile'}
             </span>
           </div>
 
-          {activeDiagnosis ? (
-            <div className="flex flex-col gap-2.5 text-xs">
-              {activeDiagnosis.workingWell.length > 0 && (
+          {(postAnalysisError || effectiveVerification?.verificationError) && (
+            <div
+              data-testid="verification-error-banner"
+              className="p-2.5 rounded bg-[#EF4444]/10 border border-[#EF4444]/40 text-xs text-[#FCA5A5]"
+            >
+              <strong>Verification Unverified:</strong>{' '}
+              {postAnalysisError ?? effectiveVerification?.verificationError}
+            </div>
+          )}
+
+          {effectiveVerification && effectiveVerification.appliedCorrections.length > 0 && (
+            <div className="p-2 rounded bg-[#0C0D12] border border-[#242732] flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="font-bold uppercase tracking-wider text-[#9CA3AF] mr-1">
+                Corrections Applied:
+              </span>
+              {effectiveVerification.appliedCorrections.slice(-4).map((corr) => (
+                <span
+                  key={corr.id}
+                  className="px-2 py-0.5 rounded bg-[#D4AF37]/15 border border-[#D4AF37]/40 text-[#F2CA52] font-mono-tabular"
+                >
+                  {corr.label}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {effectiveVerification ? (
+            <div className="flex flex-col gap-3 text-xs">
+              {activeDiagnosis && activeDiagnosis.workingWell.length > 0 && (
                 <div className="p-2.5 rounded bg-[#10B981]/10 border border-[#10B981]/30">
                   <div className="font-semibold text-[#34D399] mb-1">Working Well in Source</div>
                   <ul className="list-disc list-inside text-[#C5CDD8] flex flex-col gap-0.5">
@@ -512,46 +609,208 @@ export const AiMasterView: React.FC<Props> = ({
                   </ul>
                 </div>
               )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {activeDiagnosis.findings.map((f) => (
+
+              {/* Active Technical Findings (only unresolved / improved / partially resolved / unverified / active) */}
+              <div data-testid="active-findings-section" className="flex flex-col gap-2">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[#F7F8FA] flex items-center justify-between">
+                  <span>
+                    Remaining Active Problems ({effectiveVerification.activeFindings.length})
+                  </span>
+                  {effectiveVerification.activeFindings.length === 0 && (
+                    <span className="text-[#34D399] font-mono-tabular">
+                      0 ACTIVE TECHNICAL PROBLEMS
+                    </span>
+                  )}
+                </div>
+
+                {effectiveVerification.activeFindings.length > 0 && (
                   <div
-                    key={f.id}
-                    className={`p-2.5 rounded border ${
-                      f.kind === 'technical-problem'
-                        ? 'bg-[#EF4444]/8 border-[#EF4444]/35'
-                        : f.kind === 'artistic-choice'
-                          ? 'bg-[#38BDF8]/8 border-[#38BDF8]/30'
-                          : 'bg-[#0C0D12] border-[#222530]'
+                    className={`grid grid-cols-1 gap-2 ${
+                      effectiveVerification.activeFindings.length > 1 ? 'md:grid-cols-2' : ''
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-bold text-[#F7F8FA]">{f.title}</span>
-                      <span
-                        className={`text-[10px] font-mono-tabular uppercase px-1.5 py-0.5 rounded ${
-                          f.kind === 'technical-problem'
-                            ? 'bg-[#EF4444]/20 text-[#FCA5A5]'
-                            : f.kind === 'artistic-choice'
+                    {effectiveVerification.activeFindings.map((vf) => (
+                      <div
+                        key={vf.findingId}
+                        data-testid={`active-finding-${vf.findingId}`}
+                        className="p-2.5 rounded border bg-[#EF4444]/8 border-[#EF4444]/35 flex flex-col gap-1.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-[#F7F8FA]">
+                              {vf.originalFinding.title}
+                            </div>
+                            <div className="text-[10px] font-mono-tabular text-[#9CA3AF]">
+                              Severity: {vf.updatedSeverity.toUpperCase()} · {vf.originalFinding.category}
+                            </div>
+                          </div>
+                          <span
+                            className={`text-[10px] font-mono-tabular font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap ${verificationBadgeClass(vf.status)}`}
+                          >
+                            {vf.status.replace('_', ' ')}
+                          </span>
+                        </div>
+
+                        {vf.beforeMeasurements.length > 0 && (
+                          <div className="grid grid-cols-2 gap-1 text-[10px] font-mono-tabular bg-[#0C0D12] p-1.5 rounded border border-[#222530]">
+                            {vf.beforeMeasurements.map((m) => (
+                              <div key={m.key} className="flex flex-col">
+                                <span className="text-[#9CA3AF]">{m.label}</span>
+                                <span className="text-[#E5E7EB]">
+                                  Before: {m.beforeFormatted} → After:{' '}
+                                  <strong
+                                    className={
+                                      m.meetsThreshold
+                                        ? 'text-[#34D399]'
+                                        : m.afterValue === null
+                                          ? 'text-[#FCA5A5]'
+                                          : 'text-[#F59E0B]'
+                                    }
+                                  >
+                                    {m.afterFormatted}
+                                  </strong>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <p className="text-[11px] text-[#C5CDD8]">{vf.verificationSummary}</p>
+                        {vf.remainingDeviation && (
+                          <p className="text-[11px] font-mono-tabular text-[#F59E0B]">
+                            Remaining: {vf.remainingDeviation}
+                          </p>
+                        )}
+                        {vf.nextRecommendedAction && (
+                          <p className="text-[11px] text-[#D4AF37]">
+                            Next Action: {vf.nextRecommendedAction}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Verified Resolved Findings (Before/After proof + Status: RESOLVED) */}
+              {effectiveVerification.resolvedFindings.length > 0 && (
+                <div data-testid="resolved-findings-section" className="flex flex-col gap-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[#34D399]">
+                    Verified Resolved Findings ({effectiveVerification.resolvedFindings.length})
+                  </div>
+                  <div
+                    className={`grid grid-cols-1 gap-2 ${
+                      effectiveVerification.resolvedFindings.length > 1 ? 'md:grid-cols-2' : ''
+                    }`}
+                  >
+                    {effectiveVerification.resolvedFindings.map((vf) => (
+                      <div
+                        key={vf.findingId}
+                        data-testid={`resolved-finding-${vf.findingId}`}
+                        className="p-2.5 rounded border bg-[#10B981]/8 border-[#10B981]/35 flex flex-col gap-1.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-bold text-[#F7F8FA]">
+                            {vf.originalFinding.title}
+                          </span>
+                          <span
+                            className={`text-[10px] font-mono-tabular font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap ${verificationBadgeClass('RESOLVED')}`}
+                          >
+                            Status: RESOLVED
+                          </span>
+                        </div>
+                        {vf.beforeMeasurements.length > 0 && (
+                          <div className="grid grid-cols-2 gap-1 text-[10px] font-mono-tabular bg-[#0C0D12] p-1.5 rounded border border-[#1E2E28]">
+                            {vf.beforeMeasurements.map((m) => (
+                              <div key={m.key} className="flex flex-col">
+                                <span className="text-[#9CA3AF]">{m.label}</span>
+                                <span className="text-[#C5CDD8]">
+                                  Before: {m.beforeFormatted} → After:{' '}
+                                  <strong className="text-[#34D399]">{m.afterFormatted}</strong>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <p className="text-[11px] text-[#A7F3D0]">{vf.verificationSummary}</p>
+                        {vf.appliedCorrections.length > 0 && (
+                          <div className="text-[10px] font-mono-tabular text-[#9CA3AF]">
+                            Verified after: {vf.appliedCorrections.slice(-2).join(' · ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Newly Introduced Technical Issues */}
+              {effectiveVerification.newlyIntroducedFindings.length > 0 && (
+                <div data-testid="newly-introduced-findings-section" className="flex flex-col gap-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[#F59E0B]">
+                    Newly Detected Issues After Processing ({effectiveVerification.newlyIntroducedFindings.length})
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {effectiveVerification.newlyIntroducedFindings.map((nf) => (
+                      <div
+                        key={nf.id}
+                        className="p-2.5 rounded border bg-[#F59E0B]/10 border-[#F59E0B]/40 flex flex-col gap-1"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-[#F7F8FA]">{nf.title}</span>
+                          <span className="text-[10px] font-mono-tabular uppercase px-1.5 py-0.5 rounded bg-[#F59E0B]/20 text-[#F59E0B]">
+                            NEW {nf.severity}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono-tabular text-[#F2CA52]">
+                          {nf.evidence.join(' · ')}
+                        </div>
+                        <p className="text-[11px] text-[#C5CDD8]">{nf.explanation}</p>
+                        {nf.recommendedAction && (
+                          <p className="text-[11px] text-[#D4AF37]">Action: {nf.recommendedAction}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Artistic Choices & Program Observations */}
+              {effectiveVerification.artisticAndObservations.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {effectiveVerification.artisticAndObservations.map((f) => (
+                    <div
+                      key={f.id}
+                      className={`p-2.5 rounded border ${
+                        f.kind === 'artistic-choice'
+                          ? 'bg-[#38BDF8]/8 border-[#38BDF8]/30'
+                          : 'bg-[#0C0D12] border-[#222530]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-[#F7F8FA]">{f.title}</span>
+                        <span
+                          className={`text-[10px] font-mono-tabular uppercase px-1.5 py-0.5 rounded ${
+                            f.kind === 'artistic-choice'
                               ? 'bg-[#38BDF8]/20 text-[#38BDF8]'
                               : 'bg-[#262934] text-[#C5CDD8]'
-                        }`}
-                      >
-                        {f.kind.replace('-', ' ')}
-                      </span>
+                          }`}
+                        >
+                          {f.kind.replace('-', ' ')}
+                        </span>
+                      </div>
+                      <div className="text-[11px] font-mono-tabular text-[#F2CA52] mt-1">
+                        {f.evidence.join(' · ')}
+                      </div>
+                      <p className="text-[11px] text-[#9CA3AF] mt-1">{f.explanation}</p>
                     </div>
-                    <div className="text-[11px] font-mono-tabular text-[#F2CA52] mt-1">
-                      {f.evidence.join(' · ')}
-                    </div>
-                    <p className="text-[11px] text-[#9CA3AF] mt-1">{f.explanation}</p>
-                    {f.recommendedAction && (
-                      <p className="text-[11px] text-[#D4AF37] mt-1">Action: {f.recommendedAction}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-xs text-[#9CA3AF]">
-              Click <strong className="text-[#F2CA52]">Analyze</strong> or <strong className="text-[#F2CA52]">MASTER</strong> to diagnose loudness, spectral tilt, resonances, phase coherence, distortion, and noise floor.
+              Click <strong className="text-[#F2CA52]">Analyze</strong> or <strong className="text-[#F2CA52]">CHAIN WITH AI</strong> to diagnose loudness, spectral tilt, resonances, phase coherence, distortion, and noise floor.
             </p>
           )}
         </div>
@@ -589,47 +848,97 @@ export const AiMasterView: React.FC<Props> = ({
 
       {/* Section 2: Before vs After + Multi-Objective Evaluation */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">
-            Measured Before vs After Telemetry
-          </h3>
-          <div className="grid grid-cols-3 gap-2 text-xs font-mono-tabular">
+        <div
+          data-testid="measured-before-after-telemetry"
+          className="p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">
+              Measured Before vs After Telemetry
+            </h3>
+            <span className="text-[10px] font-mono-tabular text-[#9CA3AF]">
+              {effectivePost ? 'Actual Reanalyzed Output' : postFallbackLabel}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono-tabular">
             {[
               {
                 label: 'Integrated LUFS',
                 pre: `${preAnalysis.integratedLufs.toFixed(1)}`,
-                post: `${effectivePost.integratedLufs.toFixed(1)}`,
+                post: effectivePost ? `${effectivePost.integratedLufs.toFixed(1)}` : postFallbackLabel,
+              },
+              {
+                label: 'Short-Term Max',
+                pre: `${preAnalysis.shortTermLufsMax.toFixed(1)} LUFS`,
+                post: effectivePost ? `${effectivePost.shortTermLufsMax.toFixed(1)} LUFS` : postFallbackLabel,
+              },
+              {
+                label: 'RMS Level',
+                pre: `${preAnalysis.rmsDb.toFixed(1)} dBFS`,
+                post: effectivePost ? `${effectivePost.rmsDb.toFixed(1)} dBFS` : postFallbackLabel,
+              },
+              {
+                label: 'Sample Peak',
+                pre: `${preAnalysis.samplePeakDb.toFixed(2)} dBFS`,
+                post: effectivePost ? `${effectivePost.samplePeakDb.toFixed(2)} dBFS` : postFallbackLabel,
               },
               {
                 label: 'True Peak (dBTP)',
                 pre: `${preAnalysis.truePeakDb.toFixed(2)}`,
-                post: `${effectivePost.truePeakDb.toFixed(2)}`,
+                post: effectivePost ? `${effectivePost.truePeakDb.toFixed(2)}` : postFallbackLabel,
+              },
+              {
+                label: 'Crest Factor / PLR',
+                pre: `${preAnalysis.crestFactorDb.toFixed(1)} / ${preAnalysis.plrDb.toFixed(1)} dB`,
+                post: effectivePost
+                  ? `${effectivePost.crestFactorDb.toFixed(1)} / ${effectivePost.plrDb.toFixed(1)} dB`
+                  : postFallbackLabel,
               },
               {
                 label: 'Dynamic Range',
                 pre: `${preAnalysis.dynamicRangeDb.toFixed(1)} dB`,
-                post: `${effectivePost.dynamicRangeDb.toFixed(1)} dB`,
+                post: effectivePost ? `${effectivePost.dynamicRangeDb.toFixed(1)} dB` : postFallbackLabel,
               },
               {
-                label: 'Crest Factor',
-                pre: `${preAnalysis.crestFactorDb.toFixed(1)} dB`,
-                post: `${effectivePost.crestFactorDb.toFixed(1)} dB`,
+                label: '150–400 Hz Region',
+                pre: preRegion150To400 !== null ? `${preRegion150To400.toFixed(1)} dB` : '—',
+                post:
+                  effectivePost && postRegion150To400 !== null
+                    ? `${postRegion150To400.toFixed(1)} dB`
+                    : postFallbackLabel,
+              },
+              {
+                label: 'Spectral Slope / Centroid',
+                pre: `${preAnalysis.spectralSlopeDbPerOct.toFixed(2)} / ${preAnalysis.spectralCentroidHz} Hz`,
+                post: effectivePost
+                  ? `${effectivePost.spectralSlopeDbPerOct.toFixed(2)} / ${effectivePost.spectralCentroidHz} Hz`
+                  : postFallbackLabel,
               },
               {
                 label: 'Stereo / Low Corr',
                 pre: `${preAnalysis.phaseCorrelation.toFixed(2)} / ${preAnalysis.lowEndCorrelation.toFixed(2)}`,
-                post: `${effectivePost.phaseCorrelation.toFixed(2)} / ${effectivePost.lowEndCorrelation.toFixed(2)}`,
+                post: effectivePost
+                  ? `${effectivePost.phaseCorrelation.toFixed(2)} / ${effectivePost.lowEndCorrelation.toFixed(2)}`
+                  : postFallbackLabel,
               },
               {
                 label: 'THD / Noise Floor',
                 pre: `${preAnalysis.thdEstimatePercent.toFixed(2)}% / ${(preAnalysis.noiseFloorDb ?? -72).toFixed(0)}dB`,
-                post: `${effectivePost.thdEstimatePercent.toFixed(2)}% / ${(effectivePost.noiseFloorDb ?? -72).toFixed(0)}dB`,
+                post: effectivePost
+                  ? `${effectivePost.thdEstimatePercent.toFixed(2)}% / ${(effectivePost.noiseFloorDb ?? -72).toFixed(0)}dB`
+                  : postFallbackLabel,
               },
             ].map((row) => (
               <div key={row.label} className="p-2 rounded bg-[#0C0D12] border border-[#21242F]">
                 <div className="text-[10px] text-[#9CA3AF] font-sans">{row.label}</div>
                 <div className="text-[11px] text-[#9CA3AF] mt-0.5">Pre: {row.pre}</div>
-                <div className="text-xs font-bold text-[#F2CA52]">Post: {row.post}</div>
+                <div
+                  className={`text-xs font-bold ${
+                    row.post === 'UNVERIFIED' ? 'text-[#FCA5A5]' : 'text-[#F2CA52]'
+                  }`}
+                >
+                  Post: {row.post}
+                </div>
               </div>
             ))}
           </div>
