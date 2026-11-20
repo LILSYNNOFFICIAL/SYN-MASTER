@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, AudioLines, FileAudio, Layers3, Loader2, Plus, ScanSearch, Trash2 } from 'lucide-react';
+import { createProcessorModule } from '../dsp/chainValidation';
+import { renderStemBusMix, type StemBusMixResult } from '../dsp/stemBusRenderer';
+import type { ProcessorModule, ProcessorType, ParametricEQParams, CompressorParams } from '../types/mastering';
 import {
   analyzeStemSet,
   type StemInput,
