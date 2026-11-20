@@ -1423,6 +1423,7 @@ function makeActivity(
 function toStemIntelligenceReport(
   stemSet?: StemSetAnalysis | null,
   chainsByStemId: Record<string, ProcessorModule[]> = {},
+  processingApplied = false,
 ): StemIntelligenceReport | undefined {
   if (!stemSet) return undefined;
   const processingChains = Object.fromEntries(
@@ -1440,7 +1441,7 @@ function toStemIntelligenceReport(
       integratedLufs: stem.analysis.integratedLufs,
       truePeakDb: stem.analysis.truePeakDb,
       stereoWidth: stem.analysis.stereoWidth,
-      processed: (chainsByStemId[stem.id] ?? []).some((module) => module.enabled && !module.bypassed && module.wetDry > 0.1),
+      processed: processingApplied && (chainsByStemId[stem.id] ?? []).some((module) => module.enabled && !module.bypassed && module.wetDry > 0.1),
       processors: (processingChains[stem.id] ?? []),
     })),
     overlaps: stemSet.overlaps.map((overlap) => ({
@@ -1467,6 +1468,7 @@ function buildFinalReportFromState(params: {
   referenceAnalysis?: AudioAnalysis | null;
   stemAnalysis?: StemSetAnalysis | null;
   stemChainsById?: Record<string, ProcessorModule[]>;
+  stemProcessingApplied?: boolean;
   diagnosis: DirectorDiagnosisReport;
   recommendations: DirectorRecommendation[];
   pluginSummary: PluginIntelligenceSummary;
@@ -1582,7 +1584,7 @@ function buildFinalReportFromState(params: {
     partiallyResolvedProblems,
     preservedCharacteristics,
     postFixVerification,
-    stemIntelligence: toStemIntelligenceReport(params.stemAnalysis, params.stemChainsById),
+    stemIntelligence: toStemIntelligenceReport(params.stemAnalysis, params.stemChainsById, params.stemProcessingApplied),
   };
 }
 
@@ -1635,6 +1637,7 @@ export async function runAutonomousDirectorLoop(
   let sourceChannels = opts.sourceChannels;
   let resolvedStemAnalysis = opts.stemAnalysis ?? null;
   let stemProcessedChannels: Float32Array[] | null = null;
+  let stemProcessingApplied = false;
   if (opts.stemBuses && opts.stemBuses.length > 0) {
     const dryStemRender = await renderStemBusMix(opts.stemBuses, opts.sampleRate);
     sourceChannels = dryStemRender.mixChannels;
@@ -1654,6 +1657,7 @@ export async function runAutonomousDirectorLoop(
         externalProcessor: opts.externalProcessor,
       });
       stemProcessedChannels = processedStemRender.mixChannels;
+      stemProcessingApplied = true;
     }
   }
 
@@ -1768,6 +1772,7 @@ export async function runAutonomousDirectorLoop(
       referenceAnalysis: opts.referenceAnalysis,
       stemAnalysis: resolvedStemAnalysis,
       stemChainsById: opts.stemChainsById,
+      stemProcessingApplied,
       diagnosis: plan.diagnosis,
       recommendations: plan.recommendations,
       pluginSummary: plan.pluginSummary,
@@ -2087,6 +2092,7 @@ export async function runAutonomousDirectorLoop(
     referenceAnalysis: opts.referenceAnalysis,
     stemAnalysis: resolvedStemAnalysis,
     stemChainsById: opts.stemChainsById,
+    stemProcessingApplied,
     diagnosis: plan.diagnosis,
     recommendations: plan.recommendations,
     pluginSummary: plan.pluginSummary,
