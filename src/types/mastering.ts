@@ -868,6 +868,29 @@ export interface ReferenceComparisonReport {
   cautionNote: string;
 }
 
+export interface StemIntelligenceReport {
+  sampleRate: number;
+  durationSec: number;
+  stemCount: number;
+  stems: Array<{
+    id: string;
+    name: string;
+    role: 'vocals' | 'bass' | 'drums' | 'instruments' | 'other';
+    offsetSamples: number;
+    integratedLufs: number;
+    truePeakDb: number;
+    stereoWidth: number;
+  }>;
+  overlaps: Array<{
+    stemAId: string;
+    stemBId: string;
+    band: keyof SpectralBandEnergy;
+    differenceDb: number;
+    confidence: 'low' | 'moderate';
+  }>;
+  warnings: string[];
+}
+
 export interface MasterFinalReport {
   id: string;
   createdAt: number;
@@ -894,5 +917,6 @@ export interface MasterFinalReport {
   partiallyResolvedProblems: string[];
   preservedCharacteristics: string[];
   postFixVerification?: PostFixVerificationReport;
+  stemIntelligence?: StemIntelligenceReport;
 }
 

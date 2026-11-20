@@ -21,8 +21,10 @@ import type {
   QCTargetProfile,
   ReferenceComparisonReport,
   ResolvedObjectiveTarget,
+  StemIntelligenceReport,
 } from '../types/mastering';
 import { validateChain } from '../dsp/chainValidation';
+import type { StemSetAnalysis } from '../dsp/stemAnalysis';
 import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
 import { renderAndAnalyzeOffThread } from '../dsp/workerClient';
 import { QC_TARGET_PROFILES, runQualityControl } from '../dsp/qc';
@@ -260,6 +262,7 @@ export function buildExplainableMasterPlan(input: {
   referenceAnalysis?: AudioAnalysis | null;
   externalPlugins?: ExternalPluginRecord[];
   hostConnected?: boolean;
+  stemAnalysis?: StemSetAnalysis | null;
 }): ExplainableMasterPlan {
   const { analysis, objectiveId, customSpec, referenceAnalysis } = input;
   const objective = resolveObjectiveTarget(objectiveId, customSpec, referenceAnalysis);
@@ -276,6 +279,73 @@ export function buildExplainableMasterPlan(input: {
   const lowMidBuildup = analysis.zoneEnergyDb.lowMid - analysis.zoneEnergyDb.mid;
   const harshExcess = analysis.zoneEnergyDb.highMid - analysis.zoneEnergyDb.mid;
   const nf = analysis.noiseFloorDb ?? -72;
+
+  if (input.stemAnalysis) {
+    const stemSet = input.stemAnalysis;
+    const stemNames = new Map(stemSet.stems.map((stem) => [stem.id, stem.name]));
+    const grouped = new Map<string, typeof stemSet.overlaps>();
+    for (const overlap of stemSet.overlaps) {
+      const key = [overlap.stemAId, overlap.stemBId, overlap.band].sort().join(':');
+      const group = grouped.get(key) ?? [];
+      group.push(overlap);
+      grouped.set(key, group);
+    }
+
+    const topCandidates = [...grouped.values()]
+      .map((items) => items[0])
+      .sort((a, b) => a.differenceDb - b.differenceDb)
+      .slice(0, 6);
+
+    for (const candidate of topCandidates) {
+      const nameA = stemNames.get(candidate.stemAId) ?? candidate.stemAId;
+      const nameB = stemNames.get(candidate.stemBId) ?? candidate.stemBId;
+      const bandLabel = candidate.band;
+      const findingId = `diag-stem-overlap-${candidate.stemAId}-${candidate.stemBId}-${bandLabel}`;
+      diagnosis.findings.push({
+        id: findingId,
+        kind: 'observation',
+        category: 'Spectral',
+        title: `Stem Interaction Candidate: ${nameA} / ${nameB}`,
+        severity: candidate.confidence === 'moderate' ? 'moderate' : 'low',
+        evidence: [
+          `Band: ${bandLabel}`,
+          `${nameA}: ${candidate.stemALevelDb.toFixed(1)} dB`,
+          `${nameB}: ${candidate.stemBLevelDb.toFixed(1)} dB`,
+          `Band-level difference: ${candidate.differenceDb.toFixed(1)} dB`,
+        ],
+        evidenceStrength: candidate.confidence === 'moderate' ? 'multiple' : 'single',
+        metrics: {
+          stemALevelDb: candidate.stemALevelDb,
+          stemBLevelDb: candidate.stemBLevelDb,
+          differenceDb: candidate.differenceDb,
+        },
+        explanation: 'Both supplied stems contain comparable energy in this broad frequency region. This is a coexistence candidate only; it does not establish audible masking.',
+        recommendedAction: 'Audition both stems together and in solo. If the interaction is audible, adjust the source stem arrangement, level, envelope, or stem-routed processing rather than applying an unverified master-bus cut.',
+      });
+      recommendations.push({
+        id: `rec-${findingId}`,
+        characteristic: `Stem interaction candidate: ${nameA} + ${nameB} (${bandLabel})`,
+        supportingMeasurements: [
+          `${nameA}: ${candidate.stemALevelDb.toFixed(1)} dB`,
+          `${nameB}: ${candidate.stemBLevelDb.toFixed(1)} dB`,
+          `Difference: ${candidate.differenceDb.toFixed(1)} dB`,
+          `Confidence: ${candidate.confidence}`,
+        ],
+        proposedCorrection: 'Audition the two sources in context, then make any correction on the relevant source stem or bus.',
+        selectedProcessor: 'parametric-eq',
+        proposedParamsSummary: 'No master-bus EQ command generated. Stem-routed processing is required for a safe targeted correction.',
+        commands: [],
+        expectedResult: 'Improve separation only if listening confirms an audible conflict, while preserving unrelated mix elements.',
+        potentialTradeoffs: 'A broad master-bus cut could damage other sources. This recommendation is advisory until stem-bus routing exists.',
+        priority: candidate.confidence === 'moderate' ? 'recommended' : 'optional',
+        statementType: 'hypothesis',
+      });
+    }
+
+    if (topCandidates.length > 0) {
+      diagnosis.workingWell.push(`Stem Intelligence screened ${stemSet.stems.length} supplied sources and identified ${topCandidates.length} spectral coexistence candidate(s) for listening review.`);
+    }
+  }
 
   // Stage 1: SYN-Restore ONLY if genuine DC offset, elevated quiet-frame noise floor, or strong sibilance/resonance exists
   const hasGenuineNoiseFloor = nf > -48 && analysis.rmsDb - nf >= 12;
@@ -1294,6 +1364,7 @@ export interface RunAutonomousDirectorOptions {
   qcProfile?: QCTargetProfile | null;
   exportConfig?: ExportConfig | null;
   referenceAnalysis?: AudioAnalysis | null;
+  stemAnalysis?: StemSetAnalysis | null;
   externalPlugins?: ExternalPluginRecord[];
   hostConnected?: boolean;
   initialChain?: ProcessorModule[];
@@ -1346,6 +1417,32 @@ function makeActivity(
   };
 }
 
+function toStemIntelligenceReport(stemSet?: StemSetAnalysis | null): StemIntelligenceReport | undefined {
+  if (!stemSet) return undefined;
+  return {
+    sampleRate: stemSet.sampleRate,
+    durationSec: stemSet.durationSec,
+    stemCount: stemSet.stems.length,
+    stems: stemSet.stems.map((stem) => ({
+      id: stem.id,
+      name: stem.name,
+      role: stem.role,
+      offsetSamples: stem.offsetSamples,
+      integratedLufs: stem.analysis.integratedLufs,
+      truePeakDb: stem.analysis.truePeakDb,
+      stereoWidth: stem.analysis.stereoWidth,
+    })),
+    overlaps: stemSet.overlaps.map((overlap) => ({
+      stemAId: overlap.stemAId,
+      stemBId: overlap.stemBId,
+      band: overlap.band,
+      differenceDb: overlap.differenceDb,
+      confidence: overlap.confidence,
+    })),
+    warnings: [...stemSet.warnings],
+  };
+}
+
 function buildFinalReportFromState(params: {
   operatingMode: DirectorOperatingMode;
   objective: ResolvedObjectiveTarget;
@@ -1356,6 +1453,7 @@ function buildFinalReportFromState(params: {
   rolledBack: boolean;
   preAnalysis: AudioAnalysis;
   referenceAnalysis?: AudioAnalysis | null;
+  stemAnalysis?: StemSetAnalysis | null;
   diagnosis: DirectorDiagnosisReport;
   recommendations: DirectorRecommendation[];
   pluginSummary: PluginIntelligenceSummary;
@@ -1468,6 +1566,7 @@ function buildFinalReportFromState(params: {
     partiallyResolvedProblems,
     preservedCharacteristics,
     postFixVerification,
+    stemIntelligence: toStemIntelligenceReport(params.stemAnalysis),
   };
 }
 
@@ -1540,6 +1639,7 @@ export async function runAutonomousDirectorLoop(
     objectiveId: opts.objectiveId,
     customSpec: opts.customSpec,
     referenceAnalysis: opts.referenceAnalysis,
+    stemAnalysis: opts.stemAnalysis,
     externalPlugins: opts.externalPlugins,
     hostConnected: opts.hostConnected,
   });
@@ -1620,6 +1720,7 @@ export async function runAutonomousDirectorLoop(
       rolledBack: false,
       preAnalysis,
       referenceAnalysis: opts.referenceAnalysis,
+      stemAnalysis: opts.stemAnalysis,
       diagnosis: plan.diagnosis,
       recommendations: plan.recommendations,
       pluginSummary: plan.pluginSummary,
@@ -1937,6 +2038,7 @@ export async function runAutonomousDirectorLoop(
     rolledBack,
     preAnalysis,
     referenceAnalysis: opts.referenceAnalysis,
+    stemAnalysis: opts.stemAnalysis,
     diagnosis: plan.diagnosis,
     recommendations: plan.recommendations,
     pluginSummary: plan.pluginSummary,
