@@ -78,6 +78,7 @@ export const StemIntelligencePanel: React.FC = () => {
     setProcessedMix(null);
     setDirectorReport(null);
     setDirectorPreview(null);
+    setDirectorProgress(null);
     try {
       const context = contextRef.current ?? new AudioContext();
       contextRef.current = context;
@@ -115,6 +116,7 @@ export const StemIntelligencePanel: React.FC = () => {
     setProcessedMix(null);
     setDirectorReport(null);
     setDirectorPreview(null);
+    setDirectorProgress(null);
   };
 
   const removeStem = (id: string) => {
@@ -124,6 +126,7 @@ export const StemIntelligencePanel: React.FC = () => {
     setProcessedMix(null);
     setDirectorReport(null);
     setDirectorPreview(null);
+    setDirectorProgress(null);
   };
 
   const addProcessor = (stemId: string, type: ProcessorType) => {
@@ -135,6 +138,7 @@ export const StemIntelligencePanel: React.FC = () => {
     setProcessedMix(null);
     setDirectorReport(null);
     setDirectorPreview(null);
+    setDirectorProgress(null);
   };
 
   const updateProcessor = (stemId: string, moduleId: string, patch: Partial<ProcessorModule>) => {
@@ -145,6 +149,7 @@ export const StemIntelligencePanel: React.FC = () => {
     setProcessedMix(null);
     setDirectorReport(null);
     setDirectorPreview(null);
+    setDirectorProgress(null);
   };
 
   const removeProcessor = (stemId: string, moduleId: string) => {
@@ -155,6 +160,7 @@ export const StemIntelligencePanel: React.FC = () => {
     setProcessedMix(null);
     setDirectorReport(null);
     setDirectorPreview(null);
+    setDirectorProgress(null);
   };
 
   const updateEqBand = (stemId: string, moduleId: string, bandIndex: number, patch: Partial<ParametricEQParams['bands'][number]>) => {
@@ -175,6 +181,7 @@ export const StemIntelligencePanel: React.FC = () => {
     setProcessedMix(null);
     setDirectorReport(null);
     setDirectorPreview(null);
+    setDirectorProgress(null);
   };
 
   const renderProcessedMix = async () => {
@@ -184,6 +191,7 @@ export const StemIntelligencePanel: React.FC = () => {
     setProcessedMix(null);
     setDirectorReport(null);
     setDirectorPreview(null);
+    setDirectorProgress(null);
     try {
       const sampleRate = stems[0].sampleRate ?? 0;
       const result = await renderStemBusMix(stems, sampleRate, { chainsByStemId });
