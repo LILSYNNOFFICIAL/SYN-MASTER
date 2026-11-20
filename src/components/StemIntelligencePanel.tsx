@@ -75,6 +75,9 @@ export const StemIntelligencePanel: React.FC = () => {
     setBusy(true);
     setError(null);
     setAnalysis(null);
+    setProcessedMix(null);
+    setDirectorReport(null);
+    setDirectorPreview(null);
     try {
       const context = contextRef.current ?? new AudioContext();
       contextRef.current = context;
@@ -140,6 +143,8 @@ export const StemIntelligencePanel: React.FC = () => {
       [stemId]: (current[stemId] ?? []).map((module) => module.id === moduleId ? { ...module, ...patch } : module),
     }));
     setProcessedMix(null);
+    setDirectorReport(null);
+    setDirectorPreview(null);
   };
 
   const removeProcessor = (stemId: string, moduleId: string) => {
@@ -148,6 +153,8 @@ export const StemIntelligencePanel: React.FC = () => {
       [stemId]: (current[stemId] ?? []).filter((module) => module.id !== moduleId),
     }));
     setProcessedMix(null);
+    setDirectorReport(null);
+    setDirectorPreview(null);
   };
 
   const updateEqBand = (stemId: string, moduleId: string, bandIndex: number, patch: Partial<ParametricEQParams['bands'][number]>) => {
@@ -166,6 +173,8 @@ export const StemIntelligencePanel: React.FC = () => {
       }),
     }));
     setProcessedMix(null);
+    setDirectorReport(null);
+    setDirectorPreview(null);
   };
 
   const renderProcessedMix = async () => {
@@ -213,7 +222,7 @@ export const StemIntelligencePanel: React.FC = () => {
         }),
       });
       setDirectorReport(report);
-      setDirectorProgress({ stage: 'Rendering final preview', passNumber: report.iterationsExecuted, maxIterations: report.iterationsExecuted });
+      setDirectorProgress({ stage: report.status === 'stopped-by-user' ? 'Stopped · rendering best available preview' : 'Rendering final preview', passNumber: report.iterationsExecuted, maxIterations: report.iterationsExecuted });
       const stemRender = await renderStemBusMix(stems, sampleRate, {
         chainsByStemId: directorMode === 'manual' ? {} : chainsByStemId,
       });
@@ -223,7 +232,7 @@ export const StemIntelligencePanel: React.FC = () => {
         chain: report.finalChain,
       });
       setDirectorPreview(finalRender);
-      setDirectorProgress({ stage: 'Completed', passNumber: report.iterationsExecuted, maxIterations: report.iterationsExecuted });
+      setDirectorProgress({ stage: report.status === 'stopped-by-user' ? 'Stopped' : report.status === 'rolled-back' ? 'Completed · best checkpoint restored' : 'Completed', passNumber: report.iterationsExecuted, maxIterations: report.iterationsExecuted });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Director stem workflow failed.');
     } finally {
@@ -494,14 +503,14 @@ export const StemIntelligencePanel: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
             <label className="text-[10px] text-[#8B93A3]">Operating Mode
-              <select value={directorMode} disabled={directorRunning} onChange={(event) => setDirectorMode(event.target.value as DirectorOperatingMode)} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
+              <select value={directorMode} disabled={directorRunning} onChange={(event) => { setDirectorMode(event.target.value as DirectorOperatingMode); setDirectorReport(null); setDirectorPreview(null); }} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
                 <option value="manual">Manual · Plan only</option>
                 <option value="assisted">Assisted · One verified pass</option>
                 <option value="autonomous">Autonomous · Iterative refinement</option>
               </select>
             </label>
             <label className="text-[10px] text-[#8B93A3]">Mastering Objective
-              <select value={directorObjective} disabled={directorRunning} onChange={(event) => setDirectorObjective(event.target.value as MasteringObjectiveId)} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
+              <select value={directorObjective} disabled={directorRunning} onChange={(event) => { setDirectorObjective(event.target.value as MasteringObjectiveId); setDirectorReport(null); setDirectorPreview(null); }} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
                 <option value="streaming">Streaming</option>
                 <option value="commercial-loudness">Commercial Loudness</option>
                 <option value="dynamic">Dynamic</option>
@@ -538,7 +547,7 @@ export const StemIntelligencePanel: React.FC = () => {
                   ['Passes', String(directorReport.iterationsExecuted)],
                   ['LUFS', `${directorReport.preAnalysis.integratedLufs.toFixed(1)} → ${directorReport.postAnalysis.integratedLufs.toFixed(1)}`],
                   ['True Peak', `${directorReport.postAnalysis.truePeakDb.toFixed(2)} dBTP`],
-                  ['QC', directorReport.qcReport.pass ? 'PASS' : 'REVIEW'],
+                  ['QC', directorReport.qcReport.overallStatus === 'pass' ? 'PASS' : 'REVIEW'],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded border border-[#292D38] bg-[#171A22] p-2">
                     <div className="text-[9px] uppercase tracking-wider text-[#8B93A3]">{label}</div>
