@@ -677,3 +677,16 @@ test('15. Spectral zone levels and Director region levels share one log-frequenc
     'Spectral slope must use the actual octave distance between representative band centers',
   );
 });
+
+test('16. Low-mid diagnosis reports evidence strength and does not claim unmeasured limiter pumping', () => {
+  const analysis = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const diagnosis = analyzeTrackIntelligence(analysis, 'streaming');
+  const mud = diagnosis.findings.find((finding) => finding.id === 'diag-mud');
+
+  assert.ok(mud, 'The deliberately low-mid-heavy fixture should produce a diagnostic hypothesis');
+  assert.equal(mud.evidenceStrength, 'convergent');
+  assert.match(mud.title, /Potential/i);
+  assert.match(mud.explanation, /cannot confirm audible masking/i);
+  assert.doesNotMatch(mud.explanation, /forces the limiter to pump/i);
+  assert.match(mud.recommendedAction ?? '', /audition/i);
+});
