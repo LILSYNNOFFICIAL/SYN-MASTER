@@ -297,6 +297,8 @@ test('Rejects out-of-inventory aiRefineCallback output safely and continues dete
     operatingMode: 'autonomous',
     objectiveId: 'streaming',
     maxIterations: 2,
+    // Force the refinement path so this test actually exercises AI-chain rejection.
+    qcProfile: { ...QC_TARGET_PROFILES[0], minDynamicRangeDb: 100 },
     aiRefineCallback: async () => {
       return [
         {
