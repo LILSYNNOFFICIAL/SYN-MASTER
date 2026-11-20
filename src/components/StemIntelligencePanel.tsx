@@ -47,7 +47,10 @@ export const StemIntelligencePanel: React.FC = () => {
   const [stems, setStems] = useState<LoadedStem[]>([]);
   const [analysis, setAnalysis] = useState<StemSetAnalysis | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);\n  const [chainsByStemId, setChainsByStemId] = useState<Record<string, ProcessorModule[]>>({});\n  const [processedMix, setProcessedMix] = useState<StemBusMixResult | null>(null);\n  const [rendering, setRendering] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [chainsByStemId, setChainsByStemId] = useState<Record<string, ProcessorModule[]>>({});
+  const [processedMix, setProcessedMix] = useState<StemBusMixResult | null>(null);
+  const [rendering, setRendering] = useState(false);
 
   useEffect(() => () => {
     if (contextRef.current && contextRef.current.state !== 'closed') {
