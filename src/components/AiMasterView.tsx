@@ -643,6 +643,11 @@ export const AiMasterView: React.FC<Props> = ({
                             <div className="text-[10px] font-mono-tabular text-[#9CA3AF]">
                               Severity: {vf.updatedSeverity.toUpperCase()} · {vf.originalFinding.category}
                             </div>
+                            {vf.originalFinding.evidenceStrength && (
+                              <div className="text-[10px] font-mono-tabular text-[#93C5FD]">
+                                Evidence: {vf.originalFinding.evidenceStrength} spectral indicators
+                              </div>
+                            )}
                           </div>
                           <span
                             className={`text-[10px] font-mono-tabular font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap ${verificationBadgeClass(vf.status)}`}
