@@ -336,7 +336,7 @@ export function analyzeTrackIntelligence(
         ...(region150To400VsMid !== null ? { region150To400VsMid } : {}),
       },
       explanation:
-        'Measured low-mid/sub-bass energy is elevated relative to the midrange. This is a tonal-balance warning, not proof of audible masking or limiter pumping; confirm by listening in context or comparing stems.',
+        'Measured low-mid/sub-bass energy is elevated relative to the midrange. This is a tonal-balance warning; spectral ratios alone cannot confirm audible masking or limiter pumping. Confirm by listening in context or comparing stems.',
       recommendedAction:
         'Audition 150–400 Hz against vocal/snare. If masking is audible, try a small dynamic EQ reduction, then reanalyze the rendered audio.',
       evidenceStrength: mudEvidenceStrength,
