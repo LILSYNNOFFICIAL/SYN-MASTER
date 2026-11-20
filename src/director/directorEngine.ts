@@ -260,7 +260,6 @@ export function buildExplainableMasterPlan(input: {
   objectiveId: MasteringObjectiveId;
   customSpec?: Partial<CustomObjectiveSpec> | null;
   referenceAnalysis?: AudioAnalysis | null;
-  stemAnalysis?: StemSetAnalysis | null;
   externalPlugins?: ExternalPluginRecord[];
   hostConnected?: boolean;
   stemAnalysis?: StemSetAnalysis | null;
@@ -1365,6 +1364,7 @@ export interface RunAutonomousDirectorOptions {
   qcProfile?: QCTargetProfile | null;
   exportConfig?: ExportConfig | null;
   referenceAnalysis?: AudioAnalysis | null;
+  stemAnalysis?: StemSetAnalysis | null;
   externalPlugins?: ExternalPluginRecord[];
   hostConnected?: boolean;
   initialChain?: ProcessorModule[];
