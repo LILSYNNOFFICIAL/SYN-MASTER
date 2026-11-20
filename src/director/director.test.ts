@@ -435,8 +435,8 @@ test('Director renders isolated stem chains before applying its master-bus refin
       bands: [{ id: 'vocal-lowpass', enabled: true, shape: 'lowpass', freq: 1200, gain: 0, q: 0.71 }],
     },
   });
-  const dryMix = (await import('../dsp/stemBusRenderer')).renderStemBusMix(stemBuses, SR);
-  const dryAnalysis = (await dryMix).mixAnalysis;
+  const dryRender = await (await import('../dsp/stemBusRenderer')).renderStemBusMix(stemBuses, SR);
+  const dryAnalysis = dryRender.mixAnalysis;
   let passInputAnalysis: ReturnType<typeof analyzeAudioBuffer> | null = null;
 
   const report = await runAutonomousDirectorLoop({
@@ -447,8 +447,9 @@ test('Director renders isolated stem chains before applying its master-bus refin
     stemBuses,
     stemChainsById: { 'vocal-bus': [eq] },
     renderPassFn: async (channels, sampleRate) => {
-      passInputAnalysis = analyzeAudioBuffer(channels, sampleRate);
-      return { channels, analysis: passInputAnalysis };
+      const analysis = analyzeAudioBuffer(channels, sampleRate);
+      passInputAnalysis = analysis;
+      return { channels, analysis };
     },
   });
 
