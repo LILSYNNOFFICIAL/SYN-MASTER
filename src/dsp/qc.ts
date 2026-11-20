@@ -158,27 +158,51 @@ export function runQualityControl(
         : 'Enable Mono Bass (<100 Hz) and reduce Stereo Imager high/mid width.',
   });
 
-  // 6. Spectral Tilt & Tonal Balance
+  // 6. Spectral Change & Tonal Balance
   const bassMidDiff = post.zoneEnergyDb.bass - post.zoneEnergyDb.mid;
   const harshDiff = post.zoneEnergyDb.highMid - post.zoneEnergyDb.mid;
-  const spectralPass = bassMidDiff < 11 && harshDiff < 4.5;
+  const bassMidBefore = pre ? pre.zoneEnergyDb.bass - pre.zoneEnergyDb.mid : null;
+  const harshBefore = pre ? pre.zoneEnergyDb.highMid - pre.zoneEnergyDb.mid : null;
+  const bassMidDelta = bassMidBefore === null ? null : bassMidDiff - bassMidBefore;
+  const harshDelta = harshBefore === null ? null : harshDiff - harshBefore;
+  const bassMidRegressed = bassMidDelta !== null && bassMidDelta > 1.5;
+  const harshRegressed = harshDelta !== null && harshDelta > 1.5;
+  // With a source reference, judge what the mastering chain changed rather than
+  // penalizing an intentional bass-heavy or bright mix that it preserved.
+  // Without a source reference, retain broad screening guardrails.
+  const spectralPass = pre
+    ? !bassMidRegressed && !harshRegressed
+    : bassMidDiff < 11 && harshDiff < 4.5;
+  const spectralIssue = bassMidRegressed || (!harshRegressed && bassMidDiff >= 11)
+    ? 'bass'
+    : 'harsh';
+  const signedDelta = (value: number | null): string =>
+    value === null ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`;
   checks.push({
     id: 'qc-spectral',
     category: 'Spectral',
-    label: 'Tonal Balance & Harshness',
+    label: 'Spectral Change & Tonal Balance',
     status: spectralPass ? 'pass' : 'warning',
-    measuredValue: `Slope ${post.spectralSlopeDbPerOct.toFixed(1)} dB/oct`,
-    targetValue: 'Balanced sub/mid/presence ratio',
+    measuredValue:
+      `Slope ${post.spectralSlopeDbPerOct.toFixed(1)} dB/oct · Bass/Mid ${bassMidDiff.toFixed(1)} dB (Δ ${signedDelta(bassMidDelta)}) · High-Mid/Mid ${harshDiff.toFixed(1)} dB (Δ ${signedDelta(harshDelta)})`,
+    targetValue: pre
+      ? 'No >1.5 dB deterioration versus source'
+      : 'Bass/Mid <11 dB · High-Mid/Mid <4.5 dB',
     explanation: spectralPass
-      ? 'Spectral energy is well-distributed across low-end, midrange, and air bands.'
-      : bassMidDiff >= 11
-        ? 'Sub/bass energy is disproportionately heavy relative to midrange.'
-        : 'Upper-mid presence (2–6 kHz) shows elevated harshness energy.',
+      ? pre
+        ? 'Processing preserved the source tonal balance. Existing bass-heavy or bright character is not treated as a new mastering defect.'
+        : 'Spectral energy falls within broad screening guardrails.'
+      : spectralIssue === 'bass'
+        ? bassMidRegressed
+          ? `Processing increased bass relative to midrange by ${signedDelta(bassMidDelta)} versus the source. Audition the level-matched change before correcting it.`
+          : 'The source has strong bass relative to midrange. This tonal-balance observation is not proof of audible masking.'
+        : harshRegressed
+          ? `Processing increased upper-mid energy relative to midrange by ${signedDelta(harshDelta)} versus the source. Audition for added harshness before correcting it.`
+          : 'The source has elevated upper-mid energy relative to midrange. Confirm audible harshness before applying EQ.'
+    ,
     suggestedFix: spectralPass
       ? undefined
-      : bassMidDiff >= 11
-        ? 'Apply subtle Parametric EQ low-shelf cut (-1.5 dB @ 100 Hz).'
-        : 'Engage Dynamic EQ cut around 3.2–4.5 kHz.',
+      : 'Compare level-matched source and processed audio. If the tonal shift is unintended or audible, adjust the responsible processing stage and reanalyze.',
   });
 
   // 7. DC Offset
