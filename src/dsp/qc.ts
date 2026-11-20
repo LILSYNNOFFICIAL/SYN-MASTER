@@ -198,8 +198,7 @@ export function runQualityControl(
           : 'The source has strong bass relative to midrange. This tonal-balance observation is not proof of audible masking.'
         : harshRegressed
           ? `Processing increased upper-mid energy relative to midrange by ${signedDelta(harshDelta)} versus the source. Audition for added harshness before correcting it.`
-          : 'The source has elevated upper-mid energy relative to midrange. Confirm audible harshness before applying EQ.'
-    ,
+          : 'The source has elevated upper-mid energy relative to midrange. Confirm audible harshness before applying EQ.',
     suggestedFix: spectralPass
       ? undefined
       : 'Compare level-matched source and processed audio. If the tonal shift is unintended or audible, adjust the responsible processing stage and reanalyze.',
