@@ -437,7 +437,7 @@ test('Director renders isolated stem chains before applying its master-bus refin
   });
   const dryRender = await (await import('../dsp/stemBusRenderer')).renderStemBusMix(stemBuses, SR);
   const dryAnalysis = dryRender.mixAnalysis;
-  let passInputAnalysis: ReturnType<typeof analyzeAudioBuffer> | null = null;
+  const passInputChannels: Float32Array[][] = [];
 
   const report = await runAutonomousDirectorLoop({
     sourceChannels: makeBalancedStereo(0.6, 0.1),
@@ -448,13 +448,14 @@ test('Director renders isolated stem chains before applying its master-bus refin
     stemChainsById: { 'vocal-bus': [eq] },
     renderPassFn: async (channels, sampleRate) => {
       const analysis = analyzeAudioBuffer(channels, sampleRate);
-      passInputAnalysis = analysis;
+      passInputChannels.push(channels);
       return { channels, analysis };
     },
   });
 
-  assert.ok(passInputAnalysis);
-  assert.ok(passInputAnalysis!.rmsDb < dryAnalysis.rmsDb - 2, 'stem EQ should change the Director pass input before the master chain');
+  assert.equal(passInputChannels.length, 1);
+  const passInputAnalysis = analyzeAudioBuffer(passInputChannels[0], SR);
+  assert.ok(passInputAnalysis.rmsDb < dryAnalysis.rmsDb - 2, 'stem EQ should change the Director pass input before the master chain');
   assert.equal(report.stemIntelligence?.stemCount, 2);
   assert.deepEqual(report.stemIntelligence?.processingChains['vocal-bus'], ['parametric-eq']);
   assert.equal(report.stemIntelligence?.stems.find((stem) => stem.id === 'vocal-bus')?.processed, true);
