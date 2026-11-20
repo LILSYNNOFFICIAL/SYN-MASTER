@@ -32,7 +32,7 @@ export type WorkspaceTab =
   | 'qc'
   | 'plugins';
 
-export type LabSubTab = 'frequency' | 'dynamics' | 'stereo' | 'distortion';
+export type LabSubTab = 'frequency' | 'dynamics' | 'stereo' | 'distortion' | 'stems';
 
 export type EQBandShape = 'highpass' | 'lowshelf' | 'bell' | 'highshelf' | 'lowpass' | 'notch';
 
