@@ -17,6 +17,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import type {
+  AiChainLifecycleState,
   AIMasteringStrategy,
   AudioAnalysis,
   CustomObjectiveSpec,
@@ -41,6 +42,9 @@ interface Props {
   customObjective: CustomObjectiveSpec;
   useGeminiCloud: boolean;
   canUndo: boolean;
+  hasPreAiSnapshot: boolean;
+  aiChainAccepted: boolean | null;
+  aiLifecycleState: AiChainLifecycleState;
   aiStrategy: AIMasteringStrategy | null;
   directorPlan: ExplainableMasterPlan | null;
   directorReport: MasterFinalReport | null;
@@ -67,6 +71,8 @@ interface Props {
   onPauseToggle: () => void;
   onStopDirector: () => void;
   onUndoLast: () => void;
+  onAcceptAiChain: () => void;
+  onRestorePreAiChain: () => void;
   onApplyChain: (chain: ProcessorModule[]) => void;
   onApplyRecommendation: (rec: DirectorRecommendation) => void;
   onAuditionCheckpoint: (cp: DirectorCheckpoint) => void;
@@ -75,15 +81,23 @@ interface Props {
 
 const MODE_LABELS: Array<{ id: DirectorOperatingMode; label: string; desc: string }> = [
   { id: 'manual', label: 'Manual', desc: 'Analyze & explain plan only. Zero automatic rack edits.' },
-  { id: 'assisted', label: 'Assisted', desc: 'Approve individual recommendations or single verified pass.' },
-  { id: 'autonomous', label: 'Autonomous', desc: 'Closed-loop MASTER -> Render -> Analyze -> QC -> Refine.' },
+  { id: 'assisted', label: 'Assisted', desc: 'Single verified closed-loop pass with manual sign-off.' },
+  { id: 'autonomous', label: 'Autonomous', desc: 'Closed-loop CHAIN WITH AI -> Render -> Measure -> Refine.' },
 ];
 
 const OBJECTIVE_LABELS: Array<{ id: MasteringObjectiveId; label: string }> = [
+  { id: 'streaming', label: 'Streaming' },
+  { id: 'commercial-loudness', label: 'Commercial Loudness' },
+  { id: 'dynamic', label: 'Dynamic' },
+  { id: 'cinematic', label: 'Cinematic' },
+  { id: 'electronic', label: 'Electronic' },
+  { id: 'hip-hop', label: 'Hip-Hop' },
+  { id: 'pop', label: 'Pop' },
+  { id: 'acoustic', label: 'Acoustic' },
+  { id: 'vocal-focused', label: 'Vocal-Focused' },
   { id: 'transparent', label: 'Transparent' },
   { id: 'punchy', label: 'Punchy' },
   { id: 'warm', label: 'Warm' },
-  { id: 'streaming', label: 'Streaming' },
   { id: 'custom', label: 'Custom' },
 ];
 
@@ -96,6 +110,9 @@ export const AiMasterView: React.FC<Props> = ({
   customObjective,
   useGeminiCloud,
   canUndo,
+  hasPreAiSnapshot,
+  aiChainAccepted,
+  aiLifecycleState,
   aiStrategy,
   directorPlan,
   directorReport,
@@ -121,6 +138,8 @@ export const AiMasterView: React.FC<Props> = ({
   onPauseToggle,
   onStopDirector,
   onUndoLast,
+  onAcceptAiChain,
+  onRestorePreAiChain,
   onApplyChain,
   onApplyRecommendation,
   onAuditionCheckpoint,
@@ -151,14 +170,30 @@ export const AiMasterView: React.FC<Props> = ({
       <div className="p-4 rounded bg-[#111217] border border-[#D4AF37]/35 flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-[11px] font-mono-tabular uppercase tracking-wider text-[#D4AF37]">
-              Autonomous Mastering Intelligence
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-mono-tabular uppercase tracking-wider text-[#D4AF37]">
+                Autonomous Mastering Intelligence
+              </span>
+              <span
+                data-testid="ai-lifecycle-badge"
+                className={`px-2 py-0.5 rounded border text-[10px] font-mono-tabular font-bold uppercase ${
+                  aiLifecycleState === 'Completed'
+                    ? 'bg-[#10B981]/15 border-[#10B981]/40 text-[#34D399]'
+                    : aiLifecycleState === 'Failed' || aiLifecycleState === 'Stopped'
+                      ? 'bg-[#EF4444]/15 border-[#EF4444]/40 text-[#FCA5A5]'
+                      : aiLifecycleState === 'Ready'
+                        ? 'bg-[#181A22] border-[#2B2E3A] text-[#C5CDD8]'
+                        : 'bg-[#38BDF8]/15 border-[#38BDF8]/40 text-[#38BDF8]'
+                }`}
+              >
+                {aiLifecycleState}
+              </span>
             </div>
-            <h2 className="text-base font-bold text-[#F7F8FA]">
+            <h2 className="text-base font-bold text-[#F7F8FA] mt-0.5">
               SYN MASTER AI | Mastering Director
             </h2>
             <p className="text-xs text-[#9CA3AF]">
-              Analyzes real audio telemetry, executes structured DSP/VST3 commands, evaluates results via independent SYN-QC, and refines cleanly within safeguards.
+              Analyzes real audio telemetry, executes structured DSP/VST3 commands off-thread, evaluates results via independent SYN-QC, and refines cleanly within safeguards.
             </p>
           </div>
 
@@ -182,12 +217,12 @@ export const AiMasterView: React.FC<Props> = ({
             >
               <Sparkles className="w-3.5 h-3.5" />
               {directorRunning
-                ? `${directorStage || 'Mastering'}...`
+                ? `${aiLifecycleState || directorStage || 'Processing'}...`
                 : operatingMode === 'manual'
-                  ? 'Generate Plan (Manual)'
+                  ? 'CHAIN WITH AI (Plan Only)'
                   : operatingMode === 'assisted'
-                    ? 'MASTER (Assisted Pass)'
-                    : 'MASTER'}
+                    ? 'CHAIN WITH AI (Assisted)'
+                    : 'CHAIN WITH AI'}
             </button>
             {directorRunning && (
               <>
@@ -218,6 +253,16 @@ export const AiMasterView: React.FC<Props> = ({
               <Undo2 className="w-3.5 h-3.5" />
               Undo
             </button>
+            {hasPreAiSnapshot && !directorRunning && (
+              <button
+                type="button"
+                onClick={onRestorePreAiChain}
+                className="px-2.5 py-2 rounded bg-[#181A22] border border-[#F59E0B]/40 text-xs text-[#F59E0B] hover:border-[#F59E0B] flex items-center gap-1"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Restore Previous
+              </button>
+            )}
           </div>
         </div>
 
@@ -268,7 +313,7 @@ export const AiMasterView: React.FC<Props> = ({
                   key={obj.id}
                   type="button"
                   onClick={() => onChangeObjectiveId(obj.id)}
-                  className={`px-3 py-1.5 rounded border text-xs font-semibold ${
+                  className={`px-2.5 py-1 rounded border text-[11px] font-semibold whitespace-nowrap ${
                     objectiveId === obj.id
                       ? 'bg-[#D4AF37] text-[#070709] border-[#F2CA52]'
                       : 'bg-[#0C0D12] border-[#262934] text-[#C5CDD8] hover:border-[#D4AF37]/60'
@@ -765,6 +810,35 @@ export const AiMasterView: React.FC<Props> = ({
                     <span>DR {cp.analysis.dynamicRangeDb.toFixed(1)} dB</span>
                     <span>THD {cp.analysis.thdEstimatePercent.toFixed(2)}%</span>
                   </div>
+                  {cp.iterationSummary && (
+                    <div className="p-1.5 rounded bg-[#141720] border border-[#222634] text-[10px] font-mono-tabular flex flex-col gap-0.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#E2E8F0] truncate">
+                          Stage: {cp.iterationSummary.activeProcessor}
+                        </span>
+                        <span
+                          className={`uppercase font-bold ${
+                            cp.iterationSummary.outcome === 'converged' || cp.iterationSummary.outcome === 'improved'
+                              ? 'text-[#34D399]'
+                              : cp.iterationSummary.outcome === 'regressed'
+                                ? 'text-[#F59E0B]'
+                                : 'text-[#9CA3AF]'
+                          }`}
+                        >
+                          {cp.iterationSummary.outcome}
+                        </span>
+                      </div>
+                      <div className="text-[#9CA3AF] truncate">
+                        Focus: {cp.iterationSummary.detectedIssue}
+                      </div>
+                      <div className="text-[#F2CA52]">
+                        Measured: {cp.iterationSummary.measuredValue} | Target: {cp.iterationSummary.targetValue}
+                      </div>
+                      {cp.iterationSummary.previousValue && (
+                        <div className="text-[#6B7280]">Previous: {cp.iterationSummary.previousValue}</div>
+                      )}
+                    </div>
+                  )}
                   <div className="flex gap-2 pt-0.5">
                     <button
                       type="button"
@@ -835,32 +909,96 @@ export const AiMasterView: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Section 5: Final Mastering Report Summary */}
+      {/* Section 5: Final Optimization Report & Accept / Restore Workflow */}
       {directorReport && (
-        <div className="p-4 rounded bg-[#111217] border border-[#34D399]/35 flex flex-col gap-2 text-xs">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#34D399] flex items-center gap-1.5">
-              <Check className="w-4 h-4" />
-              Final Mastering Report ({directorReport.objective.label} · {directorReport.iterationsExecuted} Pass(es))
-            </h3>
-            <span className="font-mono-tabular text-[#9CA3AF]">
-              Best Pass #{directorReport.bestPassNumber} · QC {directorReport.qcReport.overallStatus.toUpperCase()}
-            </span>
+        <div
+          data-testid="ai-optimization-report"
+          className="p-4 rounded bg-[#111217] border border-[#34D399]/35 flex flex-col gap-3 text-xs"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#34D399] flex items-center gap-1.5">
+                <Check className="w-4 h-4" />
+                Final Optimization Report ({directorReport.objective.label} · {directorReport.iterationsExecuted} Pass(es))
+              </h3>
+              <span className="font-mono-tabular text-[11px] text-[#9CA3AF]">
+                Best Pass #{directorReport.bestPassNumber} · QC {directorReport.qcReport.overallStatus.toUpperCase()} · {directorReport.stopReason}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="ai-accept-chain-btn"
+                onClick={onAcceptAiChain}
+                className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 border ${
+                  aiChainAccepted === true
+                    ? 'bg-[#10B981]/20 border-[#34D399] text-[#34D399]'
+                    : 'bg-[#D4AF37] border-[#F2CA52] text-[#070709] hover:bg-[#F2CA52]'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {aiChainAccepted === true ? 'Chain Accepted' : 'Accept Final Chain'}
+              </button>
+              {hasPreAiSnapshot && (
+                <button
+                  type="button"
+                  data-testid="ai-restore-previous-btn"
+                  onClick={onRestorePreAiChain}
+                  className="px-3 py-1.5 rounded bg-[#181A22] border border-[#F59E0B]/50 text-xs font-semibold text-[#F59E0B] hover:bg-[#F59E0B]/10 flex items-center gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Restore Previous Chain
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={!canUndo}
+                onClick={onUndoLast}
+                className="px-2.5 py-1.5 rounded bg-[#181A22] border border-[#2B2E3A] text-xs text-[#C5CDD8] hover:border-[#D4AF37] disabled:opacity-35 flex items-center gap-1"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+                Undo
+              </button>
+            </div>
           </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="p-2.5 rounded bg-[#0C0D12] border border-[#1E222B]">
-              <div className="font-semibold text-[#34D399] mb-1">Verified Before/After Delta</div>
+              <div className="font-semibold text-[#34D399] mb-1">Problems Detected &amp; Resolved</div>
               <ul className="list-disc list-inside text-[#C5CDD8] flex flex-col gap-0.5">
-                {directorReport.verifiedImprovements.map((imp, i) => (
-                  <li key={i}>{imp}</li>
+                {(directorReport.resolvedProblems.length > 0
+                  ? directorReport.resolvedProblems
+                  : directorReport.verifiedImprovements
+                ).map((item, i) => (
+                  <li key={i}>{item}</li>
                 ))}
               </ul>
             </div>
+
             <div className="p-2.5 rounded bg-[#0C0D12] border border-[#1E222B]">
-              <div className="font-semibold text-[#F2CA52] mb-1">Remaining Tradeoffs &amp; Notes</div>
+              <div className="font-semibold text-[#F59E0B] mb-1">Partially Resolved / Remaining Tradeoffs</div>
               <ul className="list-disc list-inside text-[#C5CDD8] flex flex-col gap-0.5">
-                {directorReport.remainingTradeoffs.map((tr, i) => (
+                {[...directorReport.partiallyResolvedProblems, ...directorReport.remainingTradeoffs].map((tr, i) => (
                   <li key={i}>{tr}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="p-2.5 rounded bg-[#0C0D12] border border-[#1E222B]">
+              <div className="font-semibold text-[#38BDF8] mb-1">Preserved Original Character</div>
+              <ul className="list-disc list-inside text-[#C5CDD8] flex flex-col gap-0.5">
+                {directorReport.preservedCharacteristics.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="p-2.5 rounded bg-[#0C0D12] border border-[#1E222B]">
+              <div className="font-semibold text-[#F2CA52] mb-1">Verified Before/After Telemetry</div>
+              <ul className="list-disc list-inside text-[#C5CDD8] flex flex-col gap-0.5">
+                {directorReport.verifiedImprovements.map((imp, i) => (
+                  <li key={i}>{imp}</li>
                 ))}
               </ul>
             </div>

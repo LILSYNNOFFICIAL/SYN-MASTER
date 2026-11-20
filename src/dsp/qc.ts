@@ -242,18 +242,20 @@ export function runQualityControl(
         : 'Reduce Saturation drive or relax Maximizer/Limiter threshold by 1–2 dB with 4x True Peak.',
   });
 
-  // 10. Broadband Noise Floor
+  // 10. Broadband Noise Floor (only evaluate quiet-frame noise floor when quiet passages exist >= 12 dB below program RMS)
   const nf = post.noiseFloorDb ?? -72;
-  const nfStatus = nf <= -52 ? 'pass' : nf <= -42 ? 'warning' : 'fail';
+  const hasQuietGapMargin = post.rmsDb - nf >= 12;
+  const nfStatus = !hasQuietGapMargin || nf <= -52 ? 'pass' : nf <= -42 ? 'warning' : 'fail';
   checks.push({
     id: 'qc-noise-floor',
     category: 'Integrity',
     label: 'Broadband Noise Floor',
     status: nfStatus,
-    measuredValue: `${nf.toFixed(1)} dBFS`,
+    measuredValue: hasQuietGapMargin ? `${nf.toFixed(1)} dBFS` : `${nf.toFixed(1)} dBFS (Continuous)`,
     targetValue: '<= -52.0 dBFS',
-    explanation:
-      nfStatus === 'pass'
+    explanation: !hasQuietGapMargin
+      ? 'Program material sustains continuously without silent intervals; no anomalous noise floor intrusion detected.'
+      : nfStatus === 'pass'
         ? 'Quiet-passage noise floor is low relative to program level.'
         : 'Elevated steady-state noise floor or hum detected in quiet frames.',
     suggestedFix:

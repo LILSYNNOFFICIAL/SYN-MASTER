@@ -41,7 +41,8 @@ interface Props {
   telemetry?: ProcessorMeterTelemetry;
   guidedMode?: boolean;
   hostConnected?: boolean;
-  onUpdate: (updated: ProcessorModule) => void;
+  onUpdate?: (updated: ProcessorModule) => void;
+  onUpdateAt?: (index: number, updated: ProcessorModule) => void;
   onMove: (index: number, dir: -1 | 1) => void;
   onDuplicate: (index: number) => void;
   onRemove: (index: number) => void;
@@ -51,7 +52,7 @@ interface Props {
   onToggleExternalBypass?: (module: ProcessorModule) => void | Promise<void>;
 }
 
-export const ProcessorModuleCard: React.FC<Props> = ({
+export const ProcessorModuleCard: React.FC<Props> = React.memo(({
   module,
   index,
   total,
@@ -59,6 +60,7 @@ export const ProcessorModuleCard: React.FC<Props> = ({
   guidedMode,
   hostConnected = false,
   onUpdate,
+  onUpdateAt,
   onMove,
   onDuplicate,
   onRemove,
@@ -69,8 +71,13 @@ export const ProcessorModuleCard: React.FC<Props> = ({
 }) => {
   const isActive = module.enabled && !module.bypassed;
 
+  const commitUpdate = (updated: ProcessorModule) => {
+    if (onUpdateAt) onUpdateAt(index, updated);
+    else onUpdate?.(updated);
+  };
+
   const setParam = <T extends ProcessorModule['params']>(patch: Partial<T>) => {
-    onUpdate({
+    commitUpdate({
       ...module,
       params: { ...(module.params as T), ...patch },
     });
@@ -97,7 +104,7 @@ export const ProcessorModuleCard: React.FC<Props> = ({
               if (module.type === 'external-vst3' && onToggleExternalBypass) {
                 void onToggleExternalBypass(module);
               } else {
-                onUpdate({ ...module, bypassed: !module.bypassed });
+                commitUpdate({ ...module, bypassed: !module.bypassed });
               }
             }}
           />
@@ -106,7 +113,7 @@ export const ProcessorModuleCard: React.FC<Props> = ({
             type="button"
             aria-label={`Toggle ${module.name} parameters`}
             aria-expanded={module.expanded}
-            onClick={() => onUpdate({ ...module, expanded: !module.expanded })}
+            onClick={() => commitUpdate({ ...module, expanded: !module.expanded })}
             className="flex items-center gap-1 text-left min-w-0 flex-1"
           >
             {module.expanded ? (
@@ -158,7 +165,7 @@ export const ProcessorModuleCard: React.FC<Props> = ({
             onClick={() => {
               if (module.type === 'external-vst3') {
                 const ep = module.params as ExternalVST3Params;
-                onUpdate({
+                commitUpdate({
                   ...module,
                   intensity: 100,
                   wetDry: 100,
@@ -174,7 +181,7 @@ export const ProcessorModuleCard: React.FC<Props> = ({
                 }
                 return;
               }
-              onUpdate({
+              commitUpdate({
                 ...module,
                 intensity: 100,
                 wetDry: 100,
@@ -210,7 +217,7 @@ export const ProcessorModuleCard: React.FC<Props> = ({
           unit="%"
           precision={0}
           compact
-          onChange={(v) => onUpdate({ ...module, intensity: v })}
+          onChange={(v) => commitUpdate({ ...module, intensity: v })}
         />
         <HorizontalSlider
           label="Wet / Dry Mix"
@@ -222,7 +229,7 @@ export const ProcessorModuleCard: React.FC<Props> = ({
           unit="%"
           precision={0}
           compact
-          onChange={(v) => onUpdate({ ...module, wetDry: v })}
+          onChange={(v) => commitUpdate({ ...module, wetDry: v })}
         />
       </div>
 
@@ -269,7 +276,7 @@ export const ProcessorModuleCard: React.FC<Props> = ({
                 unit="dB"
                 bipolar
                 heightPx={76}
-                onChange={(v) => onUpdate({ ...module, inputGainDb: v })}
+                onChange={(v) => commitUpdate({ ...module, inputGainDb: v })}
               />
               <VerticalFader
                 label="Out Trim"
@@ -281,7 +288,7 @@ export const ProcessorModuleCard: React.FC<Props> = ({
                 unit="dB"
                 bipolar
                 heightPx={76}
-                onChange={(v) => onUpdate({ ...module, outputGainDb: v })}
+                onChange={(v) => commitUpdate({ ...module, outputGainDb: v })}
               />
             </div>
 
@@ -1426,4 +1433,4 @@ export const ProcessorModuleCard: React.FC<Props> = ({
       )}
     </div>
   );
-};
+});

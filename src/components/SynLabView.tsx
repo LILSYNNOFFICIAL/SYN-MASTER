@@ -10,7 +10,6 @@ interface Props {
   preAnalysis: AudioAnalysis | null;
   postAnalysis: AudioAnalysis | null;
   chain: ProcessorModule[];
-  allowLiveTelemetry?: boolean;
   postChannels: Float32Array[] | null;
   sampleRate: number;
 }
@@ -27,11 +26,10 @@ const MetricCard: React.FC<{ label: string; value: string; delta?: string }> = (
   </div>
 );
 
-export const SynLabView: React.FC<Props> = ({
+export const SynLabView: React.FC<Props> = React.memo(({
   preAnalysis,
   postAnalysis,
   chain,
-  allowLiveTelemetry = true,
   postChannels,
   sampleRate,
 }) => {
@@ -92,7 +90,6 @@ export const SynLabView: React.FC<Props> = ({
             preAnalysis={preAnalysis}
             postAnalysis={postAnalysis}
             chain={chain}
-            allowLiveTelemetry={allowLiveTelemetry}
             sampleRate={sampleRate}
             mode="spectrum"
             heightClass="h-64"
@@ -199,7 +196,9 @@ export const SynLabView: React.FC<Props> = ({
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37] mb-2">
               Goniometer Vectorscope (M/S Phase Polarity)
             </h3>
-            <VectorscopeCanvas channels={postChannels ?? undefined} />
+            <VectorscopeCanvas
+              channels={postChannels ?? undefined}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3 content-start">
             <MetricCard
@@ -252,4 +251,4 @@ export const SynLabView: React.FC<Props> = ({
       )}
     </div>
   );
-};
+});

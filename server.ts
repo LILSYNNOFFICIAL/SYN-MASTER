@@ -3,42 +3,66 @@ import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRateLimiter } from './src/server/requestLimiter.mjs';
 import {
   AiConfigError,
   AiTimeoutError,
   generateGeminiMasterStrategy,
   refineGeminiIteration,
 } from './src/server/aiMastering.ts';
-import { validateChainAgainstInventory } from './src/director/processorInventory.ts';
 import { isValidAnalysisPayload, sanitizeAvailablePlugins } from './src/server/aiPayloadValidation.ts';
+import { createRateLimiter } from './src/server/requestLimiter.mjs';
+import { validateChainAgainstInventory } from './src/director/processorInventory.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
-// Only trust a known number of reverse-proxy hops. Leave unset when the
-// deployment topology is unknown; do not blindly trust client-supplied XFF.
+// Only trust a known number of reverse-proxy hops. Leave unset when the deployment topology is unknown.
 const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
 if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0 && trustedProxyHops <= 5) {
   app.set('trust proxy', trustedProxyHops);
 }
 
-// Apply the AI limiter before parsing request bodies. This ensures repeated
-// oversized or malformed requests cannot consume JSON parsing work indefinitely.
-const allowAiRequest = createRateLimiter({ limit: 20, windowMs: 60_000 });
-app.use('/api/ai', (req, res, next) => {
-  const key = req.ip || req.socket.remoteAddress || 'unknown';
-  const result = allowAiRequest(key);
+const allowAiRequest = createRateLimiter({ limit: 20, windowMs: 60_000, maxKeys: 10_000 });
+
+function aiRateLimiter(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+): void {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const result = allowAiRequest(ip);
+  res.setHeader('X-RateLimit-Limit', '20');
+  res.setHeader('X-RateLimit-Remaining', String(result.remaining));
   if (!result.allowed) {
-    res.setHeader('Retry-After', String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))));
-    res.status(429).json({ error: 'AI request limit reached. Please wait before trying again.' });
+    const retryAfterSec = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
+    res.setHeader('Retry-After', String(retryAfterSec));
+    res.status(429).json({ error: 'Rate limit exceeded. Try again shortly.' });
     return;
   }
   next();
-});
-
+}
+// Apply the AI limiter before JSON parsing so malformed or oversized requests are rate-limited too.
+app.use('/api/ai', aiRateLimiter);
 app.use(express.json({ limit: '4mb' }));
+
+function sendSanitizedAiError(res: express.Response, err: unknown): void {
+  if (err instanceof AiConfigError) {
+    res.status(503).json({ error: err.message });
+    return;
+  }
+  if (err instanceof AiTimeoutError) {
+    res.status(504).json({ error: err.message });
+    return;
+  }
+  if (err instanceof SyntaxError) {
+    res.status(502).json({ error: 'AI returned malformed strategy JSON.' });
+    return;
+  }
+  const msg = err instanceof Error ? err.message : 'AI mastering request failed.';
+  console.error('[SYN-AI] Endpoint error:', msg);
+  res.status(500).json({ error: 'AI mastering service could not complete the request.' });
+}
 
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -46,6 +70,7 @@ app.get('/api/health', (_req, res) => {
     aiConfigured: Boolean(process.env.GEMINI_API_KEY),
   });
 });
+
 
 app.post('/api/ai/master', async (req, res) => {
   try {
@@ -61,17 +86,18 @@ app.post('/api/ai/master', async (req, res) => {
       availablePlugins,
     } = req.body ?? {};
     if (!isValidAnalysisPayload(analysis)) {
-      res.status(400).json({ error: 'Valid complete audio analysis telemetry is required.' });
+      res.status(400).json({ error: 'Valid audio analysis telemetry is required.' });
+      return;
+    }
+    if (
+      targetLufs !== undefined &&
+      (typeof targetLufs !== 'number' || !Number.isFinite(targetLufs) || targetLufs < -30 || targetLufs > -3)
+    ) {
+      res.status(400).json({ error: 'targetLufs must be a finite number between -30 and -3.' });
       return;
     }
     if (referenceAnalysis !== undefined && referenceAnalysis !== null && !isValidAnalysisPayload(referenceAnalysis)) {
       res.status(400).json({ error: 'Invalid reference analysis telemetry.' });
-      return;
-    }
-    if (targetLufs !== undefined && (
-      typeof targetLufs !== 'number' || !Number.isFinite(targetLufs) || targetLufs < -30 || targetLufs > -3
-    )) {
-      res.status(400).json({ error: 'targetLufs must be a finite number between -30 and -3.' });
       return;
     }
     const pluginResult = sanitizeAvailablePlugins(availablePlugins);
@@ -79,6 +105,7 @@ app.post('/api/ai/master', async (req, res) => {
       res.status(400).json({ error: pluginResult.error });
       return;
     }
+    const safePlugins = pluginResult.value;
 
     const strategy = await generateGeminiMasterStrategy({
       analysis,
@@ -89,20 +116,11 @@ app.post('/api/ai/master', async (req, res) => {
       targetLufs,
       userGenreOverride: typeof userGenreOverride === 'string' ? userGenreOverride.slice(0, 60) : undefined,
       referenceAnalysis,
-      availablePlugins: pluginResult.value,
+      availablePlugins: safePlugins,
     });
     res.json({ strategy });
   } catch (err) {
-    if (err instanceof AiConfigError) {
-      res.status(503).json({ error: 'AI mastering is not configured on this server.' });
-      return;
-    }
-    if (err instanceof AiTimeoutError) {
-      res.status(504).json({ error: 'AI mastering timed out. Please try again.' });
-      return;
-    }
-    console.error('[SYN MASTER] AI mastering request failed:', err);
-    res.status(502).json({ error: 'AI mastering is temporarily unavailable. Please try again.' });
+    sendSanitizedAiError(res, err);
   }
 });
 
@@ -123,9 +141,11 @@ app.post('/api/ai/refine', async (req, res) => {
       !Array.isArray(currentChain) ||
       currentChain.length > 12
     ) {
-      res.status(400).json({ error: 'Valid pre/post analysis and a currentChain of at most 12 processors are required.' });
+      res.status(400).json({ error: 'Valid pre/post analysis and currentChain (<= 12 stages) are required.' });
       return;
     }
+    const parsedTargetLufs = Number(targetLufs ?? -14);
+    const parsedTargetTp = Number(targetTruePeakDb ?? -1.0);
     if (
       (targetLufs !== undefined && (typeof targetLufs !== 'number' || !Number.isFinite(targetLufs) || targetLufs < -30 || targetLufs > -3)) ||
       (targetTruePeakDb !== undefined && (typeof targetTruePeakDb !== 'number' || !Number.isFinite(targetTruePeakDb) || targetTruePeakDb < -6 || targetTruePeakDb > 0))
@@ -145,23 +165,14 @@ app.post('/api/ai/refine', async (req, res) => {
       preAnalysis,
       postAnalysis,
       currentChain: chainValidation.sanitizedChain,
-      targetLufs: targetLufs ?? -14,
-      targetTruePeakDb: targetTruePeakDb ?? -1.0,
+      targetLufs: parsedTargetLufs,
+      targetTruePeakDb: parsedTargetTp,
       preserveDynamics: preserveDynamics !== false,
       qcReport,
     });
     res.json({ refined });
   } catch (err) {
-    if (err instanceof AiConfigError) {
-      res.status(503).json({ error: 'AI mastering is not configured on this server.' });
-      return;
-    }
-    if (err instanceof AiTimeoutError) {
-      res.status(504).json({ error: 'AI refinement timed out. Please try again.' });
-      return;
-    }
-    console.error('[SYN MASTER] AI refinement request failed:', err);
-    res.status(502).json({ error: 'AI refinement is temporarily unavailable. Please try again.' });
+    sendSanitizedAiError(res, err);
   }
 });
 

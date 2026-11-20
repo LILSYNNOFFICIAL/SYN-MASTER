@@ -1,5 +1,5 @@
-import type { ChainCommand, ProcessorModule, ProcessorType } from '../types/mastering.ts';
-import { PROCESSOR_DEFAULT_NAMES, createDefaultParams, validateChain } from '../dsp/chainValidation.ts';
+import type { ChainCommand, ProcessorModule, ProcessorType } from '../types/mastering';
+import { PROCESSOR_DEFAULT_NAMES, createDefaultParams, validateChain } from '../dsp/chainValidation';
 
 export interface InventoryParamBound {
   min?: number;

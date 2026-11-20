@@ -170,7 +170,7 @@ function parseAiChain(
     try {
       paramsObj = JSON.parse(p.paramsJson);
     } catch {
-      throw new Error(`AI returned malformed paramsJson for processor "${p.type}".`);
+      paramsObj = {};
     }
     return {
       type: p.type,

@@ -35,7 +35,7 @@ interface Props {
 
 type LibraryTab = 'audio' | 'presets' | 'chains' | 'projects';
 
-export const LeftLibraryPanel: React.FC<Props> = ({
+export const LeftLibraryPanel: React.FC<Props> = React.memo(({
   activeTrack,
   referenceTrack,
   presets,
@@ -344,4 +344,4 @@ export const LeftLibraryPanel: React.FC<Props> = ({
       </div>
     </aside>
   );
-};
+});
