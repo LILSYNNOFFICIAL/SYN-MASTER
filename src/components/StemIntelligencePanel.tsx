@@ -47,7 +47,7 @@ export const StemIntelligencePanel: React.FC = () => {
   const [stems, setStems] = useState<LoadedStem[]>([]);
   const [analysis, setAnalysis] = useState<StemSetAnalysis | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);\n  const [chainsByStemId, setChainsByStemId] = useState<Record<string, ProcessorModule[]>>({});\n  const [processedMix, setProcessedMix] = useState<StemBusMixResult | null>(null);\n  const [rendering, setRendering] = useState(false);
 
   useEffect(() => () => {
     if (contextRef.current && contextRef.current.state !== 'closed') {
@@ -99,6 +99,77 @@ export const StemIntelligencePanel: React.FC = () => {
   const removeStem = (id: string) => {
     setStems((current) => current.filter((stem) => stem.id !== id));
     setAnalysis(null);
+  };
+
+  const addProcessor = (stemId: string, type: ProcessorType) => {
+    const module = createProcessorModule(type);
+    setChainsByStemId((current) => ({
+      ...current,
+      [stemId]: [...(current[stemId] ?? []), module],
+    }));
+    setProcessedMix(null);
+  };
+
+  const updateProcessor = (stemId: string, moduleId: string, patch: Partial<ProcessorModule>) => {
+    setChainsByStemId((current) => ({
+      ...current,
+      [stemId]: (current[stemId] ?? []).map((module) => module.id === moduleId ? { ...module, ...patch } : module),
+    }));
+    setProcessedMix(null);
+  };
+
+  const removeProcessor = (stemId: string, moduleId: string) => {
+    setChainsByStemId((current) => ({
+      ...current,
+      [stemId]: (current[stemId] ?? []).filter((module) => module.id !== moduleId),
+    }));
+    setProcessedMix(null);
+  };
+
+  const updateEqBand = (stemId: string, moduleId: string, bandIndex: number, patch: Partial<ParametricEQParams['bands'][number]>) => {
+    setChainsByStemId((current) => ({
+      ...current,
+      [stemId]: (current[stemId] ?? []).map((module) => {
+        if (module.id !== moduleId || module.type !== 'parametric-eq') return module;
+        const params = module.params as ParametricEQParams;
+        return {
+          ...module,
+          params: {
+            ...params,
+            bands: params.bands.map((band, index) => index === bandIndex ? { ...band, ...patch } : band),
+          },
+        };
+      }),
+    }));
+    setProcessedMix(null);
+  };
+
+  const renderProcessedMix = async () => {
+    if (stems.length === 0) return;
+    setRendering(true);
+    setError(null);
+    setProcessedMix(null);
+    try {
+      const sampleRate = stems[0].sampleRate ?? 0;
+      const result = await renderStemBusMix(stems, sampleRate, { chainsByStemId });
+      setProcessedMix(result);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Stem bus render failed.');
+    } finally {
+      setRendering(false);
+    }
+  };
+
+  const playProcessedMix = () => {
+    if (!processedMix || !contextRef.current) return;
+    const context = contextRef.current;
+    const buffer = context.createBuffer(2, processedMix.mixChannels[0].length, processedMix.sampleRate);
+    buffer.copyToChannel(processedMix.mixChannels[0], 0);
+    buffer.copyToChannel(processedMix.mixChannels[1], 1);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.start();
   };
 
   const runAnalysis = () => {
@@ -208,6 +279,155 @@ export const StemIntelligencePanel: React.FC = () => {
               <ScanSearch size={14} /> Analyze Stem Set
             </button>
           </div>
+        </section>
+      )}
+
+      {stems.length > 0 && (
+        <section className="rounded-lg border border-[#292D38] bg-[#111217] p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">Independent Stem Processing</h4>
+              <p className="mt-1 text-[10px] text-[#8B93A3]">Each rack processes only its assigned stem. No master-bus correction is substituted.</p>
+            </div>
+            <button
+              type="button"
+              disabled={rendering || busy}
+              onClick={() => void renderProcessedMix()}
+              className="inline-flex items-center gap-2 rounded-md bg-[#D4AF37] px-4 py-2 text-xs font-bold text-[#08090B] hover:bg-[#E6C65C] disabled:opacity-50"
+            >
+              {rendering ? <Loader2 size={14} className="animate-spin" /> : <AudioLines size={14} />}
+              {rendering ? 'Rendering Buses…' : 'Render Processed Mix'}
+            </button>
+          </div>
+          <div className="flex flex-col gap-3">
+            {stems.map((stem) => {
+              const chain = chainsByStemId[stem.id] ?? [];
+              return (
+                <div key={stem.id} className="rounded border border-[#252A35] bg-[#171A22] p-3">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-[#F7F8FA]">{stem.name} <span className="ml-1 text-[10px] font-normal uppercase text-[#8B93A3]">{stem.role} BUS</span></div>
+                    <select
+                      aria-label={`Add processor to ${stem.name}`}
+                      value=""
+                      onChange={(event) => {
+                        if (event.target.value) addProcessor(stem.id, event.target.value as ProcessorType);
+                        event.target.value = '';
+                      }}
+                      className="rounded border border-[#343A49] bg-[#0C0E13] px-2 py-1.5 text-[11px] text-[#E5E7EB]"
+                    >
+                      <option value="">+ Add processor…</option>
+                      <option value="parametric-eq">Parametric EQ</option>
+                      <option value="dynamic-eq">Dynamic EQ</option>
+                      <option value="compressor">Compressor</option>
+                      <option value="multiband-comp">Multiband Compressor</option>
+                      <option value="stereo-imager">Stereo Imager</option>
+                      <option value="saturation">Saturation</option>
+                      <option value="limiter">Limiter</option>
+                    </select>
+                  </div>
+                  {chain.length === 0 ? (
+                    <p className="text-[10px] text-[#727B8B]">Dry bus · no processors assigned.</p>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {chain.map((module) => (
+                        <div key={module.id} className="rounded border border-[#303746] bg-[#10131A] p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={!module.bypassed}
+                                onChange={(event) => updateProcessor(stem.id, module.id, { bypassed: !event.target.checked })}
+                                aria-label={`Enable ${module.name}`}
+                              />
+                              <span className="text-[11px] font-semibold text-[#E5E7EB]">{module.name}</span>
+                              <span className="text-[9px] uppercase text-[#727B8B]">{module.type}</span>
+                            </div>
+                            <button type="button" onClick={() => removeProcessor(stem.id, module.id)} className="rounded px-2 py-1 text-[10px] text-[#9CA3AF] hover:bg-red-500/10 hover:text-red-300">Remove</button>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-3 md:grid-cols-4">
+                            <label className="text-[9px] text-[#8B93A3]">Intensity {module.intensity}%
+                              <input type="range" min="0" max="100" value={module.intensity} onChange={(event) => updateProcessor(stem.id, module.id, { intensity: Number(event.target.value) })} className="mt-1 w-full" />
+                            </label>
+                            <label className="text-[9px] text-[#8B93A3]">Wet {module.wetDry}%
+                              <input type="range" min="0" max="100" value={module.wetDry} onChange={(event) => updateProcessor(stem.id, module.id, { wetDry: Number(event.target.value) })} className="mt-1 w-full" />
+                            </label>
+                            <label className="text-[9px] text-[#8B93A3]">Input {module.inputGainDb.toFixed(1)} dB
+                              <input type="range" min="-12" max="12" step="0.1" value={module.inputGainDb} onChange={(event) => updateProcessor(stem.id, module.id, { inputGainDb: Number(event.target.value) })} className="mt-1 w-full" />
+                            </label>
+                            <label className="text-[9px] text-[#8B93A3]">Output {module.outputGainDb.toFixed(1)} dB
+                              <input type="range" min="-12" max="12" step="0.1" value={module.outputGainDb} onChange={(event) => updateProcessor(stem.id, module.id, { outputGainDb: Number(event.target.value) })} className="mt-1 w-full" />
+                            </label>
+                          </div>
+                          {module.type === 'parametric-eq' && (
+                            <div className="mt-3 flex flex-col gap-2">
+                              {(module.params as ParametricEQParams).bands.map((band, index) => (
+                                <div key={band.id} className="grid grid-cols-[28px_minmax(0,1fr)_90px_80px] items-center gap-2">
+                                  <input type="checkbox" checked={band.enabled} onChange={(event) => updateEqBand(stem.id, module.id, index, { enabled: event.target.checked })} aria-label={`Enable EQ band ${band.id}`} />
+                                  <span className="text-[9px] uppercase text-[#8B93A3]">{band.shape}</span>
+                                  <label className="text-[9px] text-[#8B93A3]">Hz
+                                    <input type="number" min="20" max="19500" value={band.freq} onChange={(event) => updateEqBand(stem.id, module.id, index, { freq: Number(event.target.value) })} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-1.5 py-1 font-mono-tabular text-[10px] text-[#E5E7EB]" />
+                                  </label>
+                                  <label className="text-[9px] text-[#8B93A3]">dB
+                                    <input type="number" min="-12" max="12" step="0.1" value={band.gain} onChange={(event) => updateEqBand(stem.id, module.id, index, { gain: Number(event.target.value) })} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-1.5 py-1 font-mono-tabular text-[10px] text-[#E5E7EB]" />
+                                  </label>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {module.type === 'compressor' && (
+                            <div className="mt-3 grid grid-cols-2 gap-3">
+                              <label className="text-[9px] text-[#8B93A3]">Threshold {(module.params as CompressorParams).thresholdDb.toFixed(1)} dB
+                                <input type="range" min="-40" max="0" step="0.5" value={(module.params as CompressorParams).thresholdDb} onChange={(event) => updateProcessor(stem.id, module.id, { params: { ...(module.params as CompressorParams), thresholdDb: Number(event.target.value) } })} className="mt-1 w-full" />
+                              </label>
+                              <label className="text-[9px] text-[#8B93A3]">Ratio {(module.params as CompressorParams).ratio.toFixed(1)}:1
+                                <input type="range" min="1" max="10" step="0.1" value={(module.params as CompressorParams).ratio} onChange={(event) => updateProcessor(stem.id, module.id, { params: { ...(module.params as CompressorParams), ratio: Number(event.target.value) } })} className="mt-1 w-full" />
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {processedMix && (
+        <section className="rounded-lg border border-[#D4AF37]/30 bg-[#111217] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">Processed Stem Mix</h4>
+              <p className="mt-1 text-[10px] text-[#8B93A3]">{processedMix.stems.length} independent buses · {processedMix.durationSec.toFixed(2)} sec · {processedMix.sampleRate.toLocaleString()} Hz</p>
+            </div>
+            <button type="button" onClick={playProcessedMix} className="rounded-md border border-[#D4AF37]/40 px-3 py-2 text-xs font-semibold text-[#E5E7EB] hover:bg-[#D4AF37]/10">▶ Preview Mix</button>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[
+              ['Integrated', `${processedMix.mixAnalysis.integratedLufs.toFixed(1)} LUFS`],
+              ['True Peak', `${processedMix.mixAnalysis.truePeakDb.toFixed(2)} dBTP`],
+              ['Sample Peak', `${processedMix.mixAnalysis.samplePeakDb.toFixed(2)} dBFS`],
+              ['Clipped Samples', String(processedMix.mixAnalysis.clippedSamples)],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded border border-[#292D38] bg-[#171A22] p-3">
+                <div className="text-[10px] uppercase tracking-wider text-[#8B93A3]">{label}</div>
+                <div className="mt-1 font-mono-tabular text-base font-bold text-[#F7F8FA]">{value}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-col gap-1">
+            {processedMix.stems.map((stem) => (
+              <div key={stem.id} className="flex items-center justify-between border-b border-[#252A35] py-2 text-[10px]">
+                <span className="text-[#E5E7EB]">{stem.name} · {stem.chain.length} processor(s)</span>
+                <span className="font-mono-tabular text-[#AAB2C0]">{stem.analysis.integratedLufs.toFixed(1)} LUFS · {stem.analysis.truePeakDb.toFixed(2)} dBTP</span>
+              </div>
+            ))}
+          </div>
+          {processedMix.warnings.map((warning) => (
+            <div key={warning} className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2 text-[10px] text-amber-200">{warning}</div>
+          ))}
         </section>
       )}
 
