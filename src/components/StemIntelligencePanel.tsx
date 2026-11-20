@@ -174,8 +174,8 @@ export const StemIntelligencePanel: React.FC = () => {
     const context = contextRef.current;
     void context.resume();
     const buffer = context.createBuffer(2, processedMix.mixChannels[0].length, processedMix.sampleRate);
-    buffer.copyToChannel(processedMix.mixChannels[0], 0);
-    buffer.copyToChannel(processedMix.mixChannels[1], 1);
+    buffer.copyToChannel(new Float32Array(processedMix.mixChannels[0]), 0);
+    buffer.copyToChannel(new Float32Array(processedMix.mixChannels[1]), 1);
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
