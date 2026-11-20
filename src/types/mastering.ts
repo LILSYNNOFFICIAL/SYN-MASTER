@@ -585,6 +585,8 @@ export interface ResolvedObjectiveTarget extends CustomObjectiveSpec {
   description: string;
 }
 
+export type DiagnosticEvidenceStrength = 'single' | 'multiple' | 'convergent';
+
 export interface AnalysisFinding {
   id: string;
   kind: 'observation' | 'artistic-choice' | 'technical-problem';
@@ -594,6 +596,7 @@ export interface AnalysisFinding {
   evidence: string[];
   explanation: string;
   recommendedAction?: string;
+  evidenceStrength?: DiagnosticEvidenceStrength;
   metrics?: Record<string, number>;
 }
 
