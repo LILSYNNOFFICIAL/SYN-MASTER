@@ -410,7 +410,8 @@ export function analyzeAudioBuffer(
   const fftSize = 4096;
   const halfBins = fftSize >> 1;
   const win = createHannWindow(fftSize);
-  const monoForFft = new Float32Array(fftSize);
+  const leftForFft = new Float32Array(fftSize);
+  const rightForFft = numChannels > 1 ? new Float32Array(fftSize) : leftForFft;
   const avgPower = new Float64Array(halfBins);
   const maxOffset = Math.max(0, length - fftSize);
   const numFrames = length <= fftSize ? 1 : Math.min(48, Math.max(1, Math.floor(length / (fftSize >> 1))));
@@ -421,18 +422,34 @@ export function analyzeAudioBuffer(
         ? 0
         : Math.min(maxOffset, Math.round((f / (numFrames - 1)) * maxOffset));
     const sliceLen = Math.min(fftSize, length - offset);
-    monoForFft.fill(0);
+    leftForFft.fill(0);
+    if (numChannels > 1) rightForFft.fill(0);
     for (let i = 0; i < sliceLen; i++) {
-      monoForFft[i] = 0.5 * (left[offset + i] + right[offset + i]);
+      leftForFft[i] = left[offset + i];
+      if (numChannels > 1) rightForFft[i] = right[offset + i];
     }
-    const frameDb = computeMagnitudeSpectrumDb(
-      sliceLen < fftSize ? monoForFft.subarray(0, sliceLen) : monoForFft,
+
+    const frameWindow = sliceLen < fftSize ? undefined : win;
+    const leftFrameDb = computeMagnitudeSpectrumDb(
+      sliceLen < fftSize ? leftForFft.subarray(0, sliceLen) : leftForFft,
       fftSize,
-      sliceLen < fftSize ? undefined : win,
+      frameWindow,
     );
+    const rightFrameDb =
+      numChannels > 1
+        ? computeMagnitudeSpectrumDb(
+            sliceLen < fftSize ? rightForFft.subarray(0, sliceLen) : rightForFft,
+            fftSize,
+            frameWindow,
+          )
+        : leftFrameDb;
+
+    // Average channel powers, not waveforms. A mono fold-down here would erase
+    // legitimate spectral content from wide or polarity-inverted stereo masters.
     for (let b = 0; b < halfBins; b++) {
-      const p = Math.pow(10, frameDb[b] / 10);
-      avgPower[b] += p / numFrames;
+      const leftPower = Math.pow(10, leftFrameDb[b] / 10);
+      const rightPower = Math.pow(10, rightFrameDb[b] / 10);
+      avgPower[b] += (0.5 * (leftPower + rightPower)) / numFrames;
     }
   }
 
