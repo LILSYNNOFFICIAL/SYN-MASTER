@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, AudioLines, FileAudio, Layers3, Loader2, Plus, ScanSearch, Trash2 } from 'lucide-react';
 import { createProcessorModule } from '../dsp/chainValidation';
 import { renderStemBusMix, type StemBusMixResult } from '../dsp/stemBusRenderer';
-import type { ProcessorModule, ProcessorType, ParametricEQParams, CompressorParams, MasterFinalReport, DirectorOperatingMode, MasteringObjectiveId } from '../types/mastering';
+import { analyzeAudioBuffer } from '../dsp/analyzer';
+import type { ProcessorModule, ProcessorType, ParametricEQParams, CompressorParams, MasterFinalReport, DirectorOperatingMode, MasteringObjectiveId, AudioAnalysis } from '../types/mastering';
 import { runAutonomousDirectorLoop } from '../director/directorEngine';
 import { renderAndAnalyzeOffThread, type OffThreadRenderResult } from '../dsp/workerClient';
 import {
@@ -62,6 +63,8 @@ export const StemIntelligencePanel: React.FC = () => {
   const [directorProgress, setDirectorProgress] = useState<{ stage: string; passNumber: number; maxIterations: number } | null>(null);
   const [directorReport, setDirectorReport] = useState<MasterFinalReport | null>(null);
   const [directorPreview, setDirectorPreview] = useState<OffThreadRenderResult | null>(null);
+  const [referenceTrack, setReferenceTrack] = useState<{ name: string; analysis: AudioAnalysis } | null>(null);
+  const [referenceBusy, setReferenceBusy] = useState(false);
   const directorStopRef = useRef(false);
 
   useEffect(() => () => {
@@ -203,6 +206,33 @@ export const StemIntelligencePanel: React.FC = () => {
     }
   };
 
+  const importReference = async (file: File | null) => {
+    if (!file) return;
+    setReferenceBusy(true);
+    setError(null);
+    try {
+      const context = contextRef.current ?? new AudioContext();
+      contextRef.current = context;
+      const decoded = await context.decodeAudioData(await file.arrayBuffer());
+      if (decoded.numberOfChannels > 2) {
+        throw new Error('Reference audio must be mono or stereo. Export a stereo reference and try again.');
+      }
+      const channels = Array.from(
+        { length: decoded.numberOfChannels },
+        (_, channel) => decoded.getChannelData(channel).slice(),
+      );
+      const analysis = analyzeAudioBuffer(channels, decoded.sampleRate);
+      setReferenceTrack({ name: file.name, analysis });
+      setDirectorReport(null);
+      setDirectorPreview(null);
+      setDirectorProgress(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to analyze the reference track.');
+    } finally {
+      setReferenceBusy(false);
+    }
+  };
+
   const runDirector = async () => {
     if (stems.length === 0 || directorRunning || rendering) return;
     directorStopRef.current = false;
@@ -219,6 +249,7 @@ export const StemIntelligencePanel: React.FC = () => {
         sampleRate,
         operatingMode: directorMode,
         objectiveId: directorObjective,
+        referenceAnalysis: referenceTrack?.analysis ?? null,
         stemBuses: stems,
         stemChainsById: chainsByStemId,
         maxIterations: directorMode === 'assisted' ? 1 : 3,
@@ -500,6 +531,47 @@ export const StemIntelligencePanel: React.FC = () => {
               );
             })}
           </div>
+        </section>
+      )}
+
+      {stems.length > 0 && (
+        <section className="rounded-lg border border-[#292D38] bg-[#111217] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">Reference Master</h4>
+              <p className="mt-1 text-[10px] text-[#8B93A3]">Optional reference analysis informs tonal and loudness comparisons in Director planning.</p>
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-[#3B4150] bg-[#1B1E27] px-3 py-2 text-xs font-semibold text-[#E5E7EB] hover:border-[#D4AF37]">
+              {referenceBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              {referenceBusy ? 'Analyzing…' : referenceTrack ? 'Replace Reference' : 'Import Reference'}
+              <input
+                type="file"
+                accept="audio/*,.wav,.mp3,.flac,.aiff,.m4a"
+                className="hidden"
+                disabled={referenceBusy || directorRunning}
+                onChange={(event) => {
+                  void importReference(event.currentTarget.files?.[0] ?? null);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+          </div>
+          {referenceTrack && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded border border-[#252A35] bg-[#171A22] p-3">
+              <div className="min-w-0">
+                <div className="truncate text-xs font-semibold text-[#F7F8FA]">{referenceTrack.name}</div>
+                <div className="mt-1 font-mono-tabular text-[10px] text-[#9CA3AF]">
+                  {referenceTrack.analysis.integratedLufs.toFixed(1)} LUFS · {referenceTrack.analysis.truePeakDb.toFixed(2)} dBTP · {referenceTrack.analysis.sampleRate.toLocaleString()} Hz · {referenceTrack.analysis.durationSec.toFixed(1)} s
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={directorRunning}
+                onClick={() => { setReferenceTrack(null); setDirectorReport(null); setDirectorPreview(null); setDirectorProgress(null); }}
+                className="rounded px-2 py-1 text-[10px] text-[#9CA3AF] hover:bg-red-500/10 hover:text-red-300"
+              >Remove Reference</button>
+            </div>
+          )}
         </section>
       )}
 
