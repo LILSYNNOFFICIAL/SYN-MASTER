@@ -254,7 +254,7 @@ test('Algorithmic mastering + SYN-QC + 24-bit WAV export pipeline succeeds end-t
   assert.equal(wavBlob.size, 44 + stem.channels[0].length * 2 * 3);
 });
 
-test('optimized true-peak candidate pruning exactly matches full polyphase scanning', () => {
+test('optimized true-peak candidate pruning matches exhaustive scanning at reported precision', () => {
   const sr = 48000;
   const length = 24000;
   const left = new Float32Array(length);
