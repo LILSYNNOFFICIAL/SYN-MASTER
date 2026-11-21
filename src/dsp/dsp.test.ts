@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { computeMagnitudeSpectrumDb } from './fft';
-import { analyzeAudioBuffer, dbToLinear, linearToDb } from './analyzer';
+import { analyzeAudioBuffer, dbToLinear, linearToDb, maxInterSampleAbsAt } from './analyzer';
 import { createProcessorModule, validateChain } from './chainValidation';
 import { processChainOffline } from './offlineDsp';
 import { QC_TARGET_PROFILES, runQualityControl } from './qc';
@@ -252,4 +252,38 @@ test('Algorithmic mastering + SYN-QC + 24-bit WAV export pipeline succeeds end-t
   });
   // 44-byte RIFF header + 3s * 44100 * 2ch * 3bytes = 793844 bytes
   assert.equal(wavBlob.size, 44 + stem.channels[0].length * 2 * 3);
+});
+
+test('optimized true-peak candidate pruning exactly matches full polyphase scanning', () => {
+  const sr = 48000;
+  const length = 24000;
+  const left = new Float32Array(length);
+  const right = new Float32Array(length);
+  let state = 0x12345678;
+  for (let i = 0; i < length; i++) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    left[i] = ((state >>> 0) / 0xffffffff) * 1.8 - 0.9;
+    right[i] = 0.72 * Math.sin((2 * Math.PI * 0.247 * i)) + 0.025 * left[i];
+  }
+
+  const referencePeak = (samples: Float32Array): number => {
+    let peak = 0;
+    for (let i = 0; i < samples.length; i++) {
+      peak = Math.max(peak, Math.abs(samples[i]));
+      if (i + 1 < samples.length) {
+        peak = Math.max(peak, maxInterSampleAbsAt(samples, i));
+      }
+    }
+    return peak;
+  };
+
+  const expected = Math.max(referencePeak(left), referencePeak(right));
+  const actual = analyzeAudioBuffer([left, right], sr).truePeakDb;
+  const expectedDb = linearToDb(expected);
+  assert.ok(
+    Math.abs(actual - expectedDb) < 1e-4,
+    `Optimized true peak ${actual} dBTP differed from full scan ${expectedDb} dBTP`,
+  );
 });
