@@ -2,7 +2,40 @@
 
 **Precision Engineering. Intelligent Mastering. Exceptional Sound.**
 
-SYN MASTER is an AI-assisted mastering workstation built around a browser-based React application, a server-side Gemini integration, a native DSP engine, and a Windows VST3 companion host.
+SYN MASTER is an AI-assisted mastering workstation built around a browser-based React application, a server-side Gemini integration, a native DSP engine, and a Windows VST3 companion host. Its mastering workflow combines audio analysis, explainable processing plans, iterative DSP refinement, and post-processing verification.
+
+## Core capabilities
+
+### Mastering Workspace
+
+- Unified mastering workspace with dedicated navigation for the main mastering workflow and Stem Studio.
+- Track analysis and objective-based mastering workflows.
+- Explainable mastering plans with proposed processing stages and rationale.
+- Assisted and autonomous AI Mastering Director operating modes.
+- Multi-objective evaluation and iterative DSP refinement.
+- **FIX ALL & VERIFY** runs the autonomous refinement workflow against the active track and reports remaining findings instead of assuming every issue can be corrected.
+- Post-fix verification compares the baseline and processed analysis, reports resolved or partially resolved findings, and identifies remaining deviations.
+
+### Measurement-aware refinement
+
+The Director uses measured spectral and loudness information to guide corrections. Refinement recommendations are tied to the measurement that remains outside the active objective's threshold. For example:
+
+- Bass-vs-mid excess is addressed with a restrained low-frequency shelf in the bass region.
+- Low-mid buildup can call for a more focused low-mid bell adjustment.
+- Subsonic excess can call for high-pass filtering.
+
+The bass-vs-mid refinement path uses a proportional adjustment rather than applying a fixed, aggressive cut. It updates an existing suitable parametric-EQ bass shelf where possible, or adds a parametric EQ when one is not present.
+
+**Verification is not a promise of perfect sound.** A passing metric does not replace critical listening, and a partially resolved finding means the remaining deviation is still reported. Always audition the rendered result and check it on appropriate monitoring systems.
+
+### Stem Studio
+
+- Dedicated stem-separation workspace.
+- Disk-backed browser storage using the Origin Private File System (OPFS) for stem data, reducing reliance on keeping large stem buffers in memory.
+- Device-aware memory checks for resource-intensive processing.
+- ONNX-based stem-separation processing in the browser.
+
+Browser support and available storage can affect OPFS behavior. Test long-form separation in the target browser and device before relying on it for a production session.
 
 ## Current architecture
 
@@ -10,6 +43,7 @@ SYN MASTER is an AI-assisted mastering workstation built around a browser-based 
 - **Server:** Express. Gemini credentials are read only from the server process environment.
 - **AI mastering:** Google Gen AI SDK, with structured mastering-strategy responses.
 - **DSP:** Native SYN-DSP processors and offline audio rendering in the application.
+- **Stem separation:** ONNX Runtime Web and browser workers, with OPFS-backed stem storage.
 - **Native plugin host:** C++20, CMake, JUCE 8, isolated VST3 worker processes.
 - **Persistence:** Browser-local project/storage facilities. See source modules for exact persistence boundaries.
 
@@ -87,6 +121,8 @@ The GitHub repository and Google AI Studio project synchronize source code, but 
 2. Run the available preview/build checks.
 3. Test the application and AI features.
 4. Republish the existing deployment when ready.
+
+After updating the mastering workflow, test **FIX ALL & VERIFY** with a representative track. Review the Director activity and post-fix findings, then audition the resulting audio. Automated tests verify code paths and expected measurement handling, not the subjective quality of an individual master.
 
 The live `/api/health` response only verifies configuration presence, not full AI functionality.
 
