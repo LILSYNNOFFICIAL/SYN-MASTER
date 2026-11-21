@@ -116,11 +116,15 @@ function estimateChannelTruePeak(samples: Float32Array): {
   const n = samples.length;
   let samplePeak = 0;
   let clippedSamples = 0;
+
+  // First pass establishes the sample-peak floor. A polyphase FIR output is
+  // bounded by max(|window samples|) * the phase kernel's L1 norm.
   for (let i = 0; i < n; i++) {
     const magnitude = Math.abs(samples[i]);
     if (magnitude > samplePeak) samplePeak = magnitude;
     if (magnitude >= 0.999) clippedSamples++;
   }
+
   if (n < 2) {
     return { samplePeak, truePeak: samplePeak, clippedSamples, interSamplePeaks: 0 };
   }
@@ -133,16 +137,23 @@ function estimateChannelTruePeak(samples: Float32Array): {
     if (l1 > maxKernelL1) maxKernelL1 = l1;
   }
 
-  // A phase output cannot exceed the largest sample in its FIR window times
-  // the phase kernel's L1 norm. A monotonic deque tracks that window maximum
-  // in amortized O(1), avoiding both a second 12-sample scan and a large bitmap.
-  const threshold = Math.min(samplePeak, 1) / Math.max(maxKernelL1, 1e-12);
-  // The active deque can never exceed the 12-sample FIR window. A 16-slot
-  // ring buffer avoids allocating an index array proportional to track length.
-  const deque = new Int32Array(16);
-  let head = 0;
-  let tail = 0;
-  let nextAdd = 0;
+  // Only windows capable of beating the sample peak need interpolation.
+  // When the source already clips, also retain windows capable of producing
+  // an inter-sample-peak event (> 0 dBFS), even if they cannot beat global peak.
+  const candidateThreshold = Math.min(samplePeak, 1) / Math.max(maxKernelL1, 1e-12);
+  const candidates = new Uint8Array(n);
+  const leftReach = TP_HALF_TAPS;
+  const rightReach = TP_HALF_TAPS - 1;
+
+  for (let sampleIndex = 0; sampleIndex < n; sampleIndex++) {
+    if (Math.abs(samples[sampleIndex]) <= candidateThreshold) continue;
+    const firstCenter = Math.max(0, sampleIndex - leftReach);
+    const lastCenter = Math.min(n - 2, sampleIndex + rightReach);
+    for (let center = firstCenter; center <= lastCenter; center++) {
+      candidates[center] = 1;
+    }
+  }
+
   let truePeak = samplePeak;
   let interSamplePeaks = 0;
   const phase0 = TP_POLYPHASE_PHASES[0];
@@ -150,24 +161,9 @@ function estimateChannelTruePeak(samples: Float32Array): {
   const phase2 = TP_POLYPHASE_PHASES[2];
 
   for (let i = 0; i < n - 1; i++) {
-    const windowStart = Math.max(0, i - (TP_HALF_TAPS - 1));
-    while (head < tail && deque[head & 15] < windowStart) head++;
+    if (candidates[i] === 0) continue;
 
-    const windowEnd = Math.min(n - 1, i + TP_HALF_TAPS);
-    while (nextAdd <= windowEnd) {
-      const magnitude = Math.abs(samples[nextAdd]);
-      while (
-        tail > head &&
-        magnitude >= Math.abs(samples[deque[(tail - 1) & 15]])
-      ) {
-        tail--;
-      }
-      deque[tail & 15] = nextAdd++;
-      tail++;
-    }
-
-    if (Math.abs(samples[deque[head & 15]]) <= threshold) continue;
-
+    let phaseMax = 0;
     let acc0 = 0;
     let acc1 = 0;
     let acc2 = 0;
@@ -179,8 +175,9 @@ function estimateChannelTruePeak(samples: Float32Array): {
       acc1 += sample * phase1[t];
       acc2 += sample * phase2[t];
     }
-    const phaseMax = Math.max(Math.abs(acc0), Math.abs(acc1), Math.abs(acc2));
+    phaseMax = Math.max(Math.abs(acc0), Math.abs(acc1), Math.abs(acc2));
     if (phaseMax > truePeak) truePeak = phaseMax;
+
     if (phaseMax > 1 && Math.abs(samples[i]) <= 1 && Math.abs(samples[i + 1]) <= 1) {
       interSamplePeaks++;
     }
@@ -188,6 +185,7 @@ function estimateChannelTruePeak(samples: Float32Array): {
 
   return { samplePeak, truePeak, clippedSamples, interSamplePeaks };
 }
+
 /**
  * Fast ITU-R BS.1770-4 K-weighted integrated LUFS helper
  */
