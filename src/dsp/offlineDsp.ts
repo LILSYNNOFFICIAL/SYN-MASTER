@@ -949,7 +949,9 @@ function applyMaximizer(
 
   const targetLufs = params.targetLufs;
   const postTransientLufs = transRatio > 0.005 ? measureIntegratedLufs([left, right], sampleRate) : currentLufs;
-  const neededGainDb = Math.max(0, Math.min(24, (targetLufs - postTransientLufs) * intensityScale));
+  // Apply positive gain when below target AND attenuation when already above target.
+  // The previous zero floor made the maximizer unable to hit a lower LUFS target.
+  const neededGainDb = Math.max(-24, Math.min(24, targetLufs - postTransientLufs)) * intensityScale;
 
   const baseReleaseMs =
     params.character === 'aggressive'
@@ -975,11 +977,12 @@ function applyMaximizer(
     4,
   );
 
-  // Single adaptive trim pass to compensate any headroom compression relative to K-weighted target
-  if (neededGainDb > 0.2) {
+  // One adaptive correction pass compensates for gain reduction at the ceiling.
+  // Keep the correction signed so an overshoot can be attenuated as well as boosted.
+  {
     const postLufs = measureIntegratedLufs([left, right], sampleRate);
     const err = targetLufs - postLufs;
-    if (err > 0.35 && err < 6.0) {
+    if (Math.abs(err) > 0.35 && Math.abs(err) < 6.0) {
       const trimGr = applyLookaheadLimiter(
         left,
         right,
