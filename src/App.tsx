@@ -82,6 +82,7 @@ import { MasteringRack } from './components/MasteringRack';
 import { MeterBridge } from './components/MeterBridge';
 import { SpectrumAndEQCanvas, WaveformTimelineCanvas } from './components/CanvasVisualizers';
 import { SynLabView } from './components/SynLabView';
+import { StemIntelligencePanel } from './components/StemIntelligencePanel';
 import { AiMasterView } from './components/AiMasterView';
 import { BattleModeView } from './components/BattleModeView';
 import { QualityControlView, ReferenceMatchView } from './components/ReferenceAndQcViews';
@@ -1227,7 +1228,8 @@ export default function App() {
     setStatusNotice('Restored previous mastering chain from before CHAIN WITH AI run.');
   }, [preAiChainSnapshot, updateChainWithHistory, switchAuditionTarget]);
 
-  const handleRunMasterDirector = useCallback(async () => {
+  const handleRunMasterDirector = useCallback(async (forceAutonomous = false) => {
+    const runOperatingMode: DirectorOperatingMode = forceAutonomous ? 'autonomous' : operatingMode;
     const src = sourceChannelsRef.current;
     if (!src || !activeTrack || directorRunningRef.current) return;
 
@@ -1263,7 +1265,7 @@ export default function App() {
 
     // Optional Cloud Gemini initial strategy in Autonomous/Assisted when user opted in
     let geminiInitialChain: ProcessorModule[] | undefined;
-    if (useGeminiCloud && operatingMode !== 'manual') {
+    if (useGeminiCloud && runOperatingMode !== 'manual') {
       setAiLoading(true);
       setAiLifecycleState('Planning');
       try {
@@ -1282,7 +1284,7 @@ export default function App() {
             mode,
             objective: objectiveId,
             customObjective,
-            operatingMode,
+            operatingMode: runOperatingMode,
             targetLufs: plan.objective.targetLufs,
             referenceAnalysis: referenceTrack?.analysis ?? null,
             availablePlugins: pluginSummary.matches.map((m) => ({
@@ -1319,7 +1321,7 @@ export default function App() {
       const report = await runAutonomousDirectorLoop({
         sourceChannels: src,
         sampleRate: activeTrack.sampleRate,
-        operatingMode,
+        operatingMode: runOperatingMode,
         objectiveId,
         customSpec: customObjective,
         qcProfile: activeQcProfile,
@@ -1327,14 +1329,14 @@ export default function App() {
         referenceAnalysis: referenceTrack?.analysis ?? null,
         externalPlugins: hostSnapshot.plugins,
         hostConnected: hostSnapshot.status === 'connected',
-        initialChain: geminiInitialChain ?? (operatingMode === 'assisted' ? chain : undefined),
+        initialChain: geminiInitialChain ?? (runOperatingMode === 'assisted' ? chain : undefined),
         externalProcessor: processExternalStage,
         maxIterations,
         convergenceThreshold,
         isPaused: () => directorPauseRef.current,
         shouldStop: () => directorStopRef.current || isStale(),
         aiRefineCallback:
-          useGeminiCloud && operatingMode === 'autonomous'
+          useGeminiCloud && runOperatingMode === 'autonomous'
             ? async (ctx) => {
                 const res = await fetch('/api/ai/refine', {
                   method: 'POST',
@@ -1368,7 +1370,7 @@ export default function App() {
       setDirectorActivityLog(report.activityLog);
       setAiLifecycleState(report.status === 'stopped-by-user' ? 'Stopped' : 'Completed');
 
-      if (operatingMode !== 'manual' && report.finalChain.length > 0) {
+      if (runOperatingMode !== 'manual' && report.finalChain.length > 0) {
         updateChainWithHistory(structuredClone(report.finalChain));
         recordCorrection(
           `CHAIN WITH AI (${report.objective.label} · Pass #${report.bestPassNumber})`,
@@ -1392,7 +1394,7 @@ export default function App() {
       setIterations(passHistory);
 
       setStatusNotice(
-        operatingMode === 'manual'
+        runOperatingMode === 'manual'
           ? 'Manual Mode: Explainable mastering plan generated without altering rack.'
           : `CHAIN WITH AI ${report.status}: Best Pass #${report.bestPassNumber} (${report.postAnalysis.integratedLufs.toFixed(1)} LUFS, QC ${report.qcReport.overallStatus.toUpperCase()}).`,
       );
@@ -1641,31 +1643,13 @@ export default function App() {
         </div>
 
         {/* Zone 2: Clean Single-Line Navigation Tabs */}
-        <nav aria-label="Workspace Sections" className="hidden md:flex items-center gap-6 overflow-x-auto">
-          {(
-            [
-              { id: 'studio', label: 'Studio' },
-              { id: 'lab', label: 'SYN-Lab' },
-              { id: 'ai', label: 'AI Master' },
-              { id: 'battle', label: 'Battle Mode' },
-              { id: 'reference', label: 'Reference' },
-              { id: 'qc', label: 'SYN-QC' },
-              { id: 'plugins', label: 'Plugins' },
-            ] as const
-          ).map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setActiveTab(item.id)}
-              className={`py-1 text-xs font-semibold whitespace-nowrap shrink-0 border-b-2 transition-colors ${
-                activeTab === item.id
-                  ? 'border-[#F2CA52] text-[#F2CA52]'
-                  : 'border-transparent text-[#9CA3AF] hover:text-[#F7F8FA]'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
+        <nav aria-label="Primary Sections" className="hidden md:flex items-center gap-5">
+          <button type="button" onClick={() => setActiveTab('studio')} className={`py-1 text-xs font-bold border-b-2 ${activeTab !== 'plugins' ? 'border-[#F2CA52] text-[#F2CA52]' : 'border-transparent text-[#9CA3AF] hover:text-white'}`}>
+            MASTERING WORKSPACE
+          </button>
+          <button type="button" onClick={() => setActiveTab('plugins')} className={`py-1 text-xs font-semibold border-b-2 ${activeTab === 'plugins' ? 'border-[#F2CA52] text-[#F2CA52]' : 'border-transparent text-[#9CA3AF] hover:text-white'}`}>
+            PLUGINS &amp; HOST
+          </button>
         </nav>
 
         {/* Zone 3: Primary CTA */}
@@ -1818,16 +1802,16 @@ export default function App() {
         {/* Center Mastering Stage */}
         <main className="lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">
           {/* Mobile Tab Strip */}
-          <div className="flex md:hidden items-center gap-1 overflow-x-auto pb-1">
+          <div aria-label="Mastering Workspace Tools" className="flex items-center gap-1 overflow-x-auto pb-1">
             {(
               [
-                { id: 'studio', label: 'Studio' },
-                { id: 'lab', label: 'Lab' },
-                { id: 'ai', label: 'AI Master' },
-                { id: 'battle', label: 'Battle' },
-                { id: 'reference', label: 'Ref' },
-                { id: 'qc', label: 'QC' },
-                { id: 'plugins', label: 'Plugins' },
+                { id: 'studio', label: 'Mastering' },
+                { id: 'ai', label: 'AI Director' },
+                { id: 'lab', label: 'Analysis' },
+                { id: 'stems', label: 'Stem Studio' },
+                { id: 'reference', label: 'Reference' },
+                { id: 'battle', label: 'A/B Battle' },
+                { id: 'qc', label: 'Quality Check' },
               ] as const
             ).map((item) => (
               <button
@@ -1846,7 +1830,7 @@ export default function App() {
           </div>
 
           {/* Transport & Waveform Stage (Full waveform on Studio & Reference; compact transport bar on other tabs) */}
-          {!activeTrack && activeTab === 'plugins' ? null : !activeTrack ? (
+          {!activeTrack && (activeTab === 'plugins' || activeTab === 'stems') ? null : !activeTrack ? (
             <section className="p-8 rounded bg-[#111217] border border-[#D4AF37]/30 flex flex-col items-center text-center gap-4">
               <img
                 src="/assets/aistudio/SYN_MASTER_Neon_Chrome_Logo_533a2f19.png"
@@ -2172,6 +2156,8 @@ export default function App() {
             </section>
           )}
 
+          {activeTab === 'stems' && <StemIntelligencePanel />}
+
           {activeTab === 'lab' && (
             <SynLabView
               preAnalysis={activeTrack?.analysis ?? null}
@@ -2222,6 +2208,7 @@ export default function App() {
               onChangeConvergenceThreshold={setConvergenceThreshold}
               onAnalyzeTrack={handleAnalyzeTrack}
               onRunMasterDirector={handleRunMasterDirector}
+              onFixAllProblems={() => { setOperatingMode('autonomous'); void handleRunMasterDirector(true); }}
               onPauseToggle={() => {
                 const next = !directorPauseRef.current;
                 directorPauseRef.current = next;
@@ -2357,7 +2344,7 @@ export default function App() {
         </main>
 
         {/* Right Sidebar: Modular Mastering Chain Rack */}
-        {!fullscreenWorkspace && (
+        {!fullscreenWorkspace && activeTab !== 'plugins' && (
           <MasteringRack
             chain={chain}
             chainBypassed={chainBypassed}

@@ -82,3 +82,30 @@ export function normalizeDemucsOutput(output: Float32Array, weights: Float32Arra
     output[i] = weights[i] > 1e-8 ? output[i] / weights[i] : 0;
   }
 }
+
+/** Normalize only the finalized prefix of a disk-streamed overlap-add buffer. */
+export function normalizeDemucsRange(output: Float32Array, weights: Float32Array, count: number): Float32Array {
+  if (output.length !== weights.length) throw new RangeError('Output and weight buffers must have equal lengths.');
+  if (!Number.isSafeInteger(count) || count < 0 || count > output.length) {
+    throw new RangeError('Finalized range is outside the accumulation buffer.');
+  }
+  const normalized = new Float32Array(count);
+  for (let i = 0; i < count; i += 1) {
+    normalized[i] = weights[i] > 1e-8 ? output[i] / weights[i] : 0;
+  }
+  return normalized;
+}
+
+/** Retain only the unfinalized overlap tail after a prefix has been written to temporary storage. */
+export function shiftDemucsAccumulator(outputs: Float32Array[], weights: Float32Array, finalizedSamples: number): void {
+  if (!Number.isSafeInteger(finalizedSamples) || finalizedSamples < 0 || finalizedSamples > weights.length ||
+      outputs.some((output) => output.length !== weights.length)) {
+    throw new RangeError('Finalized overlap range is incompatible with the accumulator buffers.');
+  }
+  for (const output of outputs) {
+    output.copyWithin(0, finalizedSamples);
+    output.fill(0, output.length - finalizedSamples);
+  }
+  weights.copyWithin(0, finalizedSamples);
+  weights.fill(0, weights.length - finalizedSamples);
+}

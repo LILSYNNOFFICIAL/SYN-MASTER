@@ -27,12 +27,13 @@ export type WorkspaceTab =
   | 'studio'
   | 'lab'
   | 'ai'
+  | 'stems'
   | 'battle'
   | 'reference'
   | 'qc'
   | 'plugins';
 
-export type LabSubTab = 'frequency' | 'dynamics' | 'stereo' | 'distortion' | 'stems';
+export type LabSubTab = 'frequency' | 'dynamics' | 'stereo' | 'distortion';
 
 export type EQBandShape = 'highpass' | 'lowshelf' | 'bell' | 'highshelf' | 'lowpass' | 'notch';
 
