@@ -107,17 +107,20 @@ export function maxInterSampleAbsAt(
 /**
  * Estimate 4x oversampled True Peak using ITU-R BS.1770-4 windowed-sinc polyphase FIR
  */
-function estimateChannelTruePeak(
-  samples: Float32Array,
-  samplePeak: number,
-  clippedSamples: number,
-): {
+function estimateChannelTruePeak(samples: Float32Array): {
   samplePeak: number;
   truePeak: number;
   clippedSamples: number;
   interSamplePeaks: number;
 } {
   const n = samples.length;
+  let samplePeak = 0;
+  let clippedSamples = 0;
+  for (let i = 0; i < n; i++) {
+    const magnitude = Math.abs(samples[i]);
+    if (magnitude > samplePeak) samplePeak = magnitude;
+    if (magnitude >= 0.999) clippedSamples++;
+  }
   if (n < 2) {
     return { samplePeak, truePeak: samplePeak, clippedSamples, interSamplePeaks: 0 };
   }
@@ -130,23 +133,14 @@ function estimateChannelTruePeak(
     if (l1 > maxKernelL1) maxKernelL1 = l1;
   }
 
-  // Only windows capable of beating the sample peak need interpolation.
-  // When the source already clips, also retain windows capable of producing
-  // an inter-sample-peak event (> 0 dBFS), even if they cannot beat global peak.
-  const candidateThreshold = Math.min(samplePeak, 1) / Math.max(maxKernelL1, 1e-12);
-  const candidates = new Uint8Array(n);
-  const leftReach = TP_HALF_TAPS;
-  const rightReach = TP_HALF_TAPS - 1;
-
-  for (let sampleIndex = 0; sampleIndex < n; sampleIndex++) {
-    if (Math.abs(samples[sampleIndex]) <= candidateThreshold) continue;
-    const firstCenter = Math.max(0, sampleIndex - leftReach);
-    const lastCenter = Math.min(n - 2, sampleIndex + rightReach);
-    for (let center = firstCenter; center <= lastCenter; center++) {
-      candidates[center] = 1;
-    }
-  }
-
+  // A phase output cannot exceed the largest sample in its FIR window times
+  // the phase kernel's L1 norm. A monotonic deque tracks that window maximum
+  // in amortized O(1), avoiding both a second 12-sample scan and a large bitmap.
+  const threshold = Math.min(samplePeak, 1) / Math.max(maxKernelL1, 1e-12);
+  const deque = new Int32Array(n);
+  let head = 0;
+  let tail = 0;
+  let nextAdd = 0;
   let truePeak = samplePeak;
   let interSamplePeaks = 0;
   const phase0 = TP_POLYPHASE_PHASES[0];
@@ -154,9 +148,23 @@ function estimateChannelTruePeak(
   const phase2 = TP_POLYPHASE_PHASES[2];
 
   for (let i = 0; i < n - 1; i++) {
-    if (candidates[i] === 0) continue;
+    const windowStart = Math.max(0, i - (TP_HALF_TAPS - 1));
+    while (head < tail && deque[head] < windowStart) head++;
 
-    let phaseMax = 0;
+    const windowEnd = Math.min(n - 1, i + TP_HALF_TAPS);
+    while (nextAdd <= windowEnd) {
+      const magnitude = Math.abs(samples[nextAdd]);
+      while (
+        tail > head &&
+        magnitude >= Math.abs(samples[deque[tail - 1]])
+      ) {
+        tail--;
+      }
+      deque[tail++] = nextAdd++;
+    }
+
+    if (Math.abs(samples[deque[head]]) * maxKernelL1 <= threshold * maxKernelL1) continue;
+
     let acc0 = 0;
     let acc1 = 0;
     let acc2 = 0;
@@ -168,9 +176,8 @@ function estimateChannelTruePeak(
       acc1 += sample * phase1[t];
       acc2 += sample * phase2[t];
     }
-    phaseMax = Math.max(Math.abs(acc0), Math.abs(acc1), Math.abs(acc2));
+    const phaseMax = Math.max(Math.abs(acc0), Math.abs(acc1), Math.abs(acc2));
     if (phaseMax > truePeak) truePeak = phaseMax;
-
     if (phaseMax > 1 && Math.abs(samples[i]) <= 1 && Math.abs(samples[i + 1]) <= 1) {
       interSamplePeaks++;
     }
@@ -178,7 +185,6 @@ function estimateChannelTruePeak(
 
   return { samplePeak, truePeak, clippedSamples, interSamplePeaks };
 }
-
 /**
  * Fast ITU-R BS.1770-4 K-weighted integrated LUFS helper
  */
@@ -248,12 +254,14 @@ export function analyzeAudioBuffer(
   const durationSec = length / sampleRate;
 
   // 1. Sample Peak, True Peak, Clipping, DC Offset, RMS
-  // Fold peak/clipping collection into the existing stereo-statistics pass so
-  // long tracks do not require a separate full-buffer scan per channel.
-  let samplePeakL = 0;
-  let samplePeakR = 0;
-  let clippedLeft = 0;
-  let clippedRight = 0;
+  const tpLeft = estimateChannelTruePeak(left);
+  const tpRight = numChannels > 1 ? estimateChannelTruePeak(right) : tpLeft;
+
+  const samplePeak = Math.max(tpLeft.samplePeak, tpRight.samplePeak);
+  const truePeak = Math.max(tpLeft.truePeak, tpRight.truePeak);
+  const clippedSamples = tpLeft.clippedSamples + (numChannels > 1 ? tpRight.clippedSamples : 0);
+  const interSamplePeaks = tpLeft.interSamplePeaks + (numChannels > 1 ? tpRight.interSamplePeaks : 0);
+
   let sumSqL = 0;
   let sumSqR = 0;
   let sumL = 0;
@@ -265,12 +273,6 @@ export function analyzeAudioBuffer(
   for (let i = 0; i < length; i++) {
     const l = left[i];
     const r = right[i];
-    const absL = Math.abs(l);
-    const absR = Math.abs(r);
-    if (absL > samplePeakL) samplePeakL = absL;
-    if (absR > samplePeakR) samplePeakR = absR;
-    if (absL >= 0.999) clippedLeft++;
-    if (numChannels > 1 && absR >= 0.999) clippedRight++;
     sumL += l;
     sumR += r;
     sumSqL += l * l;
@@ -281,15 +283,6 @@ export function analyzeAudioBuffer(
     sumMidSq += m * m;
     sumSideSq += s * s;
   }
-
-  const tpLeft = estimateChannelTruePeak(left, samplePeakL, clippedLeft);
-  const tpRight = numChannels > 1
-    ? estimateChannelTruePeak(right, samplePeakR, clippedRight)
-    : tpLeft;
-  const samplePeak = Math.max(tpLeft.samplePeak, tpRight.samplePeak);
-  const truePeak = Math.max(tpLeft.truePeak, tpRight.truePeak);
-  const clippedSamples = tpLeft.clippedSamples + (numChannels > 1 ? tpRight.clippedSamples : 0);
-  const interSamplePeaks = tpLeft.interSamplePeaks + (numChannels > 1 ? tpRight.interSamplePeaks : 0);
 
   const rmsL = Math.sqrt(sumSqL / Math.max(1, length));
   const rmsR = Math.sqrt(sumSqR / Math.max(1, length));
