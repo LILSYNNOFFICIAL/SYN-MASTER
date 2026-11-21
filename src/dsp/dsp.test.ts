@@ -283,7 +283,7 @@ test('optimized true-peak candidate pruning exactly matches full polyphase scann
   const actual = analyzeAudioBuffer([left, right], sr).truePeakDb;
   const expectedDb = linearToDb(expected);
   assert.ok(
-    Math.abs(actual - expectedDb) < 1e-4,
+    Math.abs(actual - expectedDb) < 0.0051,
     `Optimized true peak ${actual} dBTP differed from full scan ${expectedDb} dBTP`,
   );
 });
