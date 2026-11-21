@@ -151,7 +151,7 @@ function estimateChannelTruePeak(samples: Float32Array): {
 
   for (let i = 0; i < n - 1; i++) {
     const windowStart = Math.max(0, i - (TP_HALF_TAPS - 1));
-    while (head < tail && deque[head] < windowStart) head++;
+    while (head < tail && deque[head & 15] < windowStart) head++;
 
     const windowEnd = Math.min(n - 1, i + TP_HALF_TAPS);
     while (nextAdd <= windowEnd) {
