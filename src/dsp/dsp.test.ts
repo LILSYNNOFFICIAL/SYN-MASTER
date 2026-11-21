@@ -191,6 +191,36 @@ test('Chain validator clamps unsafe AI parameters and rejects unknown types', ()
   assert.ok(lim.thresholdDb >= -18);
 });
 
+test('Maximizer attenuates sources already louder than the requested LUFS target', () => {
+  const sr = 48000;
+  const [left, right] = makeSineStereo(1000, 0.5, 2.0, sr);
+  const before = analyzeAudioBuffer([left, right], sr);
+  const targetLufs = before.integratedLufs - 8;
+  const maximizer = createProcessorModule('maximizer', {
+    params: {
+      character: 'transparent',
+      targetLufs,
+      ceilingDb: -1,
+      transientEmphasis: 0,
+      truePeak: true,
+    },
+  });
+
+  const rendered = processChainOffline([left, right], sr, [maximizer]);
+  const after = analyzeAudioBuffer(rendered.channels, sr);
+
+  assert.ok(
+    after.integratedLufs < before.integratedLufs - 7.5,
+    `Expected maximizer to attenuate by about 8 LU, got ${(after.integratedLufs - before.integratedLufs).toFixed(2)} LU`,
+  );
+  assert.ok(
+    Math.abs(after.integratedLufs - targetLufs) < 0.5,
+    `Expected ${targetLufs.toFixed(1)} LUFS, got ${after.integratedLufs.toFixed(1)} LUFS`,
+  );
+  assert.ok(after.truePeakDb <= -0.95, `True peak exceeded ceiling: ${after.truePeakDb} dBTP`);
+  assert.equal(after.clippedSamples, 0);
+});
+
 test('Algorithmic mastering + SYN-QC + 24-bit WAV export pipeline succeeds end-to-end', () => {
   const stem = generateDemoMasterStem('main-mix', 44100, 3);
   const preAnalysis = analyzeAudioBuffer(stem.channels, stem.sampleRate);
