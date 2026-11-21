@@ -550,9 +550,11 @@ function classifyVerifiedFinding(opts: {
       if (subNeeded && !subMet) remaining.push(`Sub vs Bass +${postSubBass.toFixed(1)} dB (target <= +${thresholds.subExcessLimit.toFixed(1)} dB)`);
       if (bassNeeded && !bassMet) remaining.push(`Bass vs Mid +${postBassMid.toFixed(1)} dB (target <= +${thresholds.bassMidDiffLimit.toFixed(1)} dB)`);
       remainingDeviation = remaining.join('; ');
-      nextRecommendedAction = !subMet
-        ? 'Engage 28–32 Hz high-pass filter to clear remaining subsonic excess.'
-        : 'Deepen surgical 220–340 Hz bell cut by 1.0–1.5 dB.';
+      const remainingActions: string[] = [];
+      if (!subMet) remainingActions.push('Engage a 28-32 Hz high-pass filter to reduce subsonic excess.');
+      if (!bassMet) remainingActions.push('Apply a restrained 80-120 Hz low-shelf reduction to address Bass vs Mid excess.');
+      if (!lowMidMet || !regMet) remainingActions.push('Use a narrow 220-340 Hz bell cut only if the low-mid measurements remain elevated.');
+      nextRecommendedAction = remainingActions.join(' ');
       verificationSummary = `VERIFICATION: Some mud metrics cleared, but ${remainingDeviation}. Status: PARTIALLY RESOLVED`;
     } else if (anyMeaningfulDrop) {
       status = 'IMPROVED';

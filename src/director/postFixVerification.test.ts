@@ -690,3 +690,36 @@ test('16. Low-mid diagnosis reports evidence strength and does not claim unmeasu
   assert.doesNotMatch(mud.explanation, /forces the limiter to pump/i);
   assert.match(mud.recommendedAction ?? '', /audition/i);
 });
+
+test('Partially resolved mud recommendation targets bass when only Bass vs Mid remains out of range', () => {
+  const baseline = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const baselineDiagnosis = analyzeTrackIntelligence(baseline, 'streaming');
+  assert.ok(baselineDiagnosis.findings.some((finding) => finding.id === 'diag-mud'));
+  const post = {
+    ...baseline,
+    zoneEnergyDb: {
+      ...baseline.zoneEnergyDb,
+      lowMid: baseline.zoneEnergyDb.mid + 2.0,
+      bass: baseline.zoneEnergyDb.mid + 11.7,
+      sub: baseline.zoneEnergyDb.mid + 15.7,
+    },
+    spectrumBinsDb: baseline.spectrumBinsFreq.map((frequency, index) =>
+      frequency >= 150 && frequency <= 400 ? baseline.spectrumBinsDb[index] - 10 : baseline.spectrumBinsDb[index]),
+  };
+  const fp = 'mud-bass-refinement';
+  const report = verifyPostFixAnalysis({
+    baselineAnalysis: baseline,
+    baselineDiagnosis,
+    postAnalysis: post,
+    objective: 'streaming',
+    currentChainFingerprint: fp,
+    postChainFingerprint: fp,
+    postProcessingStatus: 'ready',
+  });
+  const mud = report.activeFindings.find((finding) => finding.findingId === 'diag-mud');
+  assert.ok(mud);
+  assert.equal(mud.status, 'PARTIALLY_RESOLVED');
+  assert.match(mud.remainingDeviation ?? '', /Bass vs Mid/);
+  assert.match(mud.nextRecommendedAction ?? '', /low-shelf/i);
+  assert.doesNotMatch(mud.nextRecommendedAction ?? '', /220-340 Hz bell cut/i);
+});
