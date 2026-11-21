@@ -163,7 +163,7 @@ function estimateChannelTruePeak(samples: Float32Array): {
       deque[tail++] = nextAdd++;
     }
 
-    if (Math.abs(samples[deque[head]]) * maxKernelL1 <= threshold * maxKernelL1) continue;
+    if (Math.abs(samples[deque[head]]) <= threshold) continue;
 
     let acc0 = 0;
     let acc1 = 0;
