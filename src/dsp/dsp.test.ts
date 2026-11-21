@@ -268,22 +268,34 @@ test('optimized true-peak candidate pruning exactly matches full polyphase scann
     right[i] = 0.72 * Math.sin((2 * Math.PI * 0.247 * i)) + 0.025 * left[i];
   }
 
-  const referencePeak = (samples: Float32Array): number => {
+  const referenceChannel = (samples: Float32Array): { peak: number; interSamplePeaks: number } => {
     let peak = 0;
+    let interSamplePeaks = 0;
     for (let i = 0; i < samples.length; i++) {
       peak = Math.max(peak, Math.abs(samples[i]));
       if (i + 1 < samples.length) {
-        peak = Math.max(peak, maxInterSampleAbsAt(samples, i));
+        const interpolated = maxInterSampleAbsAt(samples, i);
+        peak = Math.max(peak, interpolated);
+        if (interpolated > 1 && Math.max(Math.abs(samples[i]), Math.abs(samples[i + 1])) <= 1) {
+          interSamplePeaks++;
+        }
       }
     }
-    return peak;
+    return { peak, interSamplePeaks };
   };
 
-  const expected = Math.max(referencePeak(left), referencePeak(right));
-  const actual = analyzeAudioBuffer([left, right], sr).truePeakDb;
+  const expectedLeft = referenceChannel(left);
+  const expectedRight = referenceChannel(right);
+  const expected = Math.max(expectedLeft.peak, expectedRight.peak);
+  const actual = analyzeAudioBuffer([left, right], sr);
   const expectedDb = linearToDb(expected);
   assert.ok(
-    Math.abs(actual - expectedDb) < 0.0051,
-    `Optimized true peak ${actual} dBTP differed from full scan ${expectedDb} dBTP`,
+    Math.abs(actual.truePeakDb - expectedDb) < 0.0051,
+    `Optimized true peak ${actual.truePeakDb} dBTP differed from full scan ${expectedDb} dBTP`,
+  );
+  assert.equal(
+    actual.interSamplePeaks,
+    expectedLeft.interSamplePeaks + expectedRight.interSamplePeaks,
+    'Inter-sample peak event count must match exhaustive polyphase scanning',
   );
 });
