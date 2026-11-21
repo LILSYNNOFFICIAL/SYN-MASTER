@@ -40,6 +40,7 @@ interface PendingJob {
 export interface DspWorkerClientOptions {
   workerFactory?: () => DspWorkerLike | null;
   workerTimeoutMs?: number;
+  maxMainThreadFallbackDurationSec?: number;
 }
 
 function defaultWorkerFactory(): DspWorkerLike | null {
@@ -65,7 +66,7 @@ function makeError(reason: unknown, fallback: string): Error {
  */
 export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
   const workerFactory = options.workerFactory ?? defaultWorkerFactory;
-  const workerTimeoutMs = Math.max(1, Math.min(120_000, options.workerTimeoutMs ?? 45_000));
+  const maxMainThreadFallbackDurationSec = Math.max(0, options.maxMainThreadFallbackDurationSec ?? 30);
   let worker: DspWorkerLike | null = null;
   let nextJobId = 1;
   const pendingJobs = new Map<number, PendingJob>();
@@ -155,25 +156,43 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       externalProcessor,
     } = opts;
     const safePeakBins = Math.max(1, Math.min(8192, Math.floor(peakBins)));
+    const durationSec = (sourceChannels[0]?.length ?? 0) / sampleRate;
+    const requiresWorker = durationSec > maxMainThreadFallbackDurationSec;
+    const workerTimeoutMs = Math.max(
+      1,
+      Math.min(120_000, options.workerTimeoutMs ?? Math.max(45_000, durationSec * 1_500 + 15_000)),
+    );
+    const fallbackOrThrow = async (reason: unknown): Promise<OffThreadRenderResult> => {
+      if (requiresWorker) {
+        const detail = reason instanceof Error ? reason.message : 'Unknown DSP worker failure';
+        throw new Error(
+          `Off-thread DSP rendering failed for ${durationSec.toFixed(1)}s audio. Main-thread fallback was skipped to prevent the interface from freezing. ${detail}`,
+        );
+      }
+      return renderFallback(sourceChannels, sampleRate, chain, includePeaks, safePeakBins);
+    };
 
     if (chainHasActiveExternalPlugins(chain)) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const mixed = await renderMixedChain(sourceChannels, sampleRate, chain, externalProcessor);
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      const analysis = analyzeAudioBuffer(mixed.channels, sampleRate);
+      // Keep third-party VST3 execution in its host, but analyze its rendered output in the DSP worker.
+      const analyzed = await renderAndAnalyzeOffThread({
+        sourceChannels: mixed.channels,
+        sampleRate,
+        chain: [],
+        includePeaks,
+        peakBins: safePeakBins,
+      });
       return {
-        channels: mixed.channels,
+        ...analyzed,
         telemetry: mixed.telemetry,
-        analysis,
-        peaks: includePeaks ? extractWaveformPeaks(mixed.channels, safePeakBins) : undefined,
-        usedWorker: false,
         usedExternalHost: mixed.usedExternalHost,
       };
     }
 
     const currentWorker = getWorker();
     if (!currentWorker) {
-      return renderFallback(sourceChannels, sampleRate, chain, includePeaks, safePeakBins);
+      return fallbackOrThrow(new Error('Web Worker is unavailable in this browser or deployment.'));
     }
 
     const id = nextJobId++;
@@ -210,8 +229,8 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
         usedWorker: true,
         usedExternalHost: false,
       };
-    } catch {
-      return renderFallback(sourceChannels, sampleRate, chain, includePeaks, safePeakBins);
+    } catch (error) {
+      return fallbackOrThrow(error);
     }
   };
 
