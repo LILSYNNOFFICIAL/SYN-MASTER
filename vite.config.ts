@@ -8,6 +8,8 @@ const projectRoot = import.meta.dirname;
 
 export default defineConfig(() => {
   return {
+    // ONNX Runtime touches WASM assets at runtime; keep it out of Vite's dependency pre-bundling.
+    optimizeDeps: { exclude: ['onnxruntime-web'] },
     plugins: [
       react(),
       tailwindcss(),

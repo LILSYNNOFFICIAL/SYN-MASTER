@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/components/controls/controls.test.ts src/director/director.test.ts src/director/postFixVerification.test.ts src/director/processorInventory.test.ts src/dsp/dsp.audit.test.ts src/dsp/dsp.test.ts src/dsp/dsp.verification.test.ts src/dsp/mixedChain.test.ts src/dsp/stemAnalysis.test.ts src/dsp/stemBusRenderer.test.ts src/dsp/workerClient.test.ts src/engine/telemetryStore.test.ts src/services/hostBridge.test.ts src/server/*.test.mjs src/server/aiPayloadValidation.test.ts"
+    "test": "tsx --test src/components/controls/controls.test.ts src/director/director.test.ts src/director/postFixVerification.test.ts src/director/processorInventory.test.ts src/dsp/dsp.audit.test.ts src/dsp/dsp.test.ts src/dsp/dsp.verification.test.ts src/dsp/mixedChain.test.ts src/dsp/stemAnalysis.test.ts src/dsp/stemBusRenderer.test.ts src/dsp/stemSeparationMath.test.ts src/dsp/onnxFloat64Fix.test.ts src/dsp/workerClient.test.ts src/engine/telemetryStore.test.ts src/services/stemSeparation.test.ts src/services/hostBridge.test.ts src/server/*.test.mjs src/server/aiPayloadValidation.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.32.0",
@@ -22,7 +22,8 @@
     "vite": "^8.3.0",
     "express": "^4.21.2",
     "dotenv": "^17.2.3",
-    "motion": "^12.23.24"
+    "motion": "^12.23.24",
+    "onnxruntime-web": "^1.31.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
