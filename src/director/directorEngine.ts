@@ -9,6 +9,7 @@ import type {
   DirectorDiagnosisReport,
   DirectorOperatingMode,
   DirectorRecommendation,
+  EQBand,
   ExportConfig,
   ExternalPluginRecord,
   MasterFinalReport,
@@ -29,7 +30,7 @@ import { renderStemBusMix } from '../dsp/stemBusRenderer';
 import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
 import { renderAndAnalyzeOffThread } from '../dsp/workerClient';
 import { QC_TARGET_PROFILES, runQualityControl } from '../dsp/qc';
-import { analyzeTrackIntelligence } from './analyzeIntelligence';
+import { analyzeTrackIntelligence, getDiagnosisThresholds } from './analyzeIntelligence';
 import { applyStructuredChainCommands } from './chainCommands';
 import { inspectPluginInventory } from './pluginIntelligence';
 import { validateChainAgainstInventory } from './processorInventory';
@@ -1330,7 +1331,46 @@ export function deriveRefinementCommands(
     reasons.push('Engage SYN-Restore noise/DC remediation');
   }
 
-  // 7. Spectral harshness/mud QC follow-up
+  // 7. Measurement-specific bass-vs-mid correction. Do not use a low-mid bell cut
+  // to solve excess energy in the separate 60-250 Hz bass measurement.
+  const bassMidDiff = post.zoneEnergyDb.bass - post.zoneEnergyDb.mid;
+  const bassMidLimit = getDiagnosisThresholds(objective).bassMidDiffLimit;
+  if (bassMidDiff > bassMidLimit) {
+    const excessDb = bassMidDiff - bassMidLimit;
+    const cutStepDb = Number(Math.max(0.25, Math.min(0.75, excessDb * 0.75)).toFixed(2));
+    const currentParams = eqMod?.params as { phaseMode?: 'minimum' | 'linear'; msMode?: 'stereo' | 'mid-side'; tiltDb?: number; bands?: EQBand[] } | undefined;
+    const currentBands = currentParams?.bands ?? [];
+    const bassShelfIndex = currentBands.findIndex((band) => band.shape === 'lowshelf' && band.freq >= 70 && band.freq <= 140);
+    const nextBands = currentBands.map((band) => ({ ...band }));
+    if (bassShelfIndex >= 0) {
+      const shelf = nextBands[bassShelfIndex];
+      shelf.gain = Number(Math.max(-3, shelf.gain - cutStepDb).toFixed(2));
+      shelf.enabled = true;
+    } else {
+      nextBands.push({ id: 'refine-bass-mid', enabled: true, shape: 'lowshelf', freq: 100, gain: -cutStepDb, q: 0.71 });
+    }
+    const rationale = `Reduce 60-250 Hz bass energy by a restrained ${cutStepDb.toFixed(2)} dB low shelf; Bass vs Mid is ${bassMidDiff.toFixed(1)} dB (limit ${bassMidLimit.toFixed(1)} dB).`;
+    if (eqMod) {
+      commands.push({
+        op: 'configure',
+        targetId: eqMod.id,
+        processorType: 'parametric-eq',
+        paramsPatch: { bands: nextBands },
+        rationale,
+      });
+    } else {
+      commands.push({
+        op: 'add',
+        processorType: 'parametric-eq',
+        name: 'Bass-to-Mid Refinement EQ',
+        params: { phaseMode: 'minimum', msMode: 'stereo', tiltDb: 0, bands: nextBands },
+        rationale,
+      });
+    }
+    reasons.push(`Trim bass-vs-mid excess by ${cutStepDb.toFixed(2)} dB at 100 Hz`);
+  }
+
+  // 8. Spectral harshness/mud QC follow-up
   const specCheck = qcReport.checks.find((c) => c.id === 'qc-spectral');
   if (specCheck && specCheck.status !== 'pass' && eqMod) {
     const ep = eqMod.params as { tiltDb: number };

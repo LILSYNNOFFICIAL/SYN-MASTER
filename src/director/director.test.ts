@@ -344,6 +344,35 @@ test('Mid-run cancellation stops cleanly without throwing and returns stopped-by
   assert.ok(report.iterationsExecuted <= 2);
 });
 
+test('Bass-vs-mid residual drives a targeted, proportionate low-shelf refinement', () => {
+  const source = makeBalancedStereo(1.0, 0.18);
+  const base = analyzeAudioBuffer(source, SR);
+  const pre = { ...base, zoneEnergyDb: { ...base.zoneEnergyDb, bass: base.zoneEnergyDb.mid + 12.3 } };
+  const post = { ...base, zoneEnergyDb: { ...base.zoneEnergyDb, bass: base.zoneEnergyDb.mid + 11.7 } };
+  const objective = resolveObjectiveTarget('streaming');
+  const qc = runQualityControl(pre, post, QC_TARGET_PROFILES[0]);
+  const evaluation = evaluateMultiObjectiveMetrics(pre, post, objective, qc);
+  const eq = createProcessorModule('parametric-eq');
+
+  const refinement = deriveRefinementCommands(pre, post, [eq], objective, qc, evaluation);
+  const eqCommand = refinement.commands.find((command) => command.op === 'configure' && command.processorType === 'parametric-eq');
+  assert.ok(eqCommand && eqCommand.op === 'configure', 'Bass excess must produce an EQ refinement command');
+  const bands = (eqCommand.paramsPatch as { bands?: Array<{ shape: string; freq: number; gain: number }> }).bands;
+  assert.ok(bands?.some((band) => band.shape === 'lowshelf' && band.freq >= 70 && band.freq <= 140 && band.gain < 0),
+    'Bass-vs-mid excess must target the bass band with a negative low shelf, not a 220-340 Hz mud bell');
+  const bassCut = bands!.find((band) => band.shape === 'lowshelf')!;
+  assert.ok(bassCut.gain >= -0.5 && bassCut.gain <= -0.25,
+    `A 0.2 dB miss must trigger a restrained correction, got ${bassCut.gain} dB`);
+  const applied = applyStructuredChainCommands([eq], [eqCommand]);
+  assert.equal(applied.appliedCount, 1, applied.skippedReasons.join('; '));
+  const appliedEq = applied.chain.find((module) => module.type === 'parametric-eq');
+  assert.ok(appliedEq);
+  assert.ok((appliedEq.params as { bands: Array<{ shape: string; gain: number }> }).bands.some((band) => band.shape === 'lowshelf' && band.gain === bassCut.gain));
+
+  const withoutEq = deriveRefinementCommands(pre, post, [], objective, qc, evaluation);
+  assert.ok(withoutEq.commands.some((command) => command.op === 'add' && command.processorType === 'parametric-eq'),
+    'The Director must add a bass-targeted EQ when no parametric EQ exists');
+});
 test('Anti-oscillation step damping reduces LUFS step magnitude when sign reverses', () => {
   const clean = makeBalancedStereo(1.0, 0.18);
   const pre = analyzeAudioBuffer(clean, SR);
