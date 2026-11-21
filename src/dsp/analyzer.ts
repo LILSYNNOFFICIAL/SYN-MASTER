@@ -137,7 +137,9 @@ function estimateChannelTruePeak(samples: Float32Array): {
   // the phase kernel's L1 norm. A monotonic deque tracks that window maximum
   // in amortized O(1), avoiding both a second 12-sample scan and a large bitmap.
   const threshold = Math.min(samplePeak, 1) / Math.max(maxKernelL1, 1e-12);
-  const deque = new Int32Array(n);
+  // The active deque can never exceed the 12-sample FIR window. A 16-slot
+  // ring buffer avoids allocating an index array proportional to track length.
+  const deque = new Int32Array(16);
   let head = 0;
   let tail = 0;
   let nextAdd = 0;
@@ -156,14 +158,14 @@ function estimateChannelTruePeak(samples: Float32Array): {
       const magnitude = Math.abs(samples[nextAdd]);
       while (
         tail > head &&
-        magnitude >= Math.abs(samples[deque[tail - 1]])
+        magnitude >= Math.abs(samples[deque[(tail - 1) & 15]])
       ) {
         tail--;
       }
-      deque[tail++] = nextAdd++;
+      deque[tail & 15] = nextAdd++;\n      tail++;
     }
 
-    if (Math.abs(samples[deque[head]]) <= threshold) continue;
+    if (Math.abs(samples[deque[head & 15]]) <= threshold) continue;
 
     let acc0 = 0;
     let acc1 = 0;
