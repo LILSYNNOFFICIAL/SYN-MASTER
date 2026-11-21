@@ -76,6 +76,7 @@ interface Props {
   onChangeConvergenceThreshold: (val: number) => void;
   onAnalyzeTrack: () => void;
   onRunMasterDirector: () => void;
+  onFixAllProblems: () => void;
   onPauseToggle: () => void;
   onStopDirector: () => void;
   onUndoLast: () => void;
@@ -164,6 +165,7 @@ export const AiMasterView: React.FC<Props> = ({
   onChangeConvergenceThreshold,
   onAnalyzeTrack,
   onRunMasterDirector,
+  onFixAllProblems,
   onPauseToggle,
   onStopDirector,
   onUndoLast,
@@ -612,10 +614,16 @@ export const AiMasterView: React.FC<Props> = ({
 
               {/* Active Technical Findings (only unresolved / improved / partially resolved / unverified / active) */}
               <div data-testid="active-findings-section" className="flex flex-col gap-2">
+                <p className="text-[10px] text-[#9CA3AF]">Run an autonomous repair pass against the original track. SYN-MASTER applies the best validated chain, then re-analyzes the result so unresolved issues stay visible.</p>
                 <div className="text-[11px] font-bold uppercase tracking-wider text-[#F7F8FA] flex items-center justify-between">
                   <span>
                     Remaining Active Problems ({effectiveVerification.activeFindings.length})
                   </span>
+                  {effectiveVerification.activeFindings.length > 0 && (
+                    <button type="button" onClick={onFixAllProblems} disabled={directorRunning} className="rounded-md bg-[#D4AF37] px-3 py-1.5 text-[10px] font-extrabold tracking-wide text-[#08090B] hover:bg-[#F2CA52] disabled:cursor-not-allowed disabled:opacity-50">
+                      {directorRunning ? 'FIXING & VERIFYING…' : 'FIX ALL & VERIFY'}
+                    </button>
+                  )}
                   {effectiveVerification.activeFindings.length === 0 && (
                     <span className="text-[#34D399] font-mono-tabular">
                       0 ACTIVE TECHNICAL PROBLEMS

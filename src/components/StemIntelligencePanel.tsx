@@ -139,12 +139,23 @@ export const StemIntelligencePanel: React.FC = () => {
       }
 
       const deviceMemoryGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-      const maxOutputBytes = Math.min(512, Math.max(128, deviceMemoryGb * 128)) * 1024 * 1024;
       const estimatedOutputBytes = decoded.duration * Math.max(44_100, sessionSampleRate) * 8 * Float32Array.BYTES_PER_ELEMENT;
-      if (estimatedOutputBytes > maxOutputBytes) {
+      const memoryBudgetBytes = Math.min(2_048, Math.max(768, deviceMemoryGb * 512)) * 1024 * 1024;
+      if (estimatedOutputBytes > memoryBudgetBytes) {
         const estimatedMb = Math.round(estimatedOutputBytes / (1024 * 1024));
-        const limitMb = Math.round(maxOutputBytes / (1024 * 1024));
-        throw new Error(`This mix would require about ${estimatedMb} MB for four uncompressed stems. The current browser memory guard is ${limitMb} MB. Try a shorter section or a device with more available memory.`);
+        const budgetMb = Math.round(memoryBudgetBytes / (1024 * 1024));
+        throw new Error(`This separation needs about ${estimatedMb} MB of decoded stem memory, above this device's estimated ${budgetMb} MB safe working budget. OPFS now handles chunk accumulation on disk, but Stem Studio still loads all four stems for editing and mixing. Try a shorter section or a device with more memory.`);
+      }
+      if (!navigator.storage?.getDirectory || !navigator.storage?.estimate) {
+        throw new Error('This browser does not support the required temporary disk storage (OPFS). Open SYN-MASTER in a current Chrome or Edge browser over HTTPS.');
+      }
+      const storageEstimate = await navigator.storage.estimate();
+      const availableStorageBytes = Math.max(0, (storageEstimate.quota ?? 0) - (storageEstimate.usage ?? 0));
+      const requiredStorageBytes = Math.ceil(estimatedOutputBytes * 1.15);
+      if (availableStorageBytes < requiredStorageBytes) {
+        const availableMb = Math.floor(availableStorageBytes / (1024 * 1024));
+        const requiredMb = Math.ceil(requiredStorageBytes / (1024 * 1024));
+        throw new Error(`Not enough browser temporary storage for safe stem separation. About ${requiredMb} MB is required, but only ${availableMb} MB is available. Free disk space or clear unused browser site data, then retry.`);
       }
 
       // OfflineAudioContext performs browser-native sample-rate conversion to the
@@ -459,7 +470,7 @@ export const StemIntelligencePanel: React.FC = () => {
           </label>
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-[#A1A1AA]">
-          HT-Demucs ONNX single-model · Drums, Bass, Other, Vocals · 44.1 kHz model audio, resampled to the current session rate. Inference runs locally in this browser tab. The model is downloaded from Hugging Face on first use (about 166 MB) and cached locally for later sessions when browser storage permits. This is the standard single-model variant, not the larger HT-Demucs FT ensemble. Your audio is not uploaded.
+          HT-Demucs ONNX single-model · Drums, Bass, Other, Vocals · 44.1 kHz model audio, resampled to the current session rate. Inference runs locally in this browser tab. Chunk overlap and completed stem data are streamed to temporary OPFS disk files instead of allocating four full-length worker output buffers. The four stems are then loaded into Stem Studio for editing, so final working RAM still depends on device capacity. Temporary files are removed after import. The model downloads from Hugging Face on first use (about 166 MB) and is cached locally when browser storage permits. This is the standard single-model variant, not the larger HT-Demucs FT ensemble. Your audio is not uploaded.
         </p>
         {separating && separationProgress && (
           <div className="mt-3 rounded border border-[#343A49] bg-[#0C0E13] p-3">

@@ -12,11 +12,51 @@ export interface StemSeparationProgress {
   executionProvider?: string;
 }
 
+type StoredStemDescriptor = { id: SeparatedAudioStem['id']; label: string; length: number; leftFile: string; rightFile: string };
+
 type WorkerResponse =
   | { type: 'progress'; jobId: string; stage: StemSeparationProgress['stage']; progress: number; completedChunks?: number; totalChunks?: number; executionProvider?: string }
-  | { type: 'result'; jobId: string; stems: SeparatedAudioStem[] }
+  | { type: 'result'; jobId: string; directoryName: string; stems: StoredStemDescriptor[] }
   | { type: 'cancelled'; jobId: string }
   | { type: 'error'; jobId: string; message: string };
+
+async function cleanupTemporaryStems(jobId: string): Promise<void> {
+  try {
+    const storage = await navigator.storage?.getDirectory?.();
+    if (!storage) return;
+    const directoryName = `syn-master-stems-${jobId.replace(/[^a-zA-Z0-9-]/g, '')}`;
+    await storage.removeEntry(directoryName, { recursive: true }).catch(() => undefined);
+  } catch {
+    // Temporary cleanup is best-effort after worker failure or cancellation.
+  }
+}
+
+async function loadTemporaryStems(directoryName: string, descriptors: StoredStemDescriptor[]): Promise<SeparatedAudioStem[]> {
+  const storage = await navigator.storage?.getDirectory?.();
+  if (!storage) throw new Error('OPFS temporary storage became unavailable before stem import.');
+  const directory = await storage.getDirectoryHandle(directoryName);
+  try {
+    const stems: SeparatedAudioStem[] = [];
+    for (const descriptor of descriptors) {
+      const leftHandle = await directory.getFileHandle(descriptor.leftFile);
+      const rightHandle = await directory.getFileHandle(descriptor.rightFile);
+      const [leftFile, rightFile] = await Promise.all([leftHandle.getFile(), rightHandle.getFile()]);
+      const expectedBytes = descriptor.length * Float32Array.BYTES_PER_ELEMENT;
+      if (leftFile.size !== expectedBytes || rightFile.size !== expectedBytes) {
+        throw new Error(`Temporary ${descriptor.label} stem is incomplete. Expected ${expectedBytes} bytes per channel.`);
+      }
+      const [leftBytes, rightBytes] = await Promise.all([leftFile.arrayBuffer(), rightFile.arrayBuffer()]);
+      stems.push({
+        id: descriptor.id,
+        label: descriptor.label,
+        channels: [new Float32Array(leftBytes), new Float32Array(rightBytes)],
+      });
+    }
+    return stems;
+  } finally {
+    await storage.removeEntry(directoryName, { recursive: true }).catch(() => undefined);
+  }
+}
 
 /** Resample separated stereo stems to the active SYN-MASTER session rate. */
 export async function resampleStereoChannels(
@@ -83,15 +123,23 @@ export function separateWithDemucs(
           executionProvider: message.executionProvider,
         });
       } else if (message.type === 'result') {
-        finish(() => resolve(message.stems));
+        finish(() => {
+          void loadTemporaryStems(message.directoryName, message.stems).then(resolve, reject);
+        });
       } else if (message.type === 'cancelled') {
-        finish(() => reject(new DOMException('Separation cancelled.', 'AbortError')));
+        finish(() => {
+          void cleanupTemporaryStems(jobId).finally(() => reject(new DOMException('Separation cancelled.', 'AbortError')));
+        });
       } else {
-        finish(() => reject(new Error(message.message)));
+        finish(() => {
+          void cleanupTemporaryStems(jobId).finally(() => reject(new Error(message.message)));
+        });
       }
     };
 
-    worker.onerror = (event) => finish(() => reject(new Error(event.message || 'The separation worker crashed.')));
+    worker.onerror = (event) => finish(() => {
+      void cleanupTemporaryStems(jobId).finally(() => reject(new Error(event.message || 'The separation worker crashed.')));
+    });
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) {
       finish(() => reject(new DOMException('Separation cancelled.', 'AbortError')));

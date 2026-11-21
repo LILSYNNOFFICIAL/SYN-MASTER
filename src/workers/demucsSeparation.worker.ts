@@ -10,7 +10,8 @@ import {
   DEMUCS_STEM_ROWS,
   DEMUCS_STRIDE_SAMPLES,
   getDemucsChunkCount,
-  normalizeDemucsOutput,
+  normalizeDemucsRange,
+  shiftDemucsAccumulator,
 } from '../dsp/stemSeparationMath';
 
 const MODEL_URL = 'https://huggingface.co/StemSplitio/htdemucs-onnx/resolve/d54ed9eb60e258ea82131c6ee14578628816456a/htdemucs_fp16weights.onnx';
@@ -21,7 +22,7 @@ type CancelMessage = { type: 'cancel'; jobId: string };
 type WorkerRequest = StartMessage | CancelMessage;
 type WorkerResponse =
   | { type: 'progress'; jobId: string; stage: 'loading-model' | 'initializing' | 'separating'; progress: number; completedChunks?: number; totalChunks?: number; executionProvider?: string }
-  | { type: 'result'; jobId: string; stems: Array<{ id: string; label: string; channels: [Float32Array, Float32Array] }> }
+  | { type: 'result'; jobId: string; directoryName: string; stems: Array<{ id: string; label: string; length: number; leftFile: string; rightFile: string }> }
   | { type: 'cancelled'; jobId: string }
   | { type: 'error'; jobId: string; message: string };
 
@@ -156,92 +157,137 @@ async function runChunks(
   channels: [Float32Array, Float32Array],
   jobId: string,
   provider: string,
-): Promise<Array<{ id: string; label: string; channels: [Float32Array, Float32Array] }>> {
+): Promise<{ directoryName: string; stems: Array<{ id: string; label: string; length: number; leftFile: string; rightFile: string }> }> {
   const totalSamples = channels[0].length;
   const chunkCount = getDemucsChunkCount(totalSamples);
+  const directoryName = `syn-master-stems-${jobId.replace(/[^a-zA-Z0-9-]/g, '')}`;
+  const storage = await self.navigator.storage?.getDirectory?.();
+  if (!storage) throw new Error('This browser does not support OPFS temporary storage. Use a current Chrome, Edge, or another browser with Origin Private File System support.');
+  const directory = await storage.getDirectoryHandle(directoryName, { create: true });
+  const descriptors = DEMUCS_STEM_ROWS.map((stem) => ({
+    id: stem.id,
+    label: stem.label,
+    length: totalSamples,
+    leftFile: `${stem.id}.left.f32`,
+    rightFile: `${stem.id}.right.f32`,
+  }));
+  let writers: FileSystemWritableFileStream[];
+  try {
+    writers = (await Promise.all(descriptors.map(async (stem) => {
+      const left = await directory.getFileHandle(stem.leftFile, { create: true });
+      const right = await directory.getFileHandle(stem.rightFile, { create: true });
+      return [await left.createWritable(), await right.createWritable()];
+    }))).flat();
+  } catch (cause) {
+    await storage.removeEntry(directoryName, { recursive: true }).catch(() => undefined);
+    throw cause;
+  }
   const outputs = DEMUCS_STEM_ROWS.map(() => [
-    new Float32Array(totalSamples),
-    new Float32Array(totalSamples),
+    new Float32Array(DEMUCS_SEGMENT_SAMPLES),
+    new Float32Array(DEMUCS_SEGMENT_SAMPLES),
   ] as [Float32Array, Float32Array]);
-  const weights = new Float32Array(totalSamples);
+  const weights = new Float32Array(DEMUCS_SEGMENT_SAMPLES);
   const input = new Float32Array(2 * DEMUCS_SEGMENT_SAMPLES);
   const windowCache = new Map<string, Float32Array>();
   const inputName = session.inputNames[0];
   const outputName = session.outputNames[0];
+  let flushedSamples = 0;
 
-  if (session.inputNames.length !== 1 || session.outputNames.length !== 1) {
-    throw new Error('The selected Demucs model has an unexpected input/output signature.');
-  }
-
-  for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
-    if (cancelledJobs.has(jobId)) throw new DOMException('Separation cancelled.', 'AbortError');
-    const start = chunkIndex * DEMUCS_STRIDE_SAMPLES;
-    const end = Math.min(start + DEMUCS_SEGMENT_SAMPLES, totalSamples);
-    const validSamples = end - start;
-    input.fill(0);
-    input.set(channels[0].subarray(start, end), 0);
-    input.set(channels[1].subarray(start, end), DEMUCS_SEGMENT_SAMPLES);
-
-    const result = await session.run({
-      [inputName]: new ort.Tensor('float32', input, [1, 2, DEMUCS_SEGMENT_SAMPLES]),
-    });
-    if (cancelledJobs.has(jobId)) throw new DOMException('Separation cancelled.', 'AbortError');
-
-    const tensor = result[outputName];
-    if (!tensor || tensor.dims.length !== 4 ||
-        tensor.dims[0] !== 1 || tensor.dims[1] !== DEMUCS_STEM_ROWS.length ||
-        tensor.dims[2] !== 2 || tensor.dims[3] !== DEMUCS_SEGMENT_SAMPLES ||
-        !(tensor.data instanceof Float32Array)) {
-      throw new Error('The Demucs model returned an unsupported tensor layout. Expected [1, 4, 2, 343980].');
+  try {
+    if (session.inputNames.length !== 1 || session.outputNames.length !== 1) {
+      throw new Error('The selected Demucs model has an unexpected input/output signature.');
     }
+    for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+      if (cancelledJobs.has(jobId)) throw new DOMException('Separation cancelled.', 'AbortError');
+      const start = chunkIndex * DEMUCS_STRIDE_SAMPLES;
+      const end = Math.min(start + DEMUCS_SEGMENT_SAMPLES, totalSamples);
+      const validSamples = end - start;
+      input.fill(0);
+      input.set(channels[0].subarray(start, end), 0);
+      input.set(channels[1].subarray(start, end), DEMUCS_SEGMENT_SAMPLES);
 
-    const windowKey = `${chunkIndex > 0}:${chunkIndex < chunkCount - 1}`;
-    let window = windowCache.get(windowKey);
-    if (!window) {
-      window = createDemucsChunkWindow(
-        DEMUCS_SEGMENT_SAMPLES,
-        DEMUCS_OVERLAP_SAMPLES,
-        chunkIndex > 0,
-        chunkIndex < chunkCount - 1,
-      );
-      windowCache.set(windowKey, window);
-    }
+      const result = await session.run({
+        [inputName]: new ort.Tensor('float32', input, [1, 2, DEMUCS_SEGMENT_SAMPLES]),
+      });
+      if (cancelledJobs.has(jobId)) throw new DOMException('Separation cancelled.', 'AbortError');
 
-    const data = tensor.data;
-    const rowSize = 2 * DEMUCS_SEGMENT_SAMPLES;
-    for (let stemIndex = 0; stemIndex < DEMUCS_STEM_ROWS.length; stemIndex += 1) {
-      const rowOffset = stemIndex * rowSize;
-      for (let channelIndex = 0; channelIndex < 2; channelIndex += 1) {
-        const channelOffset = rowOffset + channelIndex * DEMUCS_SEGMENT_SAMPLES;
-        const channelData = data.subarray(channelOffset, channelOffset + DEMUCS_SEGMENT_SAMPLES);
-        accumulateDemucsChunk(outputs[stemIndex][channelIndex], channelData, start, validSamples, window);
+      const tensor = result[outputName];
+      if (!tensor || tensor.dims.length !== 4 ||
+          tensor.dims[0] !== 1 || tensor.dims[1] !== DEMUCS_STEM_ROWS.length ||
+          tensor.dims[2] !== 2 || tensor.dims[3] !== DEMUCS_SEGMENT_SAMPLES ||
+          !(tensor.data instanceof Float32Array)) {
+        throw new Error('The Demucs model returned an unsupported tensor layout. Expected [1, 4, 2, 343980].');
       }
-    }
-    accumulateDemucsWeights(weights, start, validSamples, window);
 
-    post({
-      type: 'progress',
-      jobId,
-      stage: 'separating',
-      progress: (chunkIndex + 1) / chunkCount,
-      completedChunks: chunkIndex + 1,
-      totalChunks: chunkCount,
-      executionProvider: provider,
-    });
-  }
+      const windowKey = `${chunkIndex > 0}:${chunkIndex < chunkCount - 1}`;
+      let window = windowCache.get(windowKey);
+      if (!window) {
+        window = createDemucsChunkWindow(
+          DEMUCS_SEGMENT_SAMPLES,
+          DEMUCS_OVERLAP_SAMPLES,
+          chunkIndex > 0,
+          chunkIndex < chunkCount - 1,
+        );
+        windowCache.set(windowKey, window);
+      }
 
-  return outputs.map((stem, index) => {
-    normalizeDemucsOutput(stem[0], weights);
-    normalizeDemucsOutput(stem[1], weights);
-    for (const channel of stem) {
-      for (let sample = 0; sample < channel.length; sample += 1) {
-        if (!Number.isFinite(channel[sample])) {
-          throw new Error(`The model produced a non-finite sample in the ${DEMUCS_STEM_ROWS[index].label} stem.`);
+      const data = tensor.data;
+      const rowSize = 2 * DEMUCS_SEGMENT_SAMPLES;
+      for (let stemIndex = 0; stemIndex < DEMUCS_STEM_ROWS.length; stemIndex += 1) {
+        const rowOffset = stemIndex * rowSize;
+        for (let channelIndex = 0; channelIndex < 2; channelIndex += 1) {
+          const channelOffset = rowOffset + channelIndex * DEMUCS_SEGMENT_SAMPLES;
+          const channelData = data.subarray(channelOffset, channelOffset + DEMUCS_SEGMENT_SAMPLES);
+          accumulateDemucsChunk(outputs[stemIndex][channelIndex], channelData, 0, validSamples, window);
         }
       }
+      accumulateDemucsWeights(weights, 0, validSamples, window);
+
+      const safeCount = chunkIndex === chunkCount - 1
+        ? totalSamples - flushedSamples
+        : Math.min(DEMUCS_STRIDE_SAMPLES, totalSamples - flushedSamples);
+      for (let stemIndex = 0; stemIndex < outputs.length; stemIndex += 1) {
+        for (let channelIndex = 0; channelIndex < 2; channelIndex += 1) {
+          const accumulated = outputs[stemIndex][channelIndex];
+          const normalized = normalizeDemucsRange(accumulated, weights, safeCount);
+          for (const value of normalized) {
+            if (!Number.isFinite(value)) {
+              throw new Error(`The model produced a non-finite sample in the ${DEMUCS_STEM_ROWS[stemIndex].label} stem.`);
+            }
+          }
+          const writer = writers[stemIndex * 2 + channelIndex];
+          const writeData = new Uint8Array(normalized.byteLength);
+          new Float32Array(writeData.buffer).set(normalized);
+          await writer.write({
+            type: 'write',
+            position: flushedSamples * Float32Array.BYTES_PER_ELEMENT,
+            data: writeData,
+          });
+        }
+      }
+      flushedSamples += safeCount;
+
+      if (safeCount < DEMUCS_SEGMENT_SAMPLES) {
+        shiftDemucsAccumulator(outputs.flatMap((stem) => Array.from(stem)), weights, safeCount);
+      }
+
+      post({
+        type: 'progress',
+        jobId,
+        stage: 'separating',
+        progress: (chunkIndex + 1) / chunkCount,
+        completedChunks: chunkIndex + 1,
+        totalChunks: chunkCount,
+        executionProvider: provider,
+      });
     }
-    return { id: DEMUCS_STEM_ROWS[index].id, label: DEMUCS_STEM_ROWS[index].label, channels: stem };
-  });
+    await Promise.all(writers.map((writer) => writer.close()));
+    return { directoryName, stems: descriptors };
+  } catch (cause) {
+    await Promise.all(writers.map((writer) => writer.abort().catch(() => undefined)));
+    await storage.removeEntry(directoryName, { recursive: true }).catch(() => undefined);
+    throw cause;
+  }
 }
 
 async function separate(job: StartMessage): Promise<void> {
@@ -283,9 +329,16 @@ async function separate(job: StartMessage): Promise<void> {
       stems = await runChunks(session, channels, jobId, created.provider);
     }
 
-    if (cancelledJobs.has(jobId)) throw new DOMException('Separation cancelled.', 'AbortError');
-    const transfer = stems.flatMap((stem) => [stem.channels[0].buffer, stem.channels[1].buffer]);
-    post({ type: 'result', jobId, stems }, transfer);
+    if (cancelledJobs.has(jobId)) {
+      const storage = await self.navigator.storage?.getDirectory?.();
+      if (storage) await storage.removeEntry(stems.directoryName, { recursive: true }).catch(() => undefined);
+      throw new DOMException('Separation cancelled.', 'AbortError');
+    }
+    if (session) {
+      await session.release();
+      session = null;
+    }
+    post({ type: 'result', jobId, directoryName: stems.directoryName, stems: stems.stems });
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') {
       post({ type: 'cancelled', jobId });

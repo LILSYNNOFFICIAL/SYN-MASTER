@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import type { AudioAnalysis, LabSubTab, ProcessorModule } from '../types/mastering';
-import { StemIntelligencePanel } from './StemIntelligencePanel';
 import {
   LoudnessHistoryCanvas,
   SpectrumAndEQCanvas,
@@ -68,7 +67,6 @@ export const SynLabView: React.FC<Props> = React.memo(({
             { id: 'dynamics', label: 'Dynamics Lab' },
             { id: 'stereo', label: 'Stereo Lab' },
             { id: 'distortion', label: 'Distortion Lab' },
-            { id: 'stems', label: 'Stem Intelligence' },
           ] as const
         ).map((t) => (
           <button
@@ -252,7 +250,6 @@ export const SynLabView: React.FC<Props> = React.memo(({
         </div>
       )}
 
-      {subTab === 'stems' && <StemIntelligencePanel />}
     </div>
   );
 });
