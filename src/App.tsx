@@ -1801,8 +1801,8 @@ export default function App() {
 
         {/* Center Mastering Stage */}
         <main className="lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">
-          {/* Mobile Tab Strip */}
-          <div aria-label="Mastering Workspace Tools" className="flex items-center gap-1 overflow-x-auto pb-1">
+          {/* Mastering Workspace Navigation */}
+          <div aria-label="Workspace Navigation" className="flex items-center gap-1 overflow-x-auto pb-1">
             {(
               [
                 { id: 'studio', label: 'Mastering' },
@@ -1812,6 +1812,7 @@ export default function App() {
                 { id: 'reference', label: 'Reference' },
                 { id: 'battle', label: 'A/B Battle' },
                 { id: 'qc', label: 'Quality Check' },
+                { id: 'plugins', label: 'Plugins' },
               ] as const
             ).map((item) => (
               <button
@@ -2344,7 +2345,7 @@ export default function App() {
         </main>
 
         {/* Right Sidebar: Modular Mastering Chain Rack */}
-        {!fullscreenWorkspace && activeTab !== 'plugins' && (
+        {!fullscreenWorkspace && activeTab !== 'plugins' && activeTab !== 'stems' && (
           <MasteringRack
             chain={chain}
             chainBypassed={chainBypassed}
