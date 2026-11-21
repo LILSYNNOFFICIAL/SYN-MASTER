@@ -162,7 +162,8 @@ function estimateChannelTruePeak(samples: Float32Array): {
       ) {
         tail--;
       }
-      deque[tail & 15] = nextAdd++;\n      tail++;
+      deque[tail & 15] = nextAdd++;
+      tail++;
     }
 
     if (Math.abs(samples[deque[head & 15]]) <= threshold) continue;
