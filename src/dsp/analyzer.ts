@@ -147,8 +147,8 @@ function estimateChannelTruePeak(samples: Float32Array): {
 
   for (let sampleIndex = 0; sampleIndex < n; sampleIndex++) {
     if (Math.abs(samples[sampleIndex]) <= candidateThreshold) continue;
-    const firstCenter = Math.max(0, sampleIndex - rightReach);
-    const lastCenter = Math.min(n - 2, sampleIndex + leftReach);
+    const firstCenter = Math.max(0, sampleIndex - leftReach);
+    const lastCenter = Math.min(n - 2, sampleIndex + rightReach);
     for (let center = firstCenter; center <= lastCenter; center++) {
       candidates[center] = 1;
     }
