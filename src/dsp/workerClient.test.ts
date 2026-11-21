@@ -5,9 +5,9 @@ import { processChainOffline } from './offlineDsp.ts';
 import { createDspWorkerClient } from './workerClient.ts';
 import type { DspWorkerRequest, DspWorkerSuccessResponse } from './dspWorker.ts';
 
-function makeSource(): Float32Array[] {
-  const left = new Float32Array(4096);
-  const right = new Float32Array(4096);
+function makeSource(length = 4096): Float32Array[] {
+  const left = new Float32Array(length);
+  const right = new Float32Array(length);
   for (let i = 0; i < left.length; i++) {
     const sample = 0.2 * Math.sin((2 * Math.PI * 440 * i) / 44100);
     left[i] = sample;
@@ -80,7 +80,7 @@ test('uses worker results and keeps transferred input clones separate from the s
   assert.equal(worker.terminated, true);
 });
 
-test('terminates a timed-out worker and falls back instead of leaving a pending job', async () => {
+test('terminates a timed-out worker and falls back for short audio instead of leaving a pending job', async () => {
   const source = makeSource();
   const worker = new FakeWorker();
   worker.respond = false;
@@ -97,5 +97,32 @@ test('terminates a timed-out worker and falls back instead of leaving a pending 
   assert.equal(result.usedWorker, false);
   assert.equal(result.channels.length, 2);
   assert.equal(worker.terminated, true);
+  client.dispose();
+});
+
+test('does not run a long-form DSP fallback on the UI thread when the worker is unavailable', async () => {
+  const source = makeSource(31 * 44100);
+  const client = createDspWorkerClient({ workerFactory: () => null });
+  await assert.rejects(
+    client.renderAndAnalyzeOffThread({ sourceChannels: source, sampleRate: 44100, chain: [] }),
+    /Main-thread fallback was skipped to prevent the interface from freezing.*Web Worker is unavailable/,
+  );
+  client.dispose();
+});
+
+test('does not run a long-form DSP fallback on the UI thread after a worker timeout', async () => {
+  const source = makeSource(31 * 44100);
+  const worker = new FakeWorker();
+  worker.respond = false;
+  const client = createDspWorkerClient({
+    workerFactory: () => worker as unknown as Worker,
+    workerTimeoutMs: 5,
+  });
+  await assert.rejects(
+    client.renderAndAnalyzeOffThread({ sourceChannels: source, sampleRate: 44100, chain: [] }),
+    /Main-thread fallback was skipped to prevent the interface from freezing.*timed out after 5 ms/,
+  );
+  assert.equal(worker.terminated, true);
+  assert.equal(client.getPendingJobCount(), 0);
   client.dispose();
 });
