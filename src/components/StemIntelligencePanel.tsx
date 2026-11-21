@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, AudioLines, FileAudio, Layers3, Loader2, Plus, ScanSearch, Trash2 } from 'lucide-react';
+import { AlertTriangle, AudioLines, FileAudio, Layers3, Loader2, Plus, ScanSearch, Sparkles, Trash2, X } from 'lucide-react';
+import { resampleStereoChannels, separateWithDemucs, type StemSeparationProgress } from '../services/stemSeparation';
 import { createProcessorModule } from '../dsp/chainValidation';
 import { renderStemBusMix, type StemBusMixResult } from '../dsp/stemBusRenderer';
 import { analyzeAudioBuffer } from '../dsp/analyzer';
@@ -65,9 +66,13 @@ export const StemIntelligencePanel: React.FC = () => {
   const [directorPreview, setDirectorPreview] = useState<OffThreadRenderResult | null>(null);
   const [referenceTrack, setReferenceTrack] = useState<{ name: string; analysis: AudioAnalysis } | null>(null);
   const [referenceBusy, setReferenceBusy] = useState(false);
+  const [separating, setSeparating] = useState(false);
+  const [separationProgress, setSeparationProgress] = useState<StemSeparationProgress | null>(null);
+  const separationAbortRef = useRef<AbortController | null>(null);
   const directorStopRef = useRef(false);
 
   useEffect(() => () => {
+    separationAbortRef.current?.abort();
     if (contextRef.current && contextRef.current.state !== 'closed') {
       void contextRef.current.close();
     }
@@ -111,6 +116,107 @@ export const StemIntelligencePanel: React.FC = () => {
     } finally {
       setBusy(false);
     }
+  };
+
+  const separateMixFile = async (file: File | null) => {
+    if (!file || separating) return;
+    const controller = new AbortController();
+    separationAbortRef.current = controller;
+    setSeparating(true);
+    setSeparationProgress({ stage: 'loading-model', progress: 0 });
+    setError(null);
+
+    try {
+      if (file.size > 512 * 1024 * 1024) {
+        throw new Error('The source file exceeds the 512 MB browser import limit. Export a shorter or smaller stereo mix and try again.');
+      }
+      const context = contextRef.current ?? new AudioContext();
+      contextRef.current = context;
+      const sessionSampleRate = stems[0]?.sampleRate ?? context.sampleRate;
+      const decoded = await context.decodeAudioData(await file.arrayBuffer());
+      if (decoded.numberOfChannels > 2) {
+        throw new Error('The source mix must be mono or stereo. Export a stereo mix and try again.');
+      }
+
+      const deviceMemoryGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+      const maxOutputBytes = Math.min(512, Math.max(128, deviceMemoryGb * 128)) * 1024 * 1024;
+      const estimatedOutputBytes = decoded.duration * Math.max(44_100, sessionSampleRate) * 8 * Float32Array.BYTES_PER_ELEMENT;
+      if (estimatedOutputBytes > maxOutputBytes) {
+        const estimatedMb = Math.round(estimatedOutputBytes / (1024 * 1024));
+        const limitMb = Math.round(maxOutputBytes / (1024 * 1024));
+        throw new Error(`This mix would require about ${estimatedMb} MB for four uncompressed stems. The current browser memory guard is ${limitMb} MB. Try a shorter section or a device with more available memory.`);
+      }
+
+      // OfflineAudioContext performs browser-native sample-rate conversion to the
+      // fixed 44.1 kHz input expected by the exported HT-Demucs graph.
+      const outputLength = Math.max(1, Math.ceil(decoded.duration * 44_100));
+      const offline = new OfflineAudioContext(2, outputLength, 44_100);
+      const input = offline.createBuffer(2, decoded.length, decoded.sampleRate);
+      const left = decoded.getChannelData(0);
+      input.copyToChannel(left, 0);
+      input.copyToChannel(decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : left, 1);
+      const source = offline.createBufferSource();
+      source.buffer = input;
+      source.connect(offline.destination);
+      source.start(0);
+      const resampled = await offline.startRendering();
+      if (controller.signal.aborted) throw new DOMException('Separation cancelled.', 'AbortError');
+
+      const separated = await separateWithDemucs(
+        [resampled.getChannelData(0).slice(), resampled.getChannelData(1).slice()],
+        controller.signal,
+        setSeparationProgress,
+      );
+      const baseName = file.name.replace(/\.[^.]+$/, '');
+      const imported: LoadedStem[] = [];
+      setSeparationProgress({ stage: 'resampling', progress: 0, completedChunks: 0, totalChunks: separated.length });
+      for (let index = 0; index < separated.length; index += 1) {
+        const stem = separated[index];
+        if (controller.signal.aborted) throw new DOMException('Separation cancelled.', 'AbortError');
+        const channels = await resampleStereoChannels(stem.channels, 44_100, sessionSampleRate);
+        if (controller.signal.aborted) throw new DOMException('Separation cancelled.', 'AbortError');
+        stem.channels = channels;
+        setSeparationProgress({
+          stage: 'resampling',
+          progress: (index + 1) / separated.length,
+          completedChunks: index + 1,
+          totalChunks: separated.length,
+        });
+        imported.push({
+          id: makeStemId(),
+          name: `${baseName} · ${stem.label}`,
+          fileName: `${baseName}_${stem.id}.wav`,
+          role: stem.id === 'other' ? 'instruments' : stem.id,
+          channels,
+          sampleRate: sessionSampleRate,
+          offsetSamples: 0,
+        });
+      }
+      setAnalysis(null);
+      setProcessedMix(null);
+      setDirectorReport(null);
+      setDirectorPreview(null);
+      setDirectorProgress(null);
+      setStems((current) => [...current, ...imported]);
+      setChainsByStemId((current) => ({
+        ...current,
+        ...Object.fromEntries(imported.map((stem) => [stem.id, []])),
+      }));
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') {
+        setError('Stem separation was cancelled. No partial stems were added.');
+      } else {
+        setError(cause instanceof Error ? cause.message : 'AI stem separation failed.');
+      }
+    } finally {
+      separationAbortRef.current = null;
+      setSeparating(false);
+      setSeparationProgress(null);
+    }
+  };
+
+  const cancelSeparation = () => {
+    separationAbortRef.current?.abort();
   };
 
   const updateStem = (id: string, patch: Partial<Pick<LoadedStem, 'role' | 'offsetSamples'>>) => {
@@ -326,6 +432,67 @@ export const StemIntelligencePanel: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-4">
+      <section className="rounded-lg border border-[#D4AF37]/30 bg-gradient-to-br from-[#171610] to-[#111217] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="rounded-md border border-[#D4AF37]/30 bg-[#D4AF37]/10 p-2 text-[#D4AF37]">
+              <Sparkles size={18} />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold tracking-wide text-[#F7F8FA]">AI STEM SEPARATION</h3>
+              <p className="text-xs text-[#9CA3AF]">Turn one stereo mix into four editable source stems.</p>
+            </div>
+          </div>
+          <label className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-bold transition-colors ${separating ? 'cursor-not-allowed border-[#3B4150] text-[#6B7280]' : 'cursor-pointer border-[#D4AF37]/50 bg-[#D4AF37] text-[#08090B] hover:bg-[#E6C65C]'}`}>
+            {separating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            {separating ? 'Separating…' : 'Choose Mix & Separate'}
+            <input
+              type="file"
+              accept="audio/*,.wav,.mp3,.flac,.aiff,.m4a"
+              className="hidden"
+              disabled={separating || busy || directorRunning}
+              onChange={(event) => {
+                void separateMixFile(event.currentTarget.files?.[0] ?? null);
+                event.currentTarget.value = '';
+              }}
+            />
+          </label>
+        </div>
+        <p className="mt-3 text-[11px] leading-relaxed text-[#A1A1AA]">
+          HT-Demucs ONNX single-model · Drums, Bass, Other, Vocals · 44.1 kHz model audio, resampled to the current session rate. Inference runs locally in this browser tab. The model is downloaded from Hugging Face on first use (about 166 MB) and cached locally for later sessions when browser storage permits. This is the standard single-model variant, not the larger HT-Demucs FT ensemble. Your audio is not uploaded.
+        </p>
+        {separating && separationProgress && (
+          <div className="mt-3 rounded border border-[#343A49] bg-[#0C0E13] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[10px]">
+              <span className="font-semibold text-[#D4AF37]">
+                {separationProgress.stage === 'loading-model'
+                  ? `Loading model · ${separationProgress.progress > 0 ? `${Math.round(separationProgress.progress * 100)}%` : 'first use downloads ~166 MB'}`
+                  : separationProgress.stage === 'initializing'
+                  ? 'Initializing inference runtime…'
+                  : separationProgress.stage === 'resampling'
+                  ? `Matching session rate · ${separationProgress.completedChunks ?? 0}/${separationProgress.totalChunks ?? 4} stems`
+                  : `Separating audio · ${separationProgress.completedChunks ?? 0}/${separationProgress.totalChunks ?? '…'} chunks`}
+              </span>
+              {separationProgress.executionProvider && (
+                <span className="font-mono-tabular text-[#9CA3AF]">{separationProgress.executionProvider}</span>
+              )}
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#292D38]">
+              <div
+                className={`h-full rounded-full bg-[#D4AF37] transition-all ${(separationProgress.stage === 'loading-model' && separationProgress.progress === 0) || separationProgress.stage === 'initializing' ? 'w-1/5 animate-pulse' : ''}`}
+                style={separationProgress.progress > 0 ? { width: `${Math.round(separationProgress.progress * 100)}%` } : undefined}
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[9px] text-[#7F8795]">Large mixes may take several minutes depending on hardware.</span>
+              <button type="button" onClick={cancelSeparation} className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-300 hover:text-red-200">
+                <X size={12} /> Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
       <section className="rounded-lg border border-[#292D38] bg-[#111217] p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -345,7 +512,7 @@ export const StemIntelligencePanel: React.FC = () => {
               multiple
               accept="audio/*,.wav,.mp3,.flac,.aiff,.m4a"
               className="hidden"
-              disabled={busy}
+              disabled={busy || separating}
               onChange={(event) => {
                 void importFiles(event.currentTarget.files);
                 event.currentTarget.value = '';
@@ -356,7 +523,7 @@ export const StemIntelligencePanel: React.FC = () => {
         <p className="mt-3 text-[11px] leading-relaxed text-[#8B93A3]">
           Import mono or stereo WAV/audio stems. Files are decoded to one session sample rate.
           Imported stems start at sample 0; adjust offsets below when their timeline positions differ.
-          This tool analyzes supplied stems. It does not separate a stereo mix into stems.
+          For a full stereo mix, use AI Stem Separation above to generate Drums, Bass, Other, and Vocals automatically.
         </p>
       </section>
 
@@ -411,7 +578,7 @@ export const StemIntelligencePanel: React.FC = () => {
           <div className="mt-4 flex justify-end">
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || separating}
               onClick={runAnalysis}
               className="inline-flex items-center gap-2 rounded-md bg-[#D4AF37] px-4 py-2 text-xs font-bold text-[#08090B] hover:bg-[#E6C65C] disabled:opacity-50"
             >
@@ -430,7 +597,7 @@ export const StemIntelligencePanel: React.FC = () => {
             </div>
             <button
               type="button"
-              disabled={rendering || busy}
+              disabled={rendering || busy || separating}
               onClick={() => void renderProcessedMix()}
               className="inline-flex items-center gap-2 rounded-md bg-[#D4AF37] px-4 py-2 text-xs font-bold text-[#08090B] hover:bg-[#E6C65C] disabled:opacity-50"
             >
@@ -548,7 +715,7 @@ export const StemIntelligencePanel: React.FC = () => {
                 type="file"
                 accept="audio/*,.wav,.mp3,.flac,.aiff,.m4a"
                 className="hidden"
-                disabled={referenceBusy || directorRunning}
+                disabled={referenceBusy || directorRunning || separating}
                 onChange={(event) => {
                   void importReference(event.currentTarget.files?.[0] ?? null);
                   event.currentTarget.value = '';
@@ -566,7 +733,7 @@ export const StemIntelligencePanel: React.FC = () => {
               </div>
               <button
                 type="button"
-                disabled={directorRunning}
+                disabled={directorRunning || separating}
                 onClick={() => { setReferenceTrack(null); setDirectorReport(null); setDirectorPreview(null); setDirectorProgress(null); }}
                 className="rounded px-2 py-1 text-[10px] text-[#9CA3AF] hover:bg-red-500/10 hover:text-red-300"
               >Remove Reference</button>
@@ -583,14 +750,14 @@ export const StemIntelligencePanel: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
             <label className="text-[10px] text-[#8B93A3]">Operating Mode
-              <select value={directorMode} disabled={directorRunning} onChange={(event) => { setDirectorMode(event.target.value as DirectorOperatingMode); setDirectorReport(null); setDirectorPreview(null); }} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
+              <select value={directorMode} disabled={directorRunning || separating} onChange={(event) => { setDirectorMode(event.target.value as DirectorOperatingMode); setDirectorReport(null); setDirectorPreview(null); }} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
                 <option value="manual">Manual · Plan only</option>
                 <option value="assisted">Assisted · One verified pass</option>
                 <option value="autonomous">Autonomous · Iterative refinement</option>
               </select>
             </label>
             <label className="text-[10px] text-[#8B93A3]">Mastering Objective
-              <select value={directorObjective} disabled={directorRunning} onChange={(event) => { setDirectorObjective(event.target.value as MasteringObjectiveId); setDirectorReport(null); setDirectorPreview(null); }} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
+              <select value={directorObjective} disabled={directorRunning || separating} onChange={(event) => { setDirectorObjective(event.target.value as MasteringObjectiveId); setDirectorReport(null); setDirectorPreview(null); }} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
                 <option value="streaming">Streaming</option>
                 <option value="commercial-loudness">Commercial Loudness</option>
                 <option value="dynamic">Dynamic</option>
@@ -609,7 +776,7 @@ export const StemIntelligencePanel: React.FC = () => {
               {directorRunning ? (
                 <button type="button" onClick={stopDirector} className="w-full rounded-md border border-red-500/40 px-4 py-2 text-xs font-bold text-red-300 hover:bg-red-500/10">Stop Director</button>
               ) : (
-                <button type="button" disabled={busy || rendering} onClick={() => void runDirector()} className="w-full rounded-md bg-[#D4AF37] px-4 py-2 text-xs font-bold text-[#08090B] hover:bg-[#E6C65C] disabled:opacity-50">Run Director</button>
+                <button type="button" disabled={busy || rendering || separating} onClick={() => void runDirector()} className="w-full rounded-md bg-[#D4AF37] px-4 py-2 text-xs font-bold text-[#08090B] hover:bg-[#E6C65C] disabled:opacity-50">Run Director</button>
               )}
             </div>
           </div>
