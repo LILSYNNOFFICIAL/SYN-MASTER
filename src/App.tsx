@@ -88,6 +88,7 @@ import { BattleModeView } from './components/BattleModeView';
 import { QualityControlView, ReferenceMatchView } from './components/ReferenceAndQcViews';
 import { PluginManagerView } from './components/PluginManagerView';
 import { ExportModal, SettingsModal } from './components/Modals';
+import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -1845,34 +1846,7 @@ export default function App() {
 
         {/* Center Mastering Stage */}
         <main className="lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">
-          {/* Mastering Workspace Navigation */}
-          <div aria-label="Workspace Navigation" className="flex items-center gap-1 overflow-x-auto pb-1">
-            {(
-              [
-                { id: 'studio', label: 'Mastering' },
-                { id: 'ai', label: 'AI Director' },
-                { id: 'lab', label: 'Analysis' },
-                { id: 'stems', label: 'Stem Studio' },
-                { id: 'reference', label: 'Reference' },
-                { id: 'battle', label: 'A/B Battle' },
-                { id: 'qc', label: 'Quality Check' },
-                { id: 'plugins', label: 'Plugins' },
-              ] as const
-            ).map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActiveTab(item.id)}
-                className={`px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap ${
-                  activeTab === item.id
-                    ? 'bg-[#D4AF37] text-[#070709]'
-                    : 'bg-[#14161D] text-[#9CA3AF]'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+          <WorkspaceNavigation activeTab={activeTab} onSelect={setActiveTab} />
 
           {/* Transport & Waveform Stage (Full waveform on Studio & Reference; compact transport bar on other tabs) */}
           {!activeTrack && (activeTab === 'plugins' || activeTab === 'stems') ? null : !activeTrack ? (
