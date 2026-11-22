@@ -1,0 +1,2142 @@
+import type {
+  AiChainLifecycleState,
+  AIMasteringStrategy,
+  AudioAnalysis,
+  ChainCommand,
+  CustomObjectiveSpec,
+  DirectorActivityEntry,
+  DirectorCheckpoint,
+  DirectorDiagnosisReport,
+  DirectorOperatingMode,
+  DirectorRecommendation,
+  EQBand,
+  ExportConfig,
+  ExternalPluginRecord,
+  MasterFinalReport,
+  MasteringObjectiveId,
+  MultiObjectiveDimension,
+  MultiObjectiveEvaluation,
+  PluginIntelligenceSummary,
+  ProcessorModule,
+  QCReport,
+  QCTargetProfile,
+  ReferenceComparisonReport,
+  ResolvedObjectiveTarget,
+  StemIntelligenceReport,
+} from '../types/mastering';
+import { validateChain } from '../dsp/chainValidation';
+import type { StemInput, StemSetAnalysis } from '../dsp/stemAnalysis';
+import { renderStemBusMix } from '../dsp/stemBusRenderer';
+import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
+import { renderAndAnalyzeOffThread } from '../dsp/workerClient';
+import { QC_TARGET_PROFILES, runQualityControl } from '../dsp/qc';
+import { analyzeTrackIntelligence, getDiagnosisThresholds } from './analyzeIntelligence';
+import { applyStructuredChainCommands } from './chainCommands';
+import { inspectPluginInventory } from './pluginIntelligence';
+import { validateChainAgainstInventory } from './processorInventory';
+import { computeChainFingerprint, verifyPostFixAnalysis } from './postFixVerification';
+
+export function resolveObjectiveTarget(
+  objectiveId: MasteringObjectiveId,
+  customSpec?: Partial<CustomObjectiveSpec> | null,
+  referenceAnalysis?: AudioAnalysis | null,
+): ResolvedObjectiveTarget {
+  switch (objectiveId) {
+    case 'streaming':
+      return {
+        id: 'streaming',
+        label: 'Streaming',
+        targetLufs: -14.0,
+        maxTruePeakDb: -1.0,
+        minDynamicRangeDb: 7.5,
+        tonalBias: 'neutral',
+        stereoPreference: 'preserve',
+        preserveTransients: true,
+        lufsTolerance: 1.0,
+        saturationAllowance: 'subtle',
+        description:
+          'Calibrated for Spotify/Apple/YouTube loudness normalization (-14.0 LUFS / -1.0 dBTP ceiling).',
+      };
+    case 'commercial-loudness':
+      return {
+        id: 'commercial-loudness',
+        label: 'Commercial Loudness',
+        targetLufs: -9.0,
+        maxTruePeakDb: -0.5,
+        minDynamicRangeDb: 5.5,
+        tonalBias: 'neutral',
+        stereoPreference: 'wide',
+        preserveTransients: true,
+        lufsTolerance: 1.2,
+        saturationAllowance: 'moderate',
+        description:
+          'Competitive release loudness with multi-stage peak control and harmonic density (-9.0 LUFS / -0.5 dBTP).',
+      };
+    case 'dynamic':
+      return {
+        id: 'dynamic',
+        label: 'Dynamic',
+        targetLufs: -16.0,
+        maxTruePeakDb: -1.2,
+        minDynamicRangeDb: 10.0,
+        tonalBias: 'neutral',
+        stereoPreference: 'preserve',
+        preserveTransients: true,
+        lufsTolerance: 1.3,
+        saturationAllowance: 'none',
+        description:
+          'Prioritizes micro-dynamic expression and unclipped transient peaks (-16.0 LUFS / -1.2 dBTP).',
+      };
+    case 'cinematic':
+      return {
+        id: 'cinematic',
+        label: 'Cinematic',
+        targetLufs: -16.5,
+        maxTruePeakDb: -1.5,
+        minDynamicRangeDb: 10.5,
+        tonalBias: 'warm',
+        stereoPreference: 'wide',
+        preserveTransients: true,
+        lufsTolerance: 1.5,
+        saturationAllowance: 'subtle',
+        description:
+          'Wide orchestral stage, deep sub headroom, and wide dynamic macro-swells (-16.5 LUFS / -1.5 dBTP).',
+      };
+    case 'electronic':
+      return {
+        id: 'electronic',
+        label: 'Electronic',
+        targetLufs: -9.5,
+        maxTruePeakDb: -0.8,
+        minDynamicRangeDb: 6.0,
+        tonalBias: 'bright',
+        stereoPreference: 'wide',
+        preserveTransients: true,
+        lufsTolerance: 1.1,
+        saturationAllowance: 'moderate',
+        description:
+          'Locked mono sub foundation, crisp air, and club-ready loudness (-9.5 LUFS / -0.8 dBTP).',
+      };
+    case 'hip-hop':
+      return {
+        id: 'hip-hop',
+        label: 'Hip-Hop',
+        targetLufs: -9.5,
+        maxTruePeakDb: -0.8,
+        minDynamicRangeDb: 6.0,
+        tonalBias: 'warm',
+        stereoPreference: 'preserve',
+        preserveTransients: true,
+        lufsTolerance: 1.1,
+        saturationAllowance: 'moderate',
+        description:
+          'Weighty low-end sub punch, forward vocal pocket, and controlled ceiling (-9.5 LUFS / -0.8 dBTP).',
+      };
+    case 'pop':
+      return {
+        id: 'pop',
+        label: 'Pop',
+        targetLufs: -11.0,
+        maxTruePeakDb: -1.0,
+        minDynamicRangeDb: 6.8,
+        tonalBias: 'bright',
+        stereoPreference: 'wide',
+        preserveTransients: true,
+        lufsTolerance: 1.0,
+        saturationAllowance: 'subtle',
+        description:
+          'Polished vocal presence, bright modern air, and radio/playlist punch (-11.0 LUFS / -1.0 dBTP).',
+      };
+    case 'acoustic':
+      return {
+        id: 'acoustic',
+        label: 'Acoustic',
+        targetLufs: -15.5,
+        maxTruePeakDb: -1.0,
+        minDynamicRangeDb: 9.5,
+        tonalBias: 'warm',
+        stereoPreference: 'preserve',
+        preserveTransients: true,
+        lufsTolerance: 1.3,
+        saturationAllowance: 'none',
+        description:
+          'Linear natural timbre and gentle resonance cleanup preserving string/room decay (-15.5 LUFS / -1.0 dBTP).',
+      };
+    case 'vocal-focused':
+      return {
+        id: 'vocal-focused',
+        label: 'Vocal-Focused',
+        targetLufs: -13.0,
+        maxTruePeakDb: -1.0,
+        minDynamicRangeDb: 7.5,
+        tonalBias: 'neutral',
+        stereoPreference: 'preserve',
+        preserveTransients: true,
+        lufsTolerance: 1.1,
+        saturationAllowance: 'subtle',
+        description:
+          'Low-mid mud control, de-essed clarity in 2–6 kHz presence pocket, and stable center image (-13.0 LUFS).',
+      };
+    case 'transparent':
+      return {
+        id: 'transparent',
+        label: 'Transparent',
+        targetLufs: -15.0,
+        maxTruePeakDb: -1.0,
+        minDynamicRangeDb: 9.0,
+        tonalBias: 'neutral',
+        stereoPreference: 'preserve',
+        preserveTransients: true,
+        lufsTolerance: 1.2,
+        saturationAllowance: 'none',
+        description:
+          'Minimal tonal coloration, linear-phase preservation, high dynamic crest retention (-15 LUFS / -1.0 dBTP).',
+      };
+    case 'punchy':
+      return {
+        id: 'punchy',
+        label: 'Punchy',
+        targetLufs: -10.5,
+        maxTruePeakDb: -0.8,
+        minDynamicRangeDb: 6.2,
+        tonalBias: 'neutral',
+        stereoPreference: 'preserve',
+        preserveTransients: true,
+        lufsTolerance: 1.2,
+        saturationAllowance: 'moderate',
+        description:
+          'Forward drum & transient impact, tight sub focus, controlled harmonic density (-10.5 LUFS / -0.8 dBTP).',
+      };
+    case 'warm':
+      return {
+        id: 'warm',
+        label: 'Warm',
+        targetLufs: -13.0,
+        maxTruePeakDb: -1.0,
+        minDynamicRangeDb: 8.0,
+        tonalBias: 'warm',
+        stereoPreference: 'wide',
+        preserveTransients: true,
+        lufsTolerance: 1.3,
+        saturationAllowance: 'rich',
+        description:
+          'Even-order analog tube weight, smooth upper midrange, gentle optical glue (-13.0 LUFS / -1.0 dBTP).',
+      };
+    case 'custom': {
+      const targetLufs =
+        customSpec?.targetLufs ??
+        (referenceAnalysis ? Math.max(-18, Math.min(-8, referenceAnalysis.integratedLufs)) : -13.0);
+      return {
+        id: 'custom',
+        label: 'Custom Objective',
+        targetLufs,
+        maxTruePeakDb: customSpec?.maxTruePeakDb ?? -1.0,
+        minDynamicRangeDb: customSpec?.minDynamicRangeDb ?? 7.0,
+        tonalBias: customSpec?.tonalBias ?? 'neutral',
+        stereoPreference: customSpec?.stereoPreference ?? 'preserve',
+        preserveTransients: customSpec?.preserveTransients ?? true,
+        lufsTolerance: 1.2,
+        saturationAllowance: targetLufs > -11 ? 'moderate' : 'subtle',
+        description: `User-defined mastering target (${targetLufs.toFixed(1)} LUFS, <= ${(customSpec?.maxTruePeakDb ?? -1.0).toFixed(1)} dBTP, DR >= ${(customSpec?.minDynamicRangeDb ?? 7.0).toFixed(1)} dB).`,
+      };
+    }
+  }
+}
+
+export interface ExplainableMasterPlan {
+  objective: ResolvedObjectiveTarget;
+  diagnosis: DirectorDiagnosisReport;
+  pluginSummary: PluginIntelligenceSummary;
+  recommendations: DirectorRecommendation[];
+  chain: ProcessorModule[];
+  strategy: AIMasteringStrategy;
+}
+
+/**
+ * Generates an Explainable Mastering Plan & structured ChainCommand[] directly from
+ * measured AudioAnalysis, chosen Objective, optional Reference, and real Plugin inventory.
+ * Selects ONLY needed processors — never blindly stacks all 10 DSP stages.
+ */
+export function buildExplainableMasterPlan(input: {
+  analysis: AudioAnalysis;
+  objectiveId: MasteringObjectiveId;
+  customSpec?: Partial<CustomObjectiveSpec> | null;
+  referenceAnalysis?: AudioAnalysis | null;
+  externalPlugins?: ExternalPluginRecord[];
+  hostConnected?: boolean;
+  stemAnalysis?: StemSetAnalysis | null;
+}): ExplainableMasterPlan {
+  const { analysis, objectiveId, customSpec, referenceAnalysis } = input;
+  const objective = resolveObjectiveTarget(objectiveId, customSpec, referenceAnalysis);
+  const diagnosis = analyzeTrackIntelligence(analysis, objective, referenceAnalysis);
+  const pluginSummary = inspectPluginInventory(
+    input.externalPlugins ?? [],
+    Boolean(input.hostConnected),
+    analysis,
+    objective,
+  );
+
+  const recommendations: DirectorRecommendation[] = [];
+  const bassMidDiff = analysis.zoneEnergyDb.bass - analysis.zoneEnergyDb.mid;
+  const lowMidBuildup = analysis.zoneEnergyDb.lowMid - analysis.zoneEnergyDb.mid;
+  const harshExcess = analysis.zoneEnergyDb.highMid - analysis.zoneEnergyDb.mid;
+  const nf = analysis.noiseFloorDb ?? -72;
+
+  if (input.stemAnalysis) {
+    const stemSet = input.stemAnalysis;
+    const stemNames = new Map(stemSet.stems.map((stem) => [stem.id, stem.name]));
+    const grouped = new Map<string, typeof stemSet.overlaps>();
+    for (const overlap of stemSet.overlaps) {
+      const key = [overlap.stemAId, overlap.stemBId, overlap.band].sort().join(':');
+      const group = grouped.get(key) ?? [];
+      group.push(overlap);
+      grouped.set(key, group);
+    }
+
+    const topCandidates = [...grouped.values()]
+      .map((items) => items[0])
+      .sort((a, b) => a.differenceDb - b.differenceDb)
+      .slice(0, 6);
+
+    for (const candidate of topCandidates) {
+      const nameA = stemNames.get(candidate.stemAId) ?? candidate.stemAId;
+      const nameB = stemNames.get(candidate.stemBId) ?? candidate.stemBId;
+      const bandLabel = candidate.band;
+      const findingId = `diag-stem-overlap-${candidate.stemAId}-${candidate.stemBId}-${bandLabel}`;
+      diagnosis.findings.push({
+        id: findingId,
+        kind: 'observation',
+        category: 'Spectral',
+        title: `Stem Interaction Candidate: ${nameA} / ${nameB}`,
+        severity: candidate.confidence === 'moderate' ? 'moderate' : 'low',
+        evidence: [
+          `Band: ${bandLabel}`,
+          `${nameA}: ${candidate.stemALevelDb.toFixed(1)} dB`,
+          `${nameB}: ${candidate.stemBLevelDb.toFixed(1)} dB`,
+          `Band-level difference: ${candidate.differenceDb.toFixed(1)} dB`,
+        ],
+        evidenceStrength: candidate.confidence === 'moderate' ? 'multiple' : 'single',
+        metrics: {
+          stemALevelDb: candidate.stemALevelDb,
+          stemBLevelDb: candidate.stemBLevelDb,
+          differenceDb: candidate.differenceDb,
+        },
+        explanation: 'Both supplied stems contain comparable energy in this broad frequency region. This is a coexistence candidate only; it does not establish audible masking.',
+        recommendedAction: 'Audition both stems together and in solo. If the interaction is audible, adjust the source stem arrangement, level, envelope, or stem-routed processing rather than applying an unverified master-bus cut.',
+      });
+      recommendations.push({
+        id: `rec-${findingId}`,
+        characteristic: `Stem interaction candidate: ${nameA} + ${nameB} (${bandLabel})`,
+        supportingMeasurements: [
+          `${nameA}: ${candidate.stemALevelDb.toFixed(1)} dB`,
+          `${nameB}: ${candidate.stemBLevelDb.toFixed(1)} dB`,
+          `Difference: ${candidate.differenceDb.toFixed(1)} dB`,
+          `Confidence: ${candidate.confidence}`,
+        ],
+        proposedCorrection: 'Audition the two sources in context, then make any correction on the relevant source stem or bus.',
+        selectedProcessor: 'parametric-eq',
+        proposedParamsSummary: 'No master-bus EQ command generated. Stem-routed processing is required for a safe targeted correction.',
+        commands: [],
+        expectedResult: 'Improve separation only if listening confirms an audible conflict, while preserving unrelated mix elements.',
+        potentialTradeoffs: 'A broad master-bus cut could damage other sources. This recommendation is advisory until stem-bus routing exists.',
+        priority: candidate.confidence === 'moderate' ? 'recommended' : 'optional',
+        statementType: 'hypothesis',
+      });
+    }
+
+    if (topCandidates.length > 0) {
+      diagnosis.workingWell.push(`Stem Intelligence screened ${stemSet.stems.length} supplied sources and identified ${topCandidates.length} spectral coexistence candidate(s) for listening review.`);
+    }
+  }
+
+  // Stage 1: SYN-Restore ONLY if genuine DC offset, elevated quiet-frame noise floor, or strong sibilance/resonance exists
+  const hasGenuineNoiseFloor = nf > -48 && analysis.rmsDb - nf >= 12;
+  const needsRestore =
+    analysis.dcOffset >= 0.004 ||
+    hasGenuineNoiseFloor ||
+    (analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 && analysis.resonances.some((r) => r.freqHz > 4500));
+
+  if (needsRestore) {
+    const hiss = nf > -48 ? Math.min(42, Math.round((nf + 55) * 2.2)) : 4;
+    const deEss = analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 ? 24 : 8;
+    const restoreParams = {
+      dcOffset: analysis.dcOffset >= 0.004,
+      humRemovalHz: 0 as const,
+      hissReduction: Math.max(0, hiss),
+      deEssAmount: deEss,
+      deEssFreqHz: 6800,
+      resonanceSuppress: analysis.resonances.length > 0 ? 16 : 6,
+      mode: 'conservative' as const,
+    };
+    recommendations.push({
+      id: 'rec-restore',
+      characteristic:
+        nf > -48
+          ? 'Elevated broadband noise floor & potential DC bias'
+          : 'DC waveform offset / upper-band sibilance spike',
+      supportingMeasurements: [
+        `Noise Floor: ${nf.toFixed(1)} dBFS`,
+        `DC Offset: ${(analysis.dcOffset * 100).toFixed(3)}%`,
+        `Presence Energy: ${analysis.zoneEnergyDb.presence.toFixed(1)} dB`,
+      ],
+      proposedCorrection: 'Engage conservative pre-master cleanup prior to tonal EQ & compression.',
+      selectedProcessor: 'restore',
+      proposedParamsSummary: `DC=${restoreParams.dcOffset ? 'ON' : 'OFF'}, Hiss=${restoreParams.hissReduction}%, De-Ess=${restoreParams.deEssAmount}% @ 6.8kHz (Conservative)`,
+      commands: [
+        {
+          op: 'add',
+          processorType: 'restore',
+          name: 'SYN-Restore Cleanup',
+          params: restoreParams,
+          rationale: 'Clean subsonic DC bias and steady-state noise before level elevation.',
+        },
+      ],
+      expectedResult: 'Lower quiet-passage noise floor and reclaim symmetric headroom without dulling transients.',
+      potentialTradeoffs: 'Excessive hiss reduction can soften ambient air tails; kept in conservative mode.',
+      priority: analysis.dcOffset >= 0.006 || nf > -42 ? 'critical' : 'recommended',
+      statementType: 'hypothesis',
+    });
+  }
+
+  // Stage 2: Surgical Parametric EQ (weighted by Objective + Reference; skipped on already balanced transparent/dynamic tracks)
+  const bands: Array<{
+    id: string;
+    enabled: boolean;
+    shape: 'highpass' | 'lowshelf' | 'bell' | 'highshelf' | 'lowpass' | 'notch';
+    freq: number;
+    gain: number;
+    q: number;
+  }> = [];
+
+  const needsSubHpf =
+    analysis.dcOffset >= 0.002 ||
+    analysis.zoneEnergyDb.sub - analysis.zoneEnergyDb.bass > 2.5 ||
+    objective.id === 'hip-hop' ||
+    objective.id === 'electronic' ||
+    objective.id === 'commercial-loudness';
+  if (needsSubHpf) {
+    bands.push({
+      id: 'b1',
+      enabled: true,
+      shape: 'highpass',
+      freq: objective.id === 'transparent' || objective.id === 'dynamic' || objective.id === 'acoustic' ? 24 : 28,
+      gain: 0,
+      q: 0.71,
+    });
+  }
+
+  const eqReasons: string[] = [];
+  let eqBassGain = 0;
+  const eqBassLimit =
+    objective.id === 'hip-hop' ||
+    objective.id === 'electronic' ||
+    objective.id === 'warm' ||
+    objective.id === 'cinematic'
+      ? 13.5
+      : 11.0;
+  if (referenceAnalysis) {
+    eqBassGain = Number(Math.max(-3.0, Math.min(3.0, (referenceAnalysis.zoneEnergyDb.bass - analysis.zoneEnergyDb.bass) * 0.45)).toFixed(1));
+    eqReasons.push(`Reference bass delta: ${(referenceAnalysis.zoneEnergyDb.bass - analysis.zoneEnergyDb.bass).toFixed(1)} dB (45% weighted)`);
+  } else if (bassMidDiff > eqBassLimit && (lowMidBuildup > 2.6 || analysis.zoneEnergyDb.sub - analysis.zoneEnergyDb.bass > 4.5)) {
+    eqBassGain = Number(Math.max(-3.0, -(bassMidDiff - (eqBassLimit - 1.5)) * 0.55).toFixed(1));
+    eqReasons.push(`Bass-to-Mid excess: +${bassMidDiff.toFixed(1)} dB`);
+  } else if (bassMidDiff < 2.0 && objective.id !== 'transparent' && objective.id !== 'dynamic' && objective.id !== 'acoustic') {
+    eqBassGain = objective.id === 'hip-hop' || objective.id === 'electronic' ? 1.5 : 1.1;
+    eqReasons.push(`Lean low-end (Bass-Mid ${bassMidDiff.toFixed(1)} dB)`);
+  }
+  if (Math.abs(eqBassGain) >= 0.3) {
+    bands.push({ id: 'b2', enabled: true, shape: 'lowshelf', freq: 88, gain: eqBassGain, q: 0.71 });
+  }
+
+  const mudCut = lowMidBuildup > 3.8 ? Number(Math.max(-3.2, -(lowMidBuildup - 2.6) * 0.6).toFixed(1)) : 0;
+  if (mudCut <= -0.4) {
+    bands.push({ id: 'b3', enabled: true, shape: 'bell', freq: 300, gain: mudCut, q: 1.4 });
+    eqReasons.push(`Low-mid buildup (+${lowMidBuildup.toFixed(1)} dB) -> ${mudCut} dB @ 300 Hz`);
+  }
+
+  if (objective.id === 'vocal-focused' && analysis.zoneEnergyDb.mid - analysis.zoneEnergyDb.bass < -3.0) {
+    bands.push({ id: 'b-vox', enabled: true, shape: 'bell', freq: 2400, gain: 1.1, q: 1.0 });
+    eqReasons.push('Vocal pocket articulation (+1.1 dB @ 2.4 kHz)');
+  }
+
+  let highAirGain = 0;
+  if (referenceAnalysis) {
+    highAirGain = Number(Math.max(-2.5, Math.min(3.0, (referenceAnalysis.zoneEnergyDb.air - analysis.zoneEnergyDb.air) * 0.4)).toFixed(1));
+  } else if (objective.tonalBias === 'bright' && analysis.spectralSlopeDbPerOct < -1.1) {
+    highAirGain = analysis.spectralSlopeDbPerOct < -2.2 ? 1.8 : 0.9;
+  } else if (objective.tonalBias === 'warm') {
+    highAirGain = harshExcess > 1.5 ? -0.8 : 0;
+  } else if (analysis.spectralSlopeDbPerOct < -3.8) {
+    highAirGain = 1.1;
+  }
+  if (Math.abs(highAirGain) >= 0.3) {
+    bands.push({ id: 'b4', enabled: true, shape: 'highshelf', freq: 11200, gain: highAirGain, q: 0.71 });
+    eqReasons.push(`Tilt (${analysis.spectralSlopeDbPerOct.toFixed(2)} dB/oct) + ${objective.tonalBias} bias -> ${highAirGain > 0 ? '+' : ''}${highAirGain} dB @ 11.2 kHz`);
+  }
+
+  const tiltDb = objective.tonalBias === 'warm' && objective.id !== 'acoustic' ? -0.4 : objective.tonalBias === 'bright' && eqReasons.length > 0 ? 0.4 : 0;
+  if (bands.length > 0 || Math.abs(tiltDb) >= 0.2) {
+    const eqParams = {
+      phaseMode:
+        objective.id === 'transparent' || objective.id === 'dynamic' || objective.id === 'acoustic'
+          ? ('linear' as const)
+          : ('minimum' as const),
+      msMode: 'stereo' as const,
+      tiltDb,
+      bands: bands.length > 0 ? bands : [{ id: 'b1', enabled: true, shape: 'highpass' as const, freq: 24, gain: 0, q: 0.71 }],
+    };
+    recommendations.push({
+      id: 'rec-eq',
+      characteristic:
+        eqReasons.length > 0
+          ? 'Spectral contour calibration'
+          : 'Subsonic headroom protection',
+      supportingMeasurements: [
+        `Slope: ${analysis.spectralSlopeDbPerOct.toFixed(2)} dB/oct`,
+        `Centroid: ${analysis.spectralCentroidHz} Hz`,
+        `Low-Mid/Mid: ${lowMidBuildup >= 0 ? '+' : ''}${lowMidBuildup.toFixed(1)} dB`,
+        ...(eqReasons.length ? [eqReasons[0]] : []),
+      ],
+      proposedCorrection:
+        eqParams.bands.length > 1
+          ? 'Shape tonal contour surgically while clearing subsonic rumble below 28 Hz.'
+          : 'Insert linear/clean high-pass at 24–28 Hz without altering musical midrange timbre.',
+      selectedProcessor: 'parametric-eq',
+      proposedParamsSummary: `${eqParams.phaseMode.toUpperCase()} phase · Tilt ${tiltDb >= 0 ? '+' : ''}${tiltDb} dB · ${eqParams.bands.length} band(s)`,
+      commands: [
+        {
+          op: 'add',
+          processorType: 'parametric-eq',
+          name: 'Master Contour EQ',
+          params: eqParams,
+          rationale: 'Calibrate subsonic headroom and broad tonal balance from measured spectral zones.',
+        },
+      ],
+      expectedResult: 'Improved midrange articulation and subsonic headroom stability ahead of limiting.',
+      potentialTradeoffs: 'Excessive cuts (>3 dB) can hollow out body; kept surgical.',
+      priority: lowMidBuildup > 4.5 || bassMidDiff > 11 ? 'critical' : 'recommended',
+      statementType: 'hypothesis',
+    });
+  }
+
+  // Stage 3: Dynamic EQ ONLY if harshness or narrow resonances detected
+  const topRes = analysis.resonances[0];
+  if (harshExcess > 3.0 || (topRes && topRes.excessDb >= 6.0)) {
+    const targetFreq = topRes && topRes.freqHz >= 250 ? topRes.freqHz : 3500;
+    const dynBands = [
+      {
+        id: 'd1',
+        enabled: true,
+        freq: targetFreq,
+        q: topRes ? 2.8 : 1.8,
+        thresholdDb: Math.round(Math.max(-32, Math.min(-14, analysis.rmsDb + 1))),
+        maxCutDb: Number(Math.max(-5.5, -Math.min(4.5, (topRes?.excessDb ?? harshExcess) * 0.45)).toFixed(1)),
+        attackMs: 6,
+        releaseMs: 95,
+      },
+    ];
+    recommendations.push({
+      id: 'rec-dyn-eq',
+      characteristic: 'Dynamic upper-mid harshness / localized resonance spike',
+      supportingMeasurements: [
+        `High-Mid vs Mid: ${harshExcess >= 0 ? '+' : ''}${harshExcess.toFixed(1)} dB`,
+        ...(topRes ? [`Resonance: ${topRes.freqHz} Hz (+${topRes.excessDb} dB)`] : []),
+      ],
+      proposedCorrection: `Attenuate ${targetFreq} Hz dynamically only when transient peaks exceed threshold.`,
+      selectedProcessor: 'dynamic-eq',
+      proposedParamsSummary: `Band 1 @ ${targetFreq} Hz (Q=${dynBands[0].q}, maxCut=${dynBands[0].maxCutDb} dB)`,
+      commands: [
+        {
+          op: 'add',
+          processorType: 'dynamic-eq',
+          name: 'Dynamic Resonance Control',
+          params: { bands: dynBands },
+          rationale: `Tame ${targetFreq} Hz spikes dynamically without dulling quiet passages.`,
+        },
+      ],
+      expectedResult: 'Reduces listener fatigue while preserving average spectral brightness.',
+      potentialTradeoffs: 'Over-taming above 3 kHz can soften snare crack or vocal bite.',
+      priority: 'recommended',
+      statementType: 'hypothesis',
+    });
+  }
+
+  // Stage 4: Bus Glue Compression (skip or use super gentle ratio if source DR < 6 dB or transparent mode)
+  const needsGlue =
+    analysis.dynamicRangeDb > 6.5 &&
+    (objective.id !== 'transparent' || analysis.crestFactorDb > 13.5);
+  if (needsGlue) {
+    const compParams = {
+      mode: objective.id === 'punchy' ? ('parallel' as const) : ('downward' as const),
+      thresholdDb: Number(Math.max(-24, Math.min(-10, analysis.rmsDb + (objective.id === 'punchy' ? 4.0 : 3.0))).toFixed(1)),
+      ratio: objective.id === 'transparent' ? 1.5 : objective.id === 'punchy' ? 2.5 : objective.id === 'warm' ? 1.9 : 2.0,
+      attackMs: objective.preserveTransients ? 28 : 14,
+      releaseMs: objective.id === 'warm' ? 190 : 120,
+      kneeDb: objective.id === 'warm' ? 7 : 4,
+      makeupDb: 0.6,
+      scHpfHz: 85,
+    };
+    recommendations.push({
+      id: 'rec-comp',
+      characteristic: `Crest factor ${analysis.crestFactorDb.toFixed(1)} dB & DR ${analysis.dynamicRangeDb.toFixed(1)} dB`,
+      supportingMeasurements: [
+        `Dynamic Range: ${analysis.dynamicRangeDb.toFixed(1)} dB`,
+        `Crest Factor: ${analysis.crestFactorDb.toFixed(1)} dB`,
+        `Transient Density: ${(analysis.transientDensity * 100).toFixed(0)}%`,
+      ],
+      proposedCorrection: 'Apply gentle bus compression with 85 Hz sidechain HPF and slow attack to preserve kick/snare punch.',
+      selectedProcessor: 'compressor',
+      proposedParamsSummary: `${compParams.mode.toUpperCase()} · ${compParams.ratio}:1 @ ${compParams.thresholdDb} dB · Atk ${compParams.attackMs} ms`,
+      commands: [
+        {
+          op: 'add',
+          processorType: 'compressor',
+          name: objective.id === 'warm' ? 'Optical Bus Glue' : 'Transient-Safe Bus Comp',
+          wetDry: objective.id === 'punchy' ? 80 : 100,
+          params: compParams,
+          rationale: 'Cohesive bus glue and peak density smoothing ahead of final limiting.',
+        },
+      ],
+      expectedResult: 'Steadier RMS density and ~1–2 dB peak headroom recovery for cleaner limiting.',
+      potentialTradeoffs: 'Too fast an attack or low threshold will flatten drum transients; monitored in QC.',
+      priority: 'recommended',
+      statementType: 'hypothesis',
+    });
+  }
+
+  // Stage 5: Harmonic Saturation ONLY when objective calls for warmth/punch AND source THD is clean
+  if (
+    objective.saturationAllowance !== 'none' &&
+    objective.saturationAllowance !== 'subtle' &&
+    analysis.thdEstimatePercent < 1.8
+  ) {
+    const satParams = {
+      flavor: objective.id === 'warm' ? ('tube' as const) : ('tape' as const),
+      drive: objective.id === 'warm' ? 28 : 20,
+      tone: objective.id === 'warm' ? -14 : 6,
+      harmonics: objective.id === 'warm' ? ('even' as const) : ('balanced' as const),
+      oversampling: 2 as const,
+    };
+    recommendations.push({
+      id: 'rec-saturation',
+      characteristic:
+        objective.id === 'warm'
+          ? 'Clean source THD supports analog harmonic enrichment'
+          : 'Commercial loudness objective benefits from soft tape crest rounding',
+      supportingMeasurements: [
+        `Pre THD: ${analysis.thdEstimatePercent.toFixed(2)}%`,
+        `Objective: ${objective.label}`,
+      ],
+      proposedCorrection: `Insert ${satParams.flavor} saturation stage (${satParams.harmonics} harmonics, 2x oversampling).`,
+      selectedProcessor: 'saturation',
+      proposedParamsSummary: `${satParams.flavor.toUpperCase()} · Drive ${satParams.drive}% · Tone ${satParams.tone} · ${satParams.harmonics}`,
+      commands: [
+        {
+          op: 'add',
+          processorType: 'saturation',
+          name: objective.id === 'warm' ? 'Analog Tube Stage' : 'Tape Crest Glue',
+          params: satParams,
+          rationale: 'Round micro-peaks harmonically before brickwall limiting.',
+        },
+      ],
+      expectedResult: 'Adds perceived density and analog warmth with minimal inter-sample overshoot.',
+      potentialTradeoffs: 'Adds measurable THD (+0.3% to +1.0%); rolled back if distortion threshold is exceeded.',
+      priority: 'optional',
+      statementType: 'hypothesis',
+    });
+  }
+
+  // Stage 6: Stereo Imager when phase/low-end correlation, L/R skew, or width preference calls for intervention
+  const needsStereoFix =
+    analysis.lowEndCorrelation < 0.72 ||
+    analysis.phaseCorrelation < 0.25 ||
+    Math.abs(analysis.lrBalanceDb) > 0.6 ||
+    objective.stereoPreference !== 'preserve';
+  if (needsStereoFix) {
+    const midWidth =
+      objective.stereoPreference === 'narrow'
+        ? 90
+        : objective.stereoPreference === 'wide' && analysis.phaseCorrelation > 0.35
+          ? 114
+          : analysis.stereoWidth < 0.55
+            ? 112
+            : 100;
+    const highWidth =
+      objective.stereoPreference === 'narrow'
+        ? 95
+        : objective.stereoPreference === 'wide' && analysis.phaseCorrelation > 0.3
+          ? 124
+          : analysis.stereoWidth < 0.6
+            ? 120
+            : 105;
+    const imgParams = {
+      lowWidth: analysis.lowEndCorrelation < 0.65 ? 55 : 82,
+      midWidth,
+      highWidth,
+      lowCrossHz: 150,
+      highCrossHz: 3500,
+      monoBassBelowHz: analysis.lowEndCorrelation < 0.5 ? 115 : 90,
+      lrBalanceDb: Number((-analysis.lrBalanceDb * 0.75).toFixed(2)),
+      midSideGainDb: objective.stereoPreference === 'wide' && analysis.phaseCorrelation > 0.4 ? 0.3 : 0,
+    };
+    recommendations.push({
+      id: 'rec-imager',
+      characteristic:
+        analysis.lowEndCorrelation < 0.72 || Math.abs(analysis.lrBalanceDb) > 0.6
+          ? 'Low-end phase focus & L/R stereo alignment'
+          : `Stereo width optimization (${objective.stereoPreference})`,
+      supportingMeasurements: [
+        `Phase Corr: ${analysis.phaseCorrelation.toFixed(2)}`,
+        `Low-End Corr: ${analysis.lowEndCorrelation.toFixed(2)}`,
+        `L/R Balance: ${analysis.lrBalanceDb.toFixed(2)} dB`,
+      ],
+      proposedCorrection: 'Anchor sub-bass in mono and correct L/R balance bias cleanly.',
+      selectedProcessor: 'stereo-imager',
+      proposedParamsSummary: `MonoBass <${imgParams.monoBassBelowHz}Hz · L/R ${imgParams.lrBalanceDb >= 0 ? '+' : ''}${imgParams.lrBalanceDb} dB · Mid ${midWidth}% / High ${highWidth}%`,
+      commands: [
+        {
+          op: 'add',
+          processorType: 'stereo-imager',
+          name: 'Master Stereo Focus',
+          params: imgParams,
+          rationale: 'Secure mono club compatibility below 100 Hz and center stereo balance.',
+        },
+      ],
+      expectedResult: 'Higher low-end mono correlation and centered stereo image.',
+      potentialTradeoffs: 'Excessive side widening can hollow out vocal center; kept conservative.',
+      priority: analysis.lowEndCorrelation < 0.4 || Math.abs(analysis.lrBalanceDb) > 1.2 ? 'critical' : 'recommended',
+      statementType: 'hypothesis',
+    });
+  }
+
+  // Stage 7: Real Connected VST3 Plugin Integration (ONLY if genuinely connected + compatible)
+  const usableVst3 = pluginSummary.matches.find((m) => m.available && m.recommendedParams.length > 0);
+  if (usableVst3 && input.externalPlugins) {
+    const recRecord = input.externalPlugins.find((p) => p.uid === usableVst3.uid);
+    if (recRecord) {
+      recommendations.push({
+        id: `rec-vst3-${usableVst3.uid}`,
+        characteristic: `Connected external VST3 capability: ${usableVst3.name} (${usableVst3.role})`,
+        supportingMeasurements: usableVst3.recommendedParams.map(
+          (rp) => `${rp.paramName} -> ${(rp.normalizedValue * 100).toFixed(0)}% (${rp.rationale})`,
+        ),
+        proposedCorrection: `Include verified host VST3 "${usableVst3.name}" only if user inserts/loads native worker instance in rack.`,
+        selectedProcessor: 'external-vst3',
+        pluginName: usableVst3.name,
+        proposedParamsSummary: usableVst3.recommendedParams
+          .map((p) => `${p.paramName}=${p.normalizedValue.toFixed(2)}`)
+          .join(' · '),
+        commands: [], // Do not auto-spawn unloaded native process handles inside autonomous offline loop unless already active
+        expectedResult: 'Integrates hardware-accurate third-party processing when native worker instance is active.',
+        potentialTradeoffs: `Adds ${recRecord.latencySamples} samples latency and requires Windows host worker.`,
+        priority: 'optional',
+        statementType: 'hypothesis',
+      });
+    }
+  }
+
+  // Stage 8: Final True-Peak Maximizer / Safety Limiter (ALWAYS present as final ceiling safeguard)
+  const maxParams = {
+    character:
+      objective.id === 'punchy'
+        ? ('punchy' as const)
+        : objective.id === 'warm'
+          ? ('smooth' as const)
+          : ('transparent' as const),
+    targetLufs: objective.targetLufs,
+    ceilingDb: objective.maxTruePeakDb,
+    transientEmphasis: objective.preserveTransients ? (objective.id === 'punchy' ? 45 : 30) : 10,
+    truePeak: true,
+  };
+  recommendations.push({
+    id: 'rec-maximizer',
+    characteristic: `Loudness calibration (${analysis.integratedLufs.toFixed(1)} -> ${objective.targetLufs.toFixed(1)} LUFS) & True Peak ceiling protection`,
+    supportingMeasurements: [
+      `Pre LUFS: ${analysis.integratedLufs.toFixed(1)} LUFS`,
+      `Pre True Peak: ${analysis.truePeakDb.toFixed(2)} dBTP`,
+      `Target: ${objective.targetLufs.toFixed(1)} LUFS / <= ${objective.maxTruePeakDb.toFixed(1)} dBTP`,
+    ],
+    proposedCorrection: 'Engage True-Peak calibrated Maximizer with transient emphasis to hit target loudness cleanly.',
+    selectedProcessor: 'maximizer',
+    proposedParamsSummary: `${maxParams.character.toUpperCase()} · Target ${maxParams.targetLufs} LUFS · Ceiling ${maxParams.ceilingDb} dBTP · Transients ${maxParams.transientEmphasis}%`,
+    commands: [
+      {
+        op: 'add',
+        processorType: 'maximizer',
+        name: 'True-Peak Master Finalizer',
+        params: maxParams,
+        rationale: 'Calibrate final integrated loudness and enforce strict True-Peak headroom.',
+      },
+    ],
+    expectedResult: `Integrated loudness converges near ${objective.targetLufs.toFixed(1)} LUFS with <= ${objective.maxTruePeakDb.toFixed(1)} dBTP ceiling.`,
+    potentialTradeoffs:
+      objective.targetLufs - analysis.integratedLufs > 6
+        ? 'Large gain push (>6 LU) narrows dynamic range; monitored across refinement passes.'
+        : 'Minimal dynamic range impact within target margin.',
+    priority: 'critical',
+    statementType: 'hypothesis',
+  });
+
+  // Execute structured commands on empty chain to build validated initial chain
+  const initialCommands = recommendations.flatMap((r) => r.commands);
+  const { chain } = applyStructuredChainCommands([], initialCommands);
+
+  const strategy: AIMasteringStrategy = {
+    id: `dir-strat-${Date.now()}`,
+    timestamp: Date.now(),
+    source: 'algorithmic',
+    genre: diagnosis.artisticProfile,
+    musicalStyle: `${objective.label} Objective`,
+    instrumentationSummary: `Centroid ${analysis.spectralCentroidHz} Hz · Transient ${(analysis.transientDensity * 100).toFixed(0)}% · DR ${analysis.dynamicRangeDb.toFixed(1)} dB`,
+    vocalPresence: analysis.zoneEnergyDb.mid > analysis.zoneEnergyDb.bass - 5 ? 'Forward / Present' : 'Embedded in Mix',
+    tonalCharacteristics: `Slope ${analysis.spectralSlopeDbPerOct.toFixed(2)} dB/oct · Width ${(analysis.stereoWidth * 100).toFixed(0)}% · Noise ${nf.toFixed(1)} dBFS`,
+    issuesDetected: diagnosis.findings
+      .filter((f) => f.kind === 'technical-problem')
+      .map((f) => `${f.title}: ${f.evidence[0] ?? ''}`),
+    strategySummary: `Constructed ${chain.length}-stage chain for ${objective.label} objective (${objective.targetLufs.toFixed(1)} LUFS / <= ${objective.maxTruePeakDb.toFixed(1)} dBTP).`,
+    targetLufs: objective.targetLufs,
+    targetTruePeakDb: objective.maxTruePeakDb,
+    reasoningPerProcessor: recommendations
+      .filter((r) => r.commands.length > 0)
+      .map((r) => ({
+        processorType: r.selectedProcessor,
+        reason: `${r.characteristic} -> ${r.proposedCorrection} (Tradeoff: ${r.potentialTradeoffs})`,
+      })),
+    chain,
+  };
+
+  return {
+    objective,
+    diagnosis,
+    pluginSummary,
+    recommendations,
+    chain,
+    strategy,
+  };
+}
+
+/**
+ * Evaluates 11 independent technical mastering objectives separately.
+ * Never reduces subjective musicality to an opaque score; labels convergence explicitly as telemetry alignment.
+ */
+export function evaluateMultiObjectiveMetrics(
+  pre: AudioAnalysis,
+  post: AudioAnalysis,
+  objective: ResolvedObjectiveTarget,
+  qcReport: QCReport,
+  reference?: AudioAnalysis | null,
+): MultiObjectiveEvaluation {
+  const dimensions: MultiObjectiveDimension[] = [];
+  const limitingFactors: string[] = [];
+
+  // 1. Loudness Compliance
+  const lufsErr = Math.abs(post.integratedLufs - objective.targetLufs);
+  const loudnessScore = Math.max(0, Math.min(100, Math.round(100 - lufsErr * 14)));
+  dimensions.push({
+    key: 'loudness',
+    label: 'Loudness Target',
+    status: lufsErr <= 0.8 ? 'optimal' : lufsErr <= objective.lufsTolerance ? 'acceptable' : lufsErr <= 3.0 ? 'attention' : 'critical',
+    score: loudnessScore,
+    measuredSummary: `${post.integratedLufs.toFixed(1)} LUFS`,
+    targetSummary: `${objective.targetLufs.toFixed(1)} ± ${objective.lufsTolerance.toFixed(1)} LUFS`,
+    note: lufsErr <= 0.8 ? 'Calibrated on target.' : `Offset of ${(post.integratedLufs - objective.targetLufs).toFixed(1)} LU.`,
+  });
+  if (lufsErr > objective.lufsTolerance) limitingFactors.push(`Loudness off target by ${(post.integratedLufs - objective.targetLufs).toFixed(1)} LU`);
+
+  // 2. True Peak Safety
+  const tpOver = Math.max(0, post.truePeakDb - objective.maxTruePeakDb);
+  const tpScore = post.truePeakDb <= objective.maxTruePeakDb + 0.05 ? 100 : Math.max(0, Math.round(100 - tpOver * 45));
+  dimensions.push({
+    key: 'truePeakSafety',
+    label: 'True Peak Safety',
+    status: post.truePeakDb <= objective.maxTruePeakDb + 0.05 ? 'optimal' : post.truePeakDb <= 0 ? 'attention' : 'critical',
+    score: tpScore,
+    measuredSummary: `${post.truePeakDb.toFixed(2)} dBTP`,
+    targetSummary: `<= ${objective.maxTruePeakDb.toFixed(1)} dBTP`,
+    note: tpOver > 0 ? `Exceeds ceiling by ${tpOver.toFixed(2)} dB.` : 'Inter-sample headroom protected.',
+  });
+  if (tpOver > 0.05) limitingFactors.push(`True Peak exceeds ${objective.maxTruePeakDb.toFixed(1)} dBTP`);
+
+  // 3. Dynamic Integrity
+  const drShortfall = Math.max(0, objective.minDynamicRangeDb - post.dynamicRangeDb);
+  const drLoss = Math.max(0, pre.dynamicRangeDb - post.dynamicRangeDb);
+  const dynScore = Math.max(0, Math.min(100, Math.round(100 - drShortfall * 18 - Math.max(0, drLoss - 3.5) * 10)));
+  dimensions.push({
+    key: 'dynamicIntegrity',
+    label: 'Dynamic Integrity',
+    status: drShortfall === 0 && drLoss <= 3.5 ? 'optimal' : drShortfall <= 1.2 ? 'acceptable' : drShortfall <= 2.5 ? 'attention' : 'critical',
+    score: dynScore,
+    measuredSummary: `${post.dynamicRangeDb.toFixed(1)} dB DR (Δ ${(post.dynamicRangeDb - pre.dynamicRangeDb).toFixed(1)})`,
+    targetSummary: `>= ${objective.minDynamicRangeDb.toFixed(1)} dB DR`,
+    note: drShortfall > 0 ? 'Compression/limiting compressing dynamic range below target.' : 'Macro-dynamics preserved.',
+  });
+  if (drShortfall > 0.5) limitingFactors.push(`Dynamic Range below ${objective.minDynamicRangeDb.toFixed(1)} dB`);
+
+  // 4. Transient Preservation
+  const crestDrop = Math.max(0, pre.crestFactorDb - post.crestFactorDb);
+  const transientRatio = pre.transientDensity > 0.05 ? post.transientDensity / pre.transientDensity : 1;
+  const transScore = Math.max(0, Math.min(100, Math.round(100 - Math.max(0, crestDrop - 3.5) * 11 - Math.max(0, (1 - transientRatio) * 40))));
+  dimensions.push({
+    key: 'transientPreservation',
+    label: 'Transient Preservation',
+    status: transScore >= 85 ? 'optimal' : transScore >= 70 ? 'acceptable' : transScore >= 50 ? 'attention' : 'critical',
+    score: transScore,
+    measuredSummary: `Crest ${post.crestFactorDb.toFixed(1)} dB · Density ${(post.transientDensity * 100).toFixed(0)}%`,
+    targetSummary: objective.preserveTransients ? 'Preserve percussive attack' : 'Controlled density',
+    note: crestDrop > 4.0 ? `Crest dropped by ${crestDrop.toFixed(1)} dB.` : 'Transient punch intact.',
+  });
+
+  // 5. Tonal Balance
+  const bassMid = post.zoneEnergyDb.bass - post.zoneEnergyDb.mid;
+  const highMidExcess = post.zoneEnergyDb.highMid - post.zoneEnergyDb.mid;
+  const mudPenalty = Math.max(0, bassMid - 10) * 6 + Math.max(0, (post.zoneEnergyDb.lowMid - post.zoneEnergyDb.mid) - 4) * 7;
+  const harshPenalty = Math.max(0, highMidExcess - 3.5) * 9;
+  const tonalScore = Math.max(0, Math.min(100, Math.round(100 - mudPenalty - harshPenalty)));
+  dimensions.push({
+    key: 'tonalBalance',
+    label: 'Tonal Balance',
+    status: tonalScore >= 85 ? 'optimal' : tonalScore >= 70 ? 'acceptable' : 'attention',
+    score: tonalScore,
+    measuredSummary: `Slope ${post.spectralSlopeDbPerOct.toFixed(2)} dB/oct · Centroid ${post.spectralCentroidHz} Hz`,
+    targetSummary: `${objective.tonalBias} tonal profile`,
+    note: mudPenalty > 6 ? 'Elevated low-mid density.' : harshPenalty > 6 ? 'Upper-mid presence spike.' : 'Spectral distribution smooth.',
+  });
+
+  // 6. Stereo Integrity
+  const lrPen = Math.max(0, Math.abs(post.lrBalanceDb) - 0.5) * 20;
+  const phasePen = Math.max(0, 0.3 - post.phaseCorrelation) * 65 + Math.max(0, 0.45 - post.lowEndCorrelation) * 45;
+  const stereoScore = Math.max(0, Math.min(100, Math.round(100 - lrPen - phasePen)));
+  dimensions.push({
+    key: 'stereoIntegrity',
+    label: 'Stereo & Phase Integrity',
+    status: stereoScore >= 85 ? 'optimal' : stereoScore >= 70 ? 'acceptable' : stereoScore >= 50 ? 'attention' : 'critical',
+    score: stereoScore,
+    measuredSummary: `Corr ${post.phaseCorrelation.toFixed(2)} · Low ${post.lowEndCorrelation.toFixed(2)} · L/R ${post.lrBalanceDb.toFixed(2)} dB`,
+    targetSummary: 'Mono-safe bass · Centered L/R',
+    note: stereoScore < 75 ? 'Check low-end mono focus or L/R balance.' : 'Coherent stereo field.',
+  });
+  if (post.lowEndCorrelation < 0.35 || post.phaseCorrelation < 0.1) limitingFactors.push('Phase / low-end mono correlation below safe threshold');
+
+  // 7. Distortion Control
+  const thdDelta = Math.max(0, post.thdEstimatePercent - pre.thdEstimatePercent);
+  const maxAllowedThd = objective.saturationAllowance === 'rich' ? 2.5 : objective.saturationAllowance === 'moderate' ? 1.8 : 1.0;
+  const distScore = Math.max(0, Math.min(100, Math.round(100 - Math.max(0, post.thdEstimatePercent - maxAllowedThd) * 22 - Math.max(0, thdDelta - 1.5) * 15)));
+  dimensions.push({
+    key: 'distortion',
+    label: 'Harmonic Distortion',
+    status: distScore >= 85 ? 'optimal' : distScore >= 70 ? 'acceptable' : distScore >= 50 ? 'attention' : 'critical',
+    score: distScore,
+    measuredSummary: `${post.thdEstimatePercent.toFixed(2)}% THD`,
+    targetSummary: `<= ${maxAllowedThd.toFixed(1)}% THD`,
+    note: distScore < 75 ? 'Harmonic breakup above allowance.' : 'Harmonic ceiling clean.',
+  });
+
+  // 8. Noise Floor
+  const nf = post.noiseFloorDb ?? -72;
+  const nfHasMargin = post.rmsDb - nf >= 12;
+  const noiseScore = !nfHasMargin || nf <= -58 ? 100 : Math.max(0, Math.round(100 - (nf + 58) * 3.5));
+  dimensions.push({
+    key: 'noise',
+    label: 'Noise Floor',
+    status: !nfHasMargin || nf <= -52 ? 'optimal' : nf <= -44 ? 'acceptable' : 'attention',
+    score: noiseScore,
+    measuredSummary: nfHasMargin ? `${nf.toFixed(1)} dBFS` : 'Continuous program',
+    targetSummary: '<= -52.0 dBFS',
+    note: !nfHasMargin
+      ? 'No silent noise gaps present.'
+      : nf > -48
+        ? 'Elevated quiet-passage noise floor.'
+        : 'Clean noise floor.',
+  });
+
+  // 9. Clipping Prevention
+  const clipScore = post.clippedSamples === 0 && post.interSamplePeaks === 0 ? 100 : Math.max(0, 100 - post.clippedSamples * 5 - post.interSamplePeaks * 3);
+  dimensions.push({
+    key: 'clipping',
+    label: 'Clipping Prevention',
+    status: post.clippedSamples === 0 && post.interSamplePeaks === 0 ? 'optimal' : post.clippedSamples === 0 ? 'attention' : 'critical',
+    score: clipScore,
+    measuredSummary: `${post.clippedSamples} clipped · ${post.interSamplePeaks} ISP`,
+    targetSummary: '0 clipped · 0 ISP',
+    note: clipScore === 100 ? 'Zero clipping or inter-sample overs.' : 'Reduce output ceiling / drive.',
+  });
+  if (post.clippedSamples > 0) limitingFactors.push(`${post.clippedSamples} clipped sample(s) detected`);
+
+  // 10. Processing Restraint / Transparency (guards against over-processing)
+  const slopeShift = Math.abs(post.spectralSlopeDbPerOct - pre.spectralSlopeDbPerOct);
+  const transpScore = Math.max(0, Math.min(100, Math.round(100 - Math.max(0, slopeShift - 1.2) * 18 - Math.max(0, crestDrop - 4.0) * 8)));
+  dimensions.push({
+    key: 'musicalTransparency',
+    label: 'Processing Restraint',
+    status: transpScore >= 82 ? 'optimal' : transpScore >= 65 ? 'acceptable' : 'attention',
+    score: transpScore,
+    measuredSummary: `Spectral Shift ${slopeShift.toFixed(2)} dB/oct · Crest Δ -${crestDrop.toFixed(1)} dB`,
+    targetSummary: objective.id === 'transparent' ? 'Minimal sonic footprint' : 'Controlled transformation',
+    note: 'Measures technical restraint vs source; subjective musicality still requires human ear verification.',
+  });
+
+  // 11. Reference Similarity (optional)
+  if (reference) {
+    const refLufsErr = Math.abs(post.integratedLufs - reference.integratedLufs);
+    const refSlopeErr = Math.abs(post.spectralSlopeDbPerOct - reference.spectralSlopeDbPerOct);
+    const refWidthErr = Math.abs(post.stereoWidth - reference.stereoWidth) * 100;
+    const refScore = Math.max(0, Math.min(100, Math.round(100 - refLufsErr * 6 - refSlopeErr * 12 - refWidthErr * 0.4)));
+    dimensions.push({
+      key: 'referenceSimilarity',
+      label: 'Reference Alignment',
+      status: refScore >= 80 ? 'optimal' : refScore >= 65 ? 'acceptable' : 'attention',
+      score: refScore,
+      measuredSummary: `LUFS Δ ${(post.integratedLufs - reference.integratedLufs).toFixed(1)} · Slope Δ ${(post.spectralSlopeDbPerOct - reference.spectralSlopeDbPerOct).toFixed(2)}`,
+      targetSummary: `${reference.integratedLufs.toFixed(1)} LUFS · ${reference.spectralSlopeDbPerOct.toFixed(2)} dB/oct`,
+      note: 'Weighted comparison avoiding blind mix-flattening.',
+    });
+  } else {
+    dimensions.push({
+      key: 'referenceSimilarity',
+      label: 'Reference Alignment',
+      status: 'not-applicable',
+      score: 100,
+      measuredSummary: 'No reference loaded',
+      targetSummary: 'Optional',
+      note: 'Load a reference track in Reference tab to enable.',
+    });
+  }
+
+  // Weighted technical convergence index (never claims subjective artistic perfection)
+  const qcPenalty = qcReport.failCount * 10 + qcReport.warningCount * 3;
+  const activeDims = dimensions.filter((d) => d.status !== 'not-applicable');
+  const rawMean = activeDims.reduce((acc, d) => acc + d.score, 0) / Math.max(1, activeDims.length);
+  const engineeringFitIndex = Math.max(0, Math.min(100, Number((rawMean - qcPenalty * 0.4).toFixed(1))));
+
+  return {
+    dimensions,
+    engineeringFitIndex,
+    limitingFactors,
+    nonMeasurableNote:
+      'Numerical telemetry convergence measures engineering compliance (loudness, headroom, dynamics, phase, distortion, QC). Artistic feel, groove, and emotional balance must be confirmed by ear.',
+  };
+}
+
+/**
+ * Intelligent Reference Track Comparison
+ * Compares loudness, dynamic range, crest, transient density, tonal zones, and stereo width.
+ */
+export function compareReferenceIntelligent(
+  pre: AudioAnalysis,
+  post: AudioAnalysis,
+  reference: AudioAnalysis,
+): ReferenceComparisonReport {
+  const zoneDeltasDb = {
+    sub: Number((reference.zoneEnergyDb.sub - post.zoneEnergyDb.sub).toFixed(2)),
+    bass: Number((reference.zoneEnergyDb.bass - post.zoneEnergyDb.bass).toFixed(2)),
+    lowMid: Number((reference.zoneEnergyDb.lowMid - post.zoneEnergyDb.lowMid).toFixed(2)),
+    mid: Number((reference.zoneEnergyDb.mid - post.zoneEnergyDb.mid).toFixed(2)),
+    highMid: Number((reference.zoneEnergyDb.highMid - post.zoneEnergyDb.highMid).toFixed(2)),
+    presence: Number((reference.zoneEnergyDb.presence - post.zoneEnergyDb.presence).toFixed(2)),
+    air: Number((reference.zoneEnergyDb.air - post.zoneEnergyDb.air).toFixed(2)),
+  };
+  const suggestedActions: string[] = [];
+
+  if (Math.abs(zoneDeltasDb.bass) > 2.0) {
+    suggestedActions.push(
+      zoneDeltasDb.bass > 0
+        ? `Reference carries +${zoneDeltasDb.bass.toFixed(1)} dB warmer bass weight — consider gentle +${(zoneDeltasDb.bass * 0.4).toFixed(1)} dB low-shelf @ 85 Hz.`
+        : `Your master has ${Math.abs(zoneDeltasDb.bass).toFixed(1)} dB heavier bass than reference — trim low shelf gently to preserve punch.`,
+    );
+  }
+  if (Math.abs(zoneDeltasDb.air) > 2.2) {
+    suggestedActions.push(
+      zoneDeltasDb.air > 0
+        ? `Reference has +${zoneDeltasDb.air.toFixed(1)} dB brighter air band — try +${(zoneDeltasDb.air * 0.35).toFixed(1)} dB high-shelf @ 11 kHz.`
+        : `Reference is darker in the top octave by ${Math.abs(zoneDeltasDb.air).toFixed(1)} dB — preserve air if intentional or trim slightly.`,
+    );
+  }
+  const drDelta = post.dynamicRangeDb - reference.dynamicRangeDb;
+  if (drDelta < -2.0) {
+    suggestedActions.push(`Master is ${Math.abs(drDelta).toFixed(1)} dB more compressed than reference — increase Maximizer Transient Emphasis or relax Compressor ratio.`);
+  }
+  const widthDelta = (post.stereoWidth - reference.stereoWidth) * 100;
+  if (Math.abs(widthDelta) > 15) {
+    suggestedActions.push(
+      widthDelta < 0
+        ? `Reference stereo stage is ${Math.abs(widthDelta).toFixed(0)}% wider — subtle mid/high width expansion above 300 Hz may help.`
+        : `Your master is ${widthDelta.toFixed(0)}% wider than reference — verify mono compatibility.`,
+    );
+  }
+  if (suggestedActions.length === 0) {
+    suggestedActions.push('Tonal contour, dynamics, and stereo spread align closely with the reference track.');
+  }
+
+  return {
+    lufsDelta: Number((post.integratedLufs - reference.integratedLufs).toFixed(2)),
+    dynamicRangeDeltaDb: Number(drDelta.toFixed(2)),
+    crestDeltaDb: Number((post.crestFactorDb - reference.crestFactorDb).toFixed(2)),
+    transientDensityDelta: Number((post.transientDensity - reference.transientDensity).toFixed(2)),
+    spectralSlopeDelta: Number((post.spectralSlopeDbPerOct - reference.spectralSlopeDbPerOct).toFixed(2)),
+    stereoWidthDelta: Number((post.stereoWidth - reference.stereoWidth).toFixed(3)),
+    zoneDeltasDb,
+    suggestedActions,
+    cautionNote:
+      pre.spectralSlopeDbPerOct < reference.spectralSlopeDbPerOct - 2.0
+        ? 'Note: Your source mix is naturally darker than the reference; 40–45% weighted EQ matching avoids harsh over-brightening.'
+        : 'Loudness-matched A/B auditioning isolates timbre and dynamics from level bias.',
+  };
+}
+
+/**
+ * Generates 3 truly differentiated Battle Mode candidates using distinct Mastering Objectives.
+ * Never declares an automatic winner.
+ */
+export function buildBattleCandidatesIntelligent(analysis: AudioAnalysis): Array<{
+  id: 'A' | 'B' | 'C';
+  title: string;
+  philosophy: string;
+  chain: ProcessorModule[];
+}> {
+  const planA = buildExplainableMasterPlan({ analysis, objectiveId: 'transparent' });
+  const planB = buildExplainableMasterPlan({ analysis, objectiveId: 'punchy' });
+  const planC = buildExplainableMasterPlan({ analysis, objectiveId: 'warm' });
+
+  return [
+    {
+      id: 'A',
+      title: 'Transparent & Dynamic (-15 LUFS)',
+      philosophy: 'Linear-phase precision, zero harmonic coloration, preserves maximum dynamic crest and original mix balance.',
+      chain: planA.chain,
+    },
+    {
+      id: 'B',
+      title: 'Punchy Commercial (-10.5 LUFS)',
+      philosophy: 'Parallel transient-preserving compression, subtle tape crest rounding, and competitive high-impact headroom.',
+      chain: planB.chain,
+    },
+    {
+      id: 'C',
+      title: 'Warm Analog Stage (-13 LUFS)',
+      philosophy: 'Even-order tube warmth, smooth optical glue, and gently expanded stereo width with sub-bass mono anchor.',
+      chain: planC.chain,
+    },
+  ];
+}
+
+/**
+ * Derives targeted ChainCommand[] from measured post-analysis, QC failures, and MultiObjective gaps.
+ */
+export function deriveRefinementCommands(
+  pre: AudioAnalysis,
+  post: AudioAnalysis,
+  currentChain: ProcessorModule[],
+  objective: ResolvedObjectiveTarget,
+  qcReport: QCReport,
+  evaluation: MultiObjectiveEvaluation,
+  options?: { prevLufsError?: number },
+): { commands: ChainCommand[]; hypothesis: string } {
+  const commands: ChainCommand[] = [];
+  const reasons: string[] = [];
+
+  const maxMod = currentChain.find((m) => m.type === 'maximizer');
+  const limMod = currentChain.find((m) => m.type === 'limiter');
+  const compMod = currentChain.find((m) => m.type === 'compressor');
+  const satMod = currentChain.find((m) => m.type === 'saturation');
+  const imgMod = currentChain.find((m) => m.type === 'stereo-imager');
+  const restoreMod = currentChain.find((m) => m.type === 'restore');
+  const eqMod = currentChain.find((m) => m.type === 'parametric-eq');
+
+  // 1. Fix True Peak / Clipping immediately
+  if (post.truePeakDb > objective.maxTruePeakDb + 0.04 || post.clippedSamples > 0 || post.interSamplePeaks > 0) {
+    const safeCeil = Number(
+      Math.max(
+        -3.0,
+        Math.min(
+          objective.maxTruePeakDb,
+          post.truePeakDb > objective.maxTruePeakDb ? objective.maxTruePeakDb - 0.15 : objective.maxTruePeakDb,
+        ),
+      ).toFixed(2),
+    );
+    if (maxMod) {
+      commands.push({
+        op: 'configure',
+        targetId: maxMod.id,
+        processorType: 'maximizer',
+        paramsPatch: { ceilingDb: safeCeil, truePeak: true },
+        rationale: `Lower Maximizer ceiling to ${safeCeil} dBTP to eliminate True Peak / ISP overshoot.`,
+      });
+    }
+    if (limMod) {
+      commands.push({
+        op: 'configure',
+        targetId: limMod.id,
+        processorType: 'limiter',
+        paramsPatch: { ceilingDb: safeCeil, truePeak: true, oversampling: 4 },
+        rationale: `Enforce 4x oversampled limiter ceiling at ${safeCeil} dBTP.`,
+      });
+    }
+    if (!maxMod && !limMod) {
+      commands.push({
+        op: 'add',
+        processorType: 'limiter',
+        name: 'Safety True-Peak Limiter',
+        params: { ceilingDb: safeCeil, thresholdDb: -1.5, releaseMs: 90, lookaheadMs: 3, truePeak: true, oversampling: 4 },
+        rationale: 'Add missing True Peak ceiling protection.',
+      });
+    }
+    reasons.push(`Enforce ${safeCeil} dBTP ceiling to clear clipping/ISP`);
+  }
+
+  // 2. Calibrate Integrated LUFS with oscillation detection & step-size damping
+  const lufsDiff = objective.targetLufs - post.integratedLufs;
+  const oscillating =
+    typeof options?.prevLufsError === 'number' &&
+    options.prevLufsError !== 0 &&
+    lufsDiff * options.prevLufsError < 0;
+  const lufsGainStepScale = oscillating ? 0.42 : 0.72;
+
+  if (Math.abs(lufsDiff) > 0.55) {
+    if (maxMod) {
+      const curTarget = (maxMod.params as { targetLufs: number }).targetLufs;
+      const nextTarget = Number(Math.max(-24, Math.min(-6, curTarget + lufsDiff * lufsGainStepScale)).toFixed(2));
+      commands.push({
+        op: 'configure',
+        targetId: maxMod.id,
+        processorType: 'maximizer',
+        paramsPatch: { targetLufs: nextTarget },
+        rationale: `Steer Maximizer Target LUFS (${curTarget} -> ${nextTarget}) to close ${lufsDiff.toFixed(1)} LU error${oscillating ? ' (damped anti-oscillation step)' : ''}.`,
+      });
+      reasons.push(`Adjust Maximizer target by ${(lufsDiff * lufsGainStepScale).toFixed(1)} LU`);
+    } else if (limMod) {
+      const curThresh = (limMod.params as { thresholdDb: number }).thresholdDb;
+      const nextThresh = Number(Math.max(-18, Math.min(0, curThresh - lufsDiff * (lufsGainStepScale * 0.9))).toFixed(2));
+      commands.push({
+        op: 'configure',
+        targetId: limMod.id,
+        processorType: 'limiter',
+        paramsPatch: { thresholdDb: nextThresh },
+        rationale: `Shift Limiter threshold to ${nextThresh} dB to approach ${objective.targetLufs} LUFS.`,
+      });
+      reasons.push(`Shift Limiter threshold toward ${nextThresh} dB`);
+    }
+  }
+
+  // 3. Protect Dynamic Range & Transients if over-compressed
+  if (post.dynamicRangeDb < objective.minDynamicRangeDb || pre.dynamicRangeDb - post.dynamicRangeDb > 4.2) {
+    if (maxMod) {
+      const curTe = (maxMod.params as { transientEmphasis: number }).transientEmphasis;
+      commands.push({
+        op: 'configure',
+        targetId: maxMod.id,
+        processorType: 'maximizer',
+        paramsPatch: { transientEmphasis: Math.min(85, curTe + 18) },
+        rationale: 'Boost Maximizer Transient Emphasis to recover drum punch.',
+      });
+    }
+    if (compMod && !compMod.bypassed) {
+      const cp = compMod.params as { ratio: number; thresholdDb: number; attackMs: number };
+      commands.push({
+        op: 'configure',
+        targetId: compMod.id,
+        processorType: 'compressor',
+        paramsPatch: {
+          ratio: Number(Math.max(1.2, cp.ratio - 0.35).toFixed(2)),
+          thresholdDb: Number(Math.min(-8, cp.thresholdDb + 1.5).toFixed(1)),
+          attackMs: Math.min(50, cp.attackMs + 6),
+        },
+        rationale: 'Relax bus compressor ratio/threshold to restore dynamic crest.',
+      });
+    }
+    reasons.push('Relax compression & boost transient emphasis to recover Dynamic Range');
+  }
+
+  // 4. Phase / Low-End Correlation / L-R Balance Remediation
+  const qcPhaseFail = qcReport.checks.some((c) => (c.id === 'qc-phase' || c.id === 'qc-lr-balance') && c.status !== 'pass');
+  if (qcPhaseFail || post.lowEndCorrelation < 0.45 || Math.abs(post.lrBalanceDb) > 0.65) {
+    if (imgMod) {
+      const ip = imgMod.params as { monoBassBelowHz: number; midWidth: number; lrBalanceDb: number };
+      commands.push({
+        op: 'configure',
+        targetId: imgMod.id,
+        processorType: 'stereo-imager',
+        paramsPatch: {
+          monoBassBelowHz: Math.min(140, Math.max(95, ip.monoBassBelowHz + 15)),
+          midWidth: post.phaseCorrelation < 0.25 ? Math.max(80, ip.midWidth - 15) : ip.midWidth,
+          lrBalanceDb: Number((ip.lrBalanceDb - post.lrBalanceDb * 0.7).toFixed(2)),
+        },
+        rationale: 'Tighten mono bass crossover & trim L/R offset per measured stereo telemetry.',
+      });
+    } else {
+      commands.push({
+        op: 'add',
+        processorType: 'stereo-imager',
+        name: 'QC Stereo Correction',
+        params: {
+          lowWidth: 65,
+          midWidth: 98,
+          highWidth: 105,
+          lowCrossHz: 150,
+          highCrossHz: 3500,
+          monoBassBelowHz: 110,
+          lrBalanceDb: Number((-post.lrBalanceDb * 0.75).toFixed(2)),
+          midSideGainDb: 0,
+        },
+        rationale: 'Insert Stereo Imager to fix phase correlation or L/R channel balance.',
+      });
+    }
+    reasons.push('Tighten mono bass & L/R channel balance');
+  }
+
+  // 5. Distortion Control
+  const distCheck = qcReport.checks.find((c) => c.id === 'qc-distortion');
+  if (distCheck && distCheck.status !== 'pass' && satMod && !satMod.bypassed) {
+    const sp = satMod.params as { drive: number };
+    const nextDrive = Math.max(4, Math.round(sp.drive * 0.55));
+    commands.push({
+      op: 'configure',
+      targetId: satMod.id,
+      processorType: 'saturation',
+      paramsPatch: { drive: nextDrive },
+      rationale: `Back off Saturation drive (${sp.drive}% -> ${nextDrive}%) to reduce THD (${post.thdEstimatePercent.toFixed(2)}%).`,
+    });
+    reasons.push(`Reduce saturation drive to ${nextDrive}%`);
+  }
+
+  // 6. Noise Floor / DC Remediation
+  const noiseFail = qcReport.checks.some((c) => (c.id === 'qc-noise-floor' || c.id === 'qc-dc') && c.status !== 'pass');
+  if (noiseFail) {
+    if (restoreMod) {
+      const rp = restoreMod.params as { hissReduction: number };
+      commands.push({
+        op: 'configure',
+        targetId: restoreMod.id,
+        processorType: 'restore',
+        paramsPatch: { dcOffset: true, hissReduction: Math.min(60, rp.hissReduction + 18) },
+        rationale: 'Increase conservative hiss reduction & DC filter.',
+      });
+    } else {
+      commands.push({
+        op: 'add',
+        processorType: 'restore',
+        position: 0,
+        name: 'QC Noise & DC Cleanup',
+        params: {
+          dcOffset: true,
+          humRemovalHz: 0,
+          hissReduction: 28,
+          deEssAmount: 12,
+          deEssFreqHz: 6800,
+          resonanceSuppress: 12,
+          mode: 'conservative',
+        },
+        rationale: 'Prepend SYN-Restore to lower elevated noise floor / DC bias.',
+      });
+    }
+    reasons.push('Engage SYN-Restore noise/DC remediation');
+  }
+
+  // 7. Measurement-specific bass-vs-mid correction. Do not use a low-mid bell cut
+  // to solve excess energy in the separate 60-250 Hz bass measurement.
+  const bassMidDiff = post.zoneEnergyDb.bass - post.zoneEnergyDb.mid;
+  const bassMidLimit = getDiagnosisThresholds(objective).bassMidDiffLimit;
+  if (bassMidDiff > bassMidLimit) {
+    const excessDb = bassMidDiff - bassMidLimit;
+    const cutStepDb = Number(Math.max(0.25, Math.min(0.75, excessDb * 0.75)).toFixed(2));
+    const currentParams = eqMod?.params as { phaseMode?: 'minimum' | 'linear'; msMode?: 'stereo' | 'mid-side'; tiltDb?: number; bands?: EQBand[] } | undefined;
+    const currentBands = currentParams?.bands ?? [];
+    const bassShelfIndex = currentBands.findIndex((band) => band.shape === 'lowshelf' && band.freq >= 70 && band.freq <= 140);
+    const nextBands = currentBands.map((band) => ({ ...band }));
+    if (bassShelfIndex >= 0) {
+      const shelf = nextBands[bassShelfIndex];
+      shelf.gain = Number(Math.max(-3, shelf.gain - cutStepDb).toFixed(2));
+      shelf.enabled = true;
+    } else {
+      nextBands.push({ id: 'refine-bass-mid', enabled: true, shape: 'lowshelf', freq: 100, gain: -cutStepDb, q: 0.71 });
+    }
+    const rationale = `Reduce 60-250 Hz bass energy by a restrained ${cutStepDb.toFixed(2)} dB low shelf; Bass vs Mid is ${bassMidDiff.toFixed(1)} dB (limit ${bassMidLimit.toFixed(1)} dB).`;
+    if (eqMod) {
+      commands.push({
+        op: 'configure',
+        targetId: eqMod.id,
+        processorType: 'parametric-eq',
+        paramsPatch: { bands: nextBands },
+        rationale,
+      });
+    } else {
+      commands.push({
+        op: 'add',
+        processorType: 'parametric-eq',
+        name: 'Bass-to-Mid Refinement EQ',
+        params: { phaseMode: 'minimum', msMode: 'stereo', tiltDb: 0, bands: nextBands },
+        rationale,
+      });
+    }
+    reasons.push(`Trim bass-vs-mid excess by ${cutStepDb.toFixed(2)} dB at 100 Hz`);
+  }
+
+  // 8. Spectral harshness/mud QC follow-up
+  const specCheck = qcReport.checks.find((c) => c.id === 'qc-spectral');
+  if (specCheck && specCheck.status !== 'pass' && eqMod) {
+    const ep = eqMod.params as { tiltDb: number };
+    const mudHeavy = post.zoneEnergyDb.bass - post.zoneEnergyDb.mid >= 11;
+    commands.push({
+      op: 'configure',
+      targetId: eqMod.id,
+      processorType: 'parametric-eq',
+      paramsPatch: {
+        tiltDb: Number(Math.max(-3, Math.min(3, ep.tiltDb + (mudHeavy ? 0.5 : -0.5))).toFixed(2)),
+      },
+      rationale: mudHeavy ? 'Tilt spectral slope slightly brighter to offset heavy bass.' : 'Ease upper-mid tilt to tame harshness.',
+    });
+    reasons.push('Refine EQ tilt for spectral balance');
+  }
+
+  return {
+    commands,
+    hypothesis:
+      reasons.length > 0
+        ? `Hypothesis: ${reasons.join('; ')} will raise Fit Index (currently ${evaluation.engineeringFitIndex.toFixed(1)}) and resolve QC flags.`
+        : 'Telemetry is balanced near convergence; minor verification pass.',
+  };
+}
+
+export interface RunAutonomousDirectorOptions {
+  sourceChannels: Float32Array[];
+  sampleRate: number;
+  operatingMode: DirectorOperatingMode;
+  objectiveId: MasteringObjectiveId;
+  customSpec?: Partial<CustomObjectiveSpec> | null;
+  qcProfile?: QCTargetProfile | null;
+  exportConfig?: ExportConfig | null;
+  referenceAnalysis?: AudioAnalysis | null;
+  stemAnalysis?: StemSetAnalysis | null;
+  stemBuses?: StemInput[];
+  stemChainsById?: Record<string, ProcessorModule[]>;
+  externalPlugins?: ExternalPluginRecord[];
+  hostConnected?: boolean;
+  initialChain?: ProcessorModule[];
+  externalProcessor?: ExternalPluginProcessCallback;
+  renderPassFn?: (
+    channels: Float32Array[],
+    sampleRate: number,
+    chain: ProcessorModule[],
+  ) => Promise<{ channels: Float32Array[]; analysis: AudioAnalysis }>;
+  aiRefineCallback?: (ctx: {
+    preAnalysis: AudioAnalysis;
+    postAnalysis: AudioAnalysis;
+    currentChain: ProcessorModule[];
+    targetLufs: number;
+    targetTruePeakDb: number;
+    preserveDynamics: boolean;
+    qcReport: QCReport;
+  }) => Promise<ProcessorModule[] | null>;
+  maxIterations?: number;
+  maxCpuBudgetMs?: number;
+  convergenceThreshold?: number;
+  isPaused?: () => boolean;
+  shouldStop?: () => boolean;
+  onProgress?: (update: {
+    stage: string;
+    lifecycle?: AiChainLifecycleState;
+    passNumber: number;
+    maxIterations: number;
+    activityEntry?: DirectorActivityEntry;
+    checkpoint?: DirectorCheckpoint;
+    currentChain?: ProcessorModule[];
+  }) => void;
+}
+
+function makeActivity(
+  passNumber: number,
+  phase: DirectorActivityEntry['phase'],
+  kind: DirectorActivityEntry['kind'],
+  message: string,
+  details?: string,
+): DirectorActivityEntry {
+  return {
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: Date.now(),
+    passNumber,
+    phase,
+    kind,
+    message,
+    details,
+  };
+}
+
+function toStemIntelligenceReport(
+  stemSet?: StemSetAnalysis | null,
+  chainsByStemId: Record<string, ProcessorModule[]> = {},
+  processingApplied = false,
+): StemIntelligenceReport | undefined {
+  if (!stemSet) return undefined;
+  const processingChains = Object.fromEntries(
+    Object.entries(chainsByStemId).map(([id, chain]) => [id, chain.map((module) => module.type)]),
+  );
+  return {
+    sampleRate: stemSet.sampleRate,
+    durationSec: stemSet.durationSec,
+    stemCount: stemSet.stems.length,
+    stems: stemSet.stems.map((stem) => ({
+      id: stem.id,
+      name: stem.name,
+      role: stem.role,
+      offsetSamples: stem.offsetSamples,
+      integratedLufs: stem.analysis.integratedLufs,
+      truePeakDb: stem.analysis.truePeakDb,
+      stereoWidth: stem.analysis.stereoWidth,
+      processed: processingApplied && (chainsByStemId[stem.id] ?? []).some((module) => module.enabled && !module.bypassed && module.wetDry > 0.1),
+      processors: (processingChains[stem.id] ?? []),
+    })),
+    overlaps: stemSet.overlaps.map((overlap) => ({
+      stemAId: overlap.stemAId,
+      stemBId: overlap.stemBId,
+      band: overlap.band,
+      differenceDb: overlap.differenceDb,
+      confidence: overlap.confidence,
+    })),
+    warnings: [...stemSet.warnings],
+    processingChains,
+  };
+}
+
+function buildFinalReportFromState(params: {
+  operatingMode: DirectorOperatingMode;
+  objective: ResolvedObjectiveTarget;
+  status: MasterFinalReport['status'];
+  stopReason: string;
+  iterationsExecuted: number;
+  bestCheckpoint: DirectorCheckpoint;
+  rolledBack: boolean;
+  preAnalysis: AudioAnalysis;
+  referenceAnalysis?: AudioAnalysis | null;
+  stemAnalysis?: StemSetAnalysis | null;
+  stemChainsById?: Record<string, ProcessorModule[]>;
+  stemProcessingApplied?: boolean;
+  diagnosis: DirectorDiagnosisReport;
+  recommendations: DirectorRecommendation[];
+  pluginSummary: PluginIntelligenceSummary;
+  checkpoints: DirectorCheckpoint[];
+  activityLog: DirectorActivityEntry[];
+}): MasterFinalReport {
+  const { preAnalysis, bestCheckpoint, diagnosis } = params;
+  const postAnalysis = bestCheckpoint.analysis;
+  const verifiedImprovements: string[] = [];
+  const remainingTradeoffs: string[] = [];
+  const resolvedProblems: string[] = [];
+  const partiallyResolvedProblems: string[] = [];
+  const preservedCharacteristics: string[] = [];
+
+  const lufsDelta = postAnalysis.integratedLufs - preAnalysis.integratedLufs;
+  verifiedImprovements.push(
+    `Integrated Loudness: ${preAnalysis.integratedLufs.toFixed(1)} -> ${postAnalysis.integratedLufs.toFixed(1)} LUFS (${lufsDelta >= 0 ? '+' : ''}${lufsDelta.toFixed(1)} LU)`,
+  );
+  verifiedImprovements.push(
+    `True Peak Headroom: ${preAnalysis.truePeakDb.toFixed(2)} -> ${postAnalysis.truePeakDb.toFixed(2)} dBTP (clipped: ${postAnalysis.clippedSamples})`,
+  );
+  verifiedImprovements.push(
+    `Stereo & Phase: Corr ${postAnalysis.phaseCorrelation.toFixed(2)} (Low ${postAnalysis.lowEndCorrelation.toFixed(2)}), L/R ${postAnalysis.lrBalanceDb.toFixed(2)} dB`,
+  );
+
+  // Evidence-based post-fix reanalysis against baseline findings
+  const hasExecutedProcessing = params.iterationsExecuted > 0 && bestCheckpoint.passNumber > 0;
+  const chainFp = computeChainFingerprint(bestCheckpoint.chain);
+  const postFixVerification = verifyPostFixAnalysis({
+    baselineAnalysis: preAnalysis,
+    baselineDiagnosis: diagnosis,
+    postAnalysis: hasExecutedProcessing ? postAnalysis : null,
+    objective: params.objective,
+    referenceAnalysis: params.referenceAnalysis,
+    baselineAnalysisId: 'baseline',
+    postAnalysisId: hasExecutedProcessing ? bestCheckpoint.id : 'baseline',
+    currentChainFingerprint: chainFp,
+    postChainFingerprint: hasExecutedProcessing ? chainFp : undefined,
+    postProcessingStatus: hasExecutedProcessing ? 'ready' : 'idle',
+    appliedCorrections: hasExecutedProcessing
+      ? [
+          {
+            id: `corr-dir-${bestCheckpoint.passNumber}`,
+            timestamp: bestCheckpoint.timestamp,
+            label: `Autonomous Director Pass #${bestCheckpoint.passNumber}`,
+            processorTypes: [
+              ...Object.values(params.stemChainsById ?? {}).flat().filter((module) => module.enabled && !module.bypassed && module.wetDry > 0.1).map((module) => module.type),
+              ...bestCheckpoint.chain.map((m) => m.type),
+            ],
+            chainFingerprint: chainFp,
+          },
+        ]
+      : [],
+  });
+
+  for (const resolved of postFixVerification.resolvedFindings) {
+    resolvedProblems.push(`${resolved.originalFinding.title} — ${resolved.verificationSummary}`);
+  }
+  for (const active of postFixVerification.activeFindings) {
+    partiallyResolvedProblems.push(
+      `${active.originalFinding.title} [${active.status}]: ${active.remainingDeviation ?? active.verificationSummary}`,
+    );
+  }
+  for (const newly of postFixVerification.newlyIntroducedFindings) {
+    remainingTradeoffs.push(`Newly detected after processing: ${newly.title} (${newly.evidence.join(', ')})`);
+  }
+
+  for (const finding of diagnosis.findings) {
+    if (finding.kind === 'artistic-choice') {
+      preservedCharacteristics.push(`${finding.title}: ${finding.explanation}`);
+    }
+  }
+
+  for (const w of diagnosis.workingWell) {
+    if (preservedCharacteristics.length < 4) preservedCharacteristics.push(w);
+  }
+
+  for (const lf of bestCheckpoint.multiObjective.limitingFactors) {
+    remainingTradeoffs.push(lf);
+  }
+  for (const chk of bestCheckpoint.qcReport.checks) {
+    if (chk.status !== 'pass') {
+      remainingTradeoffs.push(`QC ${chk.status.toUpperCase()} (${chk.label}): ${chk.measuredValue} vs ${chk.targetValue}`);
+    }
+  }
+  if (remainingTradeoffs.length === 0) {
+    remainingTradeoffs.push('All measured QC and multi-objective tolerances met within configured limits.');
+  }
+
+  return {
+    id: `report-${Date.now()}`,
+    createdAt: Date.now(),
+    operatingMode: params.operatingMode,
+    objective: params.objective,
+    status: params.status,
+    stopReason: params.stopReason,
+    iterationsExecuted: params.iterationsExecuted,
+    bestPassNumber: bestCheckpoint.passNumber,
+    rolledBack: params.rolledBack,
+    preAnalysis,
+    postAnalysis,
+    qcReport: bestCheckpoint.qcReport,
+    multiObjective: bestCheckpoint.multiObjective,
+    diagnosis: params.diagnosis,
+    recommendations: params.recommendations,
+    pluginSummary: params.pluginSummary,
+    finalChain: bestCheckpoint.chain,
+    checkpoints: params.checkpoints,
+    activityLog: params.activityLog,
+    verifiedImprovements,
+    remainingTradeoffs,
+    resolvedProblems,
+    partiallyResolvedProblems,
+    preservedCharacteristics,
+    postFixVerification,
+    stemIntelligence: toStemIntelligenceReport(params.stemAnalysis, params.stemChainsById, params.stemProcessingApplied),
+  };
+}
+
+/**
+ * Closed-loop Autonomous Mastering Director (SYN-ITERATE + SYN-QC + Safeguards)
+ */
+export async function runAutonomousDirectorLoop(
+  opts: RunAutonomousDirectorOptions,
+): Promise<MasterFinalReport> {
+  const startMs = Date.now();
+  const maxIterations = Math.max(1, Math.min(6, opts.maxIterations ?? 3));
+  const maxCpuBudgetMs = Math.max(2000, opts.maxCpuBudgetMs ?? 30000);
+  const convergenceThreshold = Math.max(0.2, opts.convergenceThreshold ?? 0.8);
+
+  const activityLog: DirectorActivityEntry[] = [];
+  const checkpoints: DirectorCheckpoint[] = [];
+
+  const emit = (
+    stage: string,
+    passNumber: number,
+    entry?: DirectorActivityEntry,
+    checkpoint?: DirectorCheckpoint,
+    currentChain?: ProcessorModule[],
+    lifecycle?: AiChainLifecycleState,
+  ) => {
+    if (entry) activityLog.push(entry);
+    opts.onProgress?.({
+      stage,
+      lifecycle,
+      passNumber,
+      maxIterations,
+      activityEntry: entry,
+      checkpoint,
+      currentChain,
+    });
+  };
+
+  // Cooperative pause wait helper
+  const waitIfPaused = async (): Promise<boolean> => {
+    while (opts.isPaused?.()) {
+      if (opts.shouldStop?.()) return false;
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    return !opts.shouldStop?.();
+  };
+
+  // Resolve the source timeline. When stem buses are supplied, their explicit
+  // offsets define the canonical mix timeline rather than a potentially stale
+  // stereo bounce passed by the caller.
+  let sourceChannels = opts.sourceChannels;
+  let resolvedStemAnalysis = opts.stemAnalysis ?? null;
+  let stemProcessedChannels: Float32Array[] | null = null;
+  let stemProcessingApplied = false;
+  if (opts.stemBuses && opts.stemBuses.length > 0) {
+    const dryStemRender = await renderStemBusMix(opts.stemBuses, opts.sampleRate);
+    sourceChannels = dryStemRender.mixChannels;
+    resolvedStemAnalysis = dryStemRender.sourceAnalysis;
+    const knownStemIds = new Set(opts.stemBuses.map((stem) => stem.id));
+    for (const stemId of Object.keys(opts.stemChainsById ?? {})) {
+      if (!knownStemIds.has(stemId)) throw new RangeError(`Stem processor chain references unknown stem "${stemId}"`);
+    }
+
+    const hasActiveStemProcessing = opts.operatingMode !== 'manual' &&
+      Object.values(opts.stemChainsById ?? {}).some((chain) =>
+        chain.some((module) => module.enabled && !module.bypassed && module.wetDry > 0.1),
+      );
+    if (hasActiveStemProcessing) {
+      const processedStemRender = await renderStemBusMix(opts.stemBuses, opts.sampleRate, {
+        chainsByStemId: opts.stemChainsById,
+        externalProcessor: opts.externalProcessor,
+      });
+      stemProcessedChannels = processedStemRender.mixChannels;
+      stemProcessingApplied = true;
+    }
+  }
+
+  const passSourceChannels = stemProcessedChannels ?? sourceChannels;
+
+  // Phase 1: Baseline Analysis (yield cleanly so UI never freezes on trigger)
+  emit('Analyzing', 0, undefined, undefined, undefined, 'Analyzing');
+  const baselineRendered = await renderAndAnalyzeOffThread({
+    sourceChannels,
+    sampleRate: opts.sampleRate,
+    chain: [],
+    externalProcessor: opts.externalProcessor,
+  });
+  const preAnalysis = baselineRendered.analysis;
+  const objective = resolveObjectiveTarget(opts.objectiveId, opts.customSpec, opts.referenceAnalysis);
+  const qcProfile: QCTargetProfile = opts.qcProfile ?? {
+    ...QC_TARGET_PROFILES[0],
+    id: `dir-${objective.id}`,
+    name: `${objective.label} Delivery`,
+    targetLufs: objective.targetLufs,
+    lufsTolerance: objective.lufsTolerance,
+    maxTruePeakDb: objective.maxTruePeakDb,
+    minDynamicRangeDb: objective.minDynamicRangeDb,
+  };
+
+  emit('Planning', 0, undefined, undefined, undefined, 'Planning');
+  const plan = buildExplainableMasterPlan({
+    analysis: preAnalysis,
+    objectiveId: opts.objectiveId,
+    customSpec: opts.customSpec,
+    referenceAnalysis: opts.referenceAnalysis,
+    stemAnalysis: resolvedStemAnalysis,
+    externalPlugins: opts.externalPlugins,
+    hostConnected: opts.hostConnected,
+  });
+
+  emit(
+    'Analyzing',
+    0,
+    makeActivity(
+      0,
+      'analyze',
+      'observation',
+      `Baseline analyzed: ${preAnalysis.integratedLufs.toFixed(1)} LUFS, ${preAnalysis.truePeakDb.toFixed(2)} dBTP, DR ${preAnalysis.dynamicRangeDb.toFixed(1)} dB, Noise ${(preAnalysis.noiseFloorDb ?? -72).toFixed(1)} dBFS.`,
+      `Profile: ${plan.diagnosis.artisticProfile} · Technical problems: ${plan.diagnosis.findings.filter((f) => f.kind === 'technical-problem').length}`,
+    ),
+    undefined,
+    undefined,
+    'Analyzing',
+  );
+
+  emit(
+    'SYN-PLUGIN',
+    0,
+    makeActivity(
+      0,
+      'plugin',
+      plan.pluginSummary.compatibleAvailableCount > 0 ? 'observation' : 'warning',
+      plan.pluginSummary.statusSummary,
+    ),
+    undefined,
+    undefined,
+    'Planning',
+  );
+
+  const baseQc = runQualityControl(preAnalysis, preAnalysis, qcProfile, opts.exportConfig);
+  const baseEval = evaluateMultiObjectiveMetrics(preAnalysis, preAnalysis, objective, baseQc, opts.referenceAnalysis);
+  const baseCheckpoint: DirectorCheckpoint = {
+    id: 'cp-0',
+    passNumber: 0,
+    label: 'Unprocessed Baseline',
+    timestamp: Date.now(),
+    chain: structuredClone(opts.initialChain ?? []),
+    analysis: preAnalysis,
+    qcReport: baseQc,
+    multiObjective: baseEval,
+    iterationSummary: {
+      activeProcessor: 'Baseline Input',
+      detectedIssue: 'Pre-master measurement',
+      measuredValue: `${preAnalysis.integratedLufs.toFixed(1)} LUFS / ${preAnalysis.truePeakDb.toFixed(2)} dBTP`,
+      targetValue: `${objective.targetLufs.toFixed(1)} LUFS / <= ${objective.maxTruePeakDb.toFixed(1)} dBTP`,
+      outcome: 'baseline',
+    },
+  };
+  checkpoints.push(baseCheckpoint);
+  emit('Planning', 0, undefined, baseCheckpoint, undefined, 'Planning');
+
+  // If Manual mode, stop cleanly after producing explainable plan & baseline without mutating audio
+  if (opts.operatingMode === 'manual') {
+    emit(
+      'Completed',
+      0,
+      makeActivity(
+        0,
+        'plan',
+        'hypothesis',
+        `Generated ${plan.recommendations.length}-step explainable plan for Manual review (no automatic chain mutations executed).`,
+      ),
+      undefined,
+      undefined,
+      'Completed',
+    );
+    return buildFinalReportFromState({
+      operatingMode: opts.operatingMode,
+      objective,
+      status: 'completed',
+      stopReason: 'Manual mode: Explainable plan generated for engineer-controlled execution.',
+      iterationsExecuted: 0,
+      bestCheckpoint: baseCheckpoint,
+      rolledBack: false,
+      preAnalysis,
+      referenceAnalysis: opts.referenceAnalysis,
+      stemAnalysis: resolvedStemAnalysis,
+      stemChainsById: opts.stemChainsById,
+      stemProcessingApplied,
+      diagnosis: plan.diagnosis,
+      recommendations: plan.recommendations,
+      pluginSummary: plan.pluginSummary,
+      checkpoints,
+      activityLog,
+    });
+  }
+
+  // Initial working chain: use validated Gemini or initialChain in Assisted if user wants refinement, else planned chain
+  let workingChain: ProcessorModule[] =
+    opts.initialChain && opts.initialChain.length > 0
+      ? validateChain(structuredClone(opts.initialChain))
+      : structuredClone(plan.chain);
+
+  emit(
+    'Building chain',
+    0,
+    makeActivity(
+      0,
+      'plan',
+      'command',
+      `Initialized ${workingChain.length}-stage DSP chain for ${objective.label} objective.`,
+      workingChain.map((m) => m.name).join(' -> '),
+    ),
+    undefined,
+    workingChain,
+    'Building chain',
+  );
+
+  // In Assisted mode, render pass 1 only (verify hypothesis + QC) then hand control back to engineer
+  const loopMax = opts.operatingMode === 'assisted' ? 1 : maxIterations;
+
+  let bestCheckpoint: DirectorCheckpoint = baseCheckpoint;
+  let lastFit = baseEval.engineeringFitIndex;
+  let prevLufsError: number | undefined;
+  let finalStatus: MasterFinalReport['status'] = 'completed';
+  let stopReason = 'Completed scheduled mastering passes.';
+  let rolledBack = false;
+  let iterationsExecuted = 0;
+
+  for (let pass = 1; pass <= loopMax; pass++) {
+    if (!(await waitIfPaused())) {
+      finalStatus = 'stopped-by-user';
+      stopReason = 'Stopped by engineer override before pass ' + pass + '.';
+      emit('Stopped', pass, makeActivity(pass, 'halted', 'warning', stopReason), undefined, undefined, 'Stopped');
+      break;
+    }
+
+    if (Date.now() - startMs > maxCpuBudgetMs) {
+      finalStatus = 'budget-reached';
+      stopReason = `Stopped after pass ${pass - 1} due to ${Math.round(maxCpuBudgetMs / 1000)}s CPU time budget.`;
+      emit('Stopped', pass, makeActivity(pass, 'halted', 'warning', stopReason), undefined, undefined, 'Stopped');
+      break;
+    }
+
+    emit('Processing', pass, undefined, undefined, workingChain, 'Processing');
+    const rendered = opts.renderPassFn
+      ? await opts.renderPassFn(passSourceChannels, opts.sampleRate, workingChain)
+      : await renderAndAnalyzeOffThread({
+          sourceChannels: passSourceChannels,
+          sampleRate: opts.sampleRate,
+          chain: workingChain,
+          externalProcessor: opts.externalProcessor,
+        });
+
+    emit('Measuring', pass, undefined, undefined, workingChain, 'Measuring');
+    const post = rendered.analysis;
+    const qcReport = runQualityControl(preAnalysis, post, qcProfile, opts.exportConfig);
+    const multiObjective = evaluateMultiObjectiveMetrics(
+      preAnalysis,
+      post,
+      objective,
+      qcReport,
+      opts.referenceAnalysis,
+    );
+
+    const introducedClipping =
+      post.clippedSamples > bestCheckpoint.analysis.clippedSamples && post.clippedSamples > 0;
+    const isFirstValid = bestCheckpoint.passNumber === 0 && !introducedClipping;
+    const improved =
+      !introducedClipping &&
+      (isFirstValid ||
+        multiObjective.engineeringFitIndex > bestCheckpoint.multiObjective.engineeringFitIndex + 0.05 ||
+        (qcReport.failCount < bestCheckpoint.qcReport.failCount &&
+          multiObjective.engineeringFitIndex >= bestCheckpoint.multiObjective.engineeringFitIndex - 1.5));
+
+    const prevCp = checkpoints[checkpoints.length - 1];
+    const cp: DirectorCheckpoint = {
+      id: `cp-${pass}`,
+      passNumber: pass,
+      label: pass === 1 ? 'Initial Master Render' : `Autonomous Refinement #${pass}`,
+      timestamp: Date.now(),
+      chain: structuredClone(workingChain),
+      analysis: post,
+      qcReport,
+      multiObjective,
+      iterationSummary: {
+        activeProcessor: workingChain.map((m) => m.name).slice(0, 3).join(' + ') || 'Dry Pass',
+        detectedIssue:
+          multiObjective.limitingFactors[0] ??
+          (qcReport.overallStatus === 'pass' ? 'Within target tolerances' : 'Fine calibration'),
+        measuredValue: `${post.integratedLufs.toFixed(1)} LUFS · ${post.truePeakDb.toFixed(2)} dBTP · DR ${post.dynamicRangeDb.toFixed(1)} dB`,
+        targetValue: `${objective.targetLufs.toFixed(1)} LUFS · <= ${objective.maxTruePeakDb.toFixed(1)} dBTP`,
+        previousValue: prevCp
+          ? `${prevCp.analysis.integratedLufs.toFixed(1)} LUFS · Fit ${prevCp.multiObjective.engineeringFitIndex.toFixed(1)}`
+          : undefined,
+        outcome: improved ? 'improved' : 'regressed',
+      },
+    };
+    checkpoints.push(cp);
+    iterationsExecuted = pass;
+
+    emit(
+      'Validating',
+      pass,
+      makeActivity(
+        pass,
+        'evaluate',
+        'verified-result',
+        `Pass ${pass} measured: ${post.integratedLufs.toFixed(1)} LUFS, ${post.truePeakDb.toFixed(2)} dBTP, DR ${post.dynamicRangeDb.toFixed(1)} dB, Fit ${multiObjective.engineeringFitIndex.toFixed(1)}/100, QC ${qcReport.overallStatus.toUpperCase()}.`,
+        `THD ${post.thdEstimatePercent.toFixed(2)}% · Clipped ${post.clippedSamples} · Phase ${post.phaseCorrelation.toFixed(2)}`,
+      ),
+      cp,
+      undefined,
+      'Validating',
+    );
+
+    if (improved) {
+      bestCheckpoint = cp;
+    } else if (pass > 1) {
+      emit(
+        'Validating',
+        pass,
+        makeActivity(
+          pass,
+          'rollback',
+          'warning',
+          `Pass ${pass} did not improve over Pass ${bestCheckpoint.passNumber} (Fit ${multiObjective.engineeringFitIndex.toFixed(1)} vs ${bestCheckpoint.multiObjective.engineeringFitIndex.toFixed(1)}); retaining Pass ${bestCheckpoint.passNumber} as best checkpoint.`,
+        ),
+        undefined,
+        undefined,
+        'Validating',
+      );
+    }
+
+    // A user stop request takes priority over convergence. The progress callback above
+    // may set shouldStop after receiving this checkpoint.
+    if (opts.shouldStop?.()) {
+      finalStatus = 'stopped-by-user';
+      stopReason = `Stopped by engineer override after pass ${pass}.`;
+      emit('Stopped', pass, makeActivity(pass, 'halted', 'warning', stopReason), undefined, undefined, 'Stopped');
+      break;
+    }
+
+    // Check convergence / early stop
+    const lufsOk = Math.abs(post.integratedLufs - objective.targetLufs) <= 0.65;
+    const tpOk = post.truePeakDb <= objective.maxTruePeakDb + 0.05;
+    if (lufsOk && tpOk && qcReport.overallStatus === 'pass' && multiObjective.engineeringFitIndex >= 90) {
+      if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
+      finalStatus = 'converged';
+      stopReason = `Converged on Pass ${pass}: LUFS (${post.integratedLufs.toFixed(1)}), True Peak (${post.truePeakDb.toFixed(2)} dBTP), and all QC checks passed.`;
+      emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
+      break;
+    }
+
+    if (pass > 1 && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold && qcReport.failCount === 0) {
+      if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
+      finalStatus = 'converged';
+      stopReason = `Stopped early after Pass ${pass}: diminishing returns (ΔFit ${(multiObjective.engineeringFitIndex - lastFit).toFixed(2)} < ${convergenceThreshold}).`;
+      emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
+      break;
+    }
+    lastFit = multiObjective.engineeringFitIndex;
+
+    // Derive next refinement if another pass remains
+    if (pass < loopMax) {
+      emit('Optimizing', pass, undefined, undefined, workingChain, 'Optimizing');
+      let nextChainFromAi: ProcessorModule[] | null = null;
+      if (opts.aiRefineCallback) {
+        try {
+          const candidateAiChain = await opts.aiRefineCallback({
+            preAnalysis,
+            postAnalysis: post,
+            currentChain: workingChain,
+            targetLufs: objective.targetLufs,
+            targetTruePeakDb: objective.maxTruePeakDb,
+            preserveDynamics: objective.preserveTransients,
+            qcReport,
+          });
+          if (candidateAiChain) {
+            const invCheck = validateChainAgainstInventory(candidateAiChain);
+            if (invCheck.valid) {
+              nextChainFromAi = invCheck.sanitizedChain;
+            } else {
+              emit(
+                'Optimizing',
+                pass,
+                makeActivity(
+                  pass,
+                  'refine',
+                  'warning',
+                  `Rejected out-of-inventory AI refinement (${invCheck.errors[0] ?? 'schema violation'}); falling back to deterministic DSP Director.`,
+                ),
+                undefined,
+                undefined,
+                'Optimizing',
+              );
+            }
+          }
+        } catch (err) {
+          emit(
+            'Optimizing',
+            pass,
+            makeActivity(
+              pass,
+              'refine',
+              'warning',
+              `Cloud Gemini refinement skipped (${err instanceof Error ? err.message : 'unavailable'}); continuing with deterministic DSP Director remediation.`,
+            ),
+            undefined,
+            undefined,
+            'Optimizing',
+          );
+        }
+      }
+
+      if (nextChainFromAi && nextChainFromAi.length > 0) {
+        workingChain = nextChainFromAi;
+        emit(
+          'Optimizing',
+          pass,
+          makeActivity(pass, 'refine', 'hypothesis', 'Applied cloud Gemini refinement adjustments for next render pass.'),
+          undefined,
+          workingChain,
+          'Optimizing',
+        );
+      } else {
+        // Refine from bestCheckpoint.chain so regression never compounds!
+        const refinementSourceChain = bestCheckpoint.passNumber > 0 ? bestCheckpoint.chain : workingChain;
+        const refinementSourcePost = bestCheckpoint.passNumber > 0 ? bestCheckpoint.analysis : post;
+        const refinementSourceQc = bestCheckpoint.passNumber > 0 ? bestCheckpoint.qcReport : qcReport;
+        const refinementSourceEval = bestCheckpoint.passNumber > 0 ? bestCheckpoint.multiObjective : multiObjective;
+
+        const { commands, hypothesis } = deriveRefinementCommands(
+          preAnalysis,
+          refinementSourcePost,
+          refinementSourceChain,
+          objective,
+          refinementSourceQc,
+          refinementSourceEval,
+          { prevLufsError },
+        );
+        prevLufsError = objective.targetLufs - refinementSourcePost.integratedLufs;
+
+        if (commands.length === 0) {
+          finalStatus = 'converged';
+          stopReason = `No further parameter corrections required after Pass ${pass}.`;
+          emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
+          break;
+        }
+        emit('Optimizing', pass, makeActivity(pass, 'refine', 'hypothesis', hypothesis), undefined, undefined, 'Optimizing');
+        const applied = applyStructuredChainCommands(refinementSourceChain, commands);
+        workingChain = applied.chain;
+        emit(
+          'Building chain',
+          pass,
+          makeActivity(
+            pass,
+            'chain',
+            'command',
+            `Executed ${applied.appliedCount} structured chain command(s) for Pass ${pass + 1}.`,
+            commands.map((c) => `${c.op}:${'processorType' in c && c.processorType ? c.processorType : ''}`).join(', '),
+          ),
+          undefined,
+          workingChain,
+          'Building chain',
+        );
+      }
+    }
+  }
+
+  // Final rollback safeguard if final checkpoint wasn't the best
+  const lastExecuted = checkpoints[checkpoints.length - 1];
+  if (lastExecuted && bestCheckpoint.passNumber !== lastExecuted.passNumber && bestCheckpoint.passNumber > 0) {
+    rolledBack = true;
+    if (finalStatus === 'completed') finalStatus = 'rolled-back';
+    stopReason = `Automatically rolled back to best verified Pass ${bestCheckpoint.passNumber} (Fit ${bestCheckpoint.multiObjective.engineeringFitIndex.toFixed(1)}/100).`;
+    emit(
+      'Validating',
+      bestCheckpoint.passNumber,
+      makeActivity(bestCheckpoint.passNumber, 'rollback', 'warning', stopReason),
+      undefined,
+      undefined,
+      'Validating',
+    );
+  }
+  bestCheckpoint.isBest = true;
+
+  emit(
+    finalStatus === 'stopped-by-user' ? 'Stopped' : 'Completed',
+    bestCheckpoint.passNumber,
+    undefined,
+    undefined,
+    bestCheckpoint.chain,
+    finalStatus === 'stopped-by-user' ? 'Stopped' : 'Completed',
+  );
+
+  return buildFinalReportFromState({
+    operatingMode: opts.operatingMode,
+    objective,
+    status: finalStatus,
+    stopReason,
+    iterationsExecuted,
+    bestCheckpoint,
+    rolledBack,
+    preAnalysis,
+    referenceAnalysis: opts.referenceAnalysis,
+    stemAnalysis: resolvedStemAnalysis,
+    stemChainsById: opts.stemChainsById,
+    stemProcessingApplied,
+    diagnosis: plan.diagnosis,
+    recommendations: plan.recommendations,
+    pluginSummary: plan.pluginSummary,
+    checkpoints,
+    activityLog,
+  });
+}
