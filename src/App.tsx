@@ -1626,7 +1626,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen lg:h-screen w-full flex flex-col bg-[#070709] text-[#F7F8FA] lg:overflow-hidden">
+    <div className="syn-workstation min-h-screen lg:h-screen w-full flex flex-col bg-[#070709] text-[#F7F8FA] lg:overflow-hidden">
       {/* Zone 3-Part Top Bar Contract */}
       <header className="h-14 shrink-0 px-4 border-b border-[#242732] bg-[#0B0C10] flex items-center justify-between gap-8">
         {/* Zone 1: Single-line Brand Lockup */}
@@ -1642,14 +1642,58 @@ export default function App() {
           </span>
         </div>
 
-        {/* Zone 2: Clean Single-Line Navigation Tabs */}
-        <nav aria-label="Primary Sections" className="hidden md:flex items-center gap-5">
-          <button type="button" onClick={() => setActiveTab('studio')} className={`py-1 text-xs font-bold border-b-2 ${activeTab !== 'plugins' ? 'border-[#F2CA52] text-[#F2CA52]' : 'border-transparent text-[#9CA3AF] hover:text-white'}`}>
-            MASTERING WORKSPACE
-          </button>
-          <button type="button" onClick={() => setActiveTab('plugins')} className={`py-1 text-xs font-semibold border-b-2 ${activeTab === 'plugins' ? 'border-[#F2CA52] text-[#F2CA52]' : 'border-transparent text-[#9CA3AF] hover:text-white'}`}>
-            PLUGINS &amp; HOST
-          </button>
+        {/* BlueNote-grade command menu: grouped actions, keyboard-friendly native disclosure menus */}
+        <nav aria-label="Application Menu" className="syn-menubar">
+          <details className="syn-menu-group">
+            <summary>File</summary>
+            <div className="syn-menu-panel" role="menu" aria-label="File">
+              <button role="menuitem" type="button" onClick={(event) => { void handleSaveProject(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Save Project <kbd>Ctrl+S</kbd></button>
+              <button role="menuitem" type="button" onClick={(event) => { setExportModalOpen(true); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Export Master</button>
+            </div>
+          </details>
+          <details className="syn-menu-group">
+            <summary>Edit</summary>
+            <div className="syn-menu-panel" role="menu" aria-label="Edit">
+              <button role="menuitem" type="button" disabled={undoStack.length === 0} onClick={(event) => { handleUndo(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Undo <kbd>Ctrl+Z</kbd></button>
+              <button role="menuitem" type="button" disabled={redoStack.length === 0} onClick={(event) => { handleRedo(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Redo <kbd>Ctrl+Y</kbd></button>
+              <button role="menuitem" type="button" onClick={(event) => { handleToggleChainBypass(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Toggle Chain Bypass</button>
+              <button role="menuitem" type="button" onClick={(event) => { handleResetChain(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Reset Processing Chain</button>
+            </div>
+          </details>
+          <details className="syn-menu-group">
+            <summary>Workspace</summary>
+            <div className="syn-menu-panel" role="menu" aria-label="Workspace">
+              {([
+                { id: 'studio', label: 'Mastering Workspace' },
+                { id: 'ai', label: 'AI Director' },
+                { id: 'lab', label: 'Analysis Lab' },
+                { id: 'stems', label: 'Stem Studio' },
+                { id: 'reference', label: 'Reference Match' },
+                { id: 'battle', label: 'A/B Battle' },
+                { id: 'qc', label: 'Quality Check' },
+                { id: 'plugins', label: 'Plugins & Host' },
+              ] as const).map((item) => (
+                <button key={item.id} role="menuitem" type="button" aria-current={activeTab === item.id ? 'page' : undefined} onClick={(event) => { setActiveTab(item.id); event.currentTarget.closest('details')?.removeAttribute('open'); }}>
+                  {item.label}{activeTab === item.id ? <span aria-hidden="true">✓</span> : null}
+                </button>
+              ))}
+            </div>
+          </details>
+          <details className="syn-menu-group">
+            <summary>View</summary>
+            <div className="syn-menu-panel" role="menu" aria-label="View">
+              <button role="menuitem" type="button" onClick={(event) => { setFullscreenWorkspace((value) => !value); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{fullscreenWorkspace ? 'Exit Fullscreen' : 'Fullscreen Workspace'}</button>
+              <button role="menuitem" type="button" onClick={(event) => { setSettingsModalOpen(true); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Preferences & Settings</button>
+            </div>
+          </details>
+          <details className="syn-menu-group">
+            <summary>Tools</summary>
+            <div className="syn-menu-panel" role="menu" aria-label="Tools">
+              <button role="menuitem" type="button" onClick={(event) => { setActiveTab('plugins'); event.currentTarget.closest('details')?.removeAttribute('open'); }}>VST3 Plugin Manager</button>
+              <button role="menuitem" type="button" onClick={(event) => { setActiveTab('stems'); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Stem Intelligence</button>
+              <button role="menuitem" type="button" onClick={(event) => { setActiveTab('lab'); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Spectral Analysis</button>
+            </div>
+          </details>
         </nav>
 
         {/* Zone 3: Primary CTA */}
