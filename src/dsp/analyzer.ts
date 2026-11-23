@@ -328,21 +328,28 @@ export function analyzeAudioBuffer(
   );
 
   // Frequency-localized correlation catches cancellation hidden by whole-program averages.
+  // Boundaries match the default Stereo Imager crossovers so a flagged band maps to
+  // the processor control that can actually correct it.
+  const lowBandL = new Float32Array(length);
+  const lowBandR = new Float32Array(length);
   const midHpL = new Float32Array(length);
   const midHpR = new Float32Array(length);
   const midL = new Float32Array(length);
   const midR = new Float32Array(length);
   const highL = new Float32Array(length);
   const highR = new Float32Array(length);
-  const hp120 = designHighPass(120, Math.SQRT1_2, sampleRate);
-  const lp2000 = designLowPass(2000, Math.SQRT1_2, sampleRate);
-  const hp2000 = designHighPass(2000, Math.SQRT1_2, sampleRate);
-  processBiquadBuffer(left, midHpL, hp120);
-  processBiquadBuffer(right, midHpR, hp120);
-  processBiquadBuffer(midHpL, midL, lp2000);
-  processBiquadBuffer(midHpR, midR, lp2000);
-  processBiquadBuffer(left, highL, hp2000);
-  processBiquadBuffer(right, highR, hp2000);
+  const lp150 = designLowPass(150, Math.SQRT1_2, sampleRate);
+  const hp150 = designHighPass(150, Math.SQRT1_2, sampleRate);
+  const lp3500 = designLowPass(3500, Math.SQRT1_2, sampleRate);
+  const hp3500 = designHighPass(3500, Math.SQRT1_2, sampleRate);
+  processBiquadBuffer(left, lowBandL, lp150);
+  processBiquadBuffer(right, lowBandR, lp150);
+  processBiquadBuffer(left, midHpL, hp150);
+  processBiquadBuffer(right, midHpR, hp150);
+  processBiquadBuffer(midHpL, midL, lp3500);
+  processBiquadBuffer(midHpR, midR, lp3500);
+  processBiquadBuffer(left, highL, hp3500);
+  processBiquadBuffer(right, highR, hp3500);
 
   const measureCorrelation = (a: Float32Array, b: Float32Array): number => {
     let aa = 0;
@@ -357,7 +364,7 @@ export function analyzeAudioBuffer(
     return d > 1e-12 ? Math.max(-1, Math.min(1, ab / d)) : 1;
   };
   const stereoBandCorrelation = {
-    low: Number(lowEndCorrelation.toFixed(3)),
+    low: Number(measureCorrelation(lowBandL, lowBandR).toFixed(3)),
     mid: Number(measureCorrelation(midL, midR).toFixed(3)),
     high: Number(measureCorrelation(highL, highR).toFixed(3)),
   };
