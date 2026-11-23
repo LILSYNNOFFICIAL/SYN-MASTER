@@ -616,3 +616,51 @@ test('Reference comparison preserves raw band deltas but bases EQ guidance on le
     'Genuine relative air difference should remain visible in reference guidance',
   );
 });
+
+test('Reference alignment score is invariant to uniform reference gain while loudness compliance remains objective-based', () => {
+  const source = makeBalancedStereo(1.2, 0.18);
+  const sourceAnalysis = analyzeAudioBuffer(source, SR);
+  const louderReference = analyzeAudioBuffer(
+    source.map((channel) => Float32Array.from(channel, (sample) => sample * 2)),
+    SR,
+  );
+  assert.ok(
+    Math.abs(louderReference.integratedLufs - sourceAnalysis.integratedLufs) > 5.5,
+    'Reference fixture must have a substantial loudness offset',
+  );
+
+  const objective = resolveObjectiveTarget('streaming');
+  const qc = runQualityControl(sourceAnalysis, sourceAnalysis, QC_TARGET_PROFILES[0]);
+  const sourceEvaluation = evaluateMultiObjectiveMetrics(
+    sourceAnalysis,
+    sourceAnalysis,
+    objective,
+    qc,
+    sourceAnalysis,
+  );
+  const louderReferenceEvaluation = evaluateMultiObjectiveMetrics(
+    sourceAnalysis,
+    sourceAnalysis,
+    objective,
+    qc,
+    louderReference,
+  );
+  const sourceReferenceScore = sourceEvaluation.dimensions.find((dimension) => dimension.key === 'referenceSimilarity');
+  const louderReferenceScore = louderReferenceEvaluation.dimensions.find((dimension) => dimension.key === 'referenceSimilarity');
+  const sourceLoudnessScore = sourceEvaluation.dimensions.find((dimension) => dimension.key === 'loudness');
+  const louderReferenceLoudnessScore = louderReferenceEvaluation.dimensions.find((dimension) => dimension.key === 'loudness');
+
+  assert.ok(sourceReferenceScore && louderReferenceScore);
+  assert.equal(
+    louderReferenceScore.score,
+    sourceReferenceScore.score,
+    'Uniform gain applied to the reference must not reduce tonal/stereo reference alignment',
+  );
+  assert.ok(sourceReferenceScore.measuredSummary.includes('LUFS'));
+  assert.ok(louderReferenceScore.measuredSummary.includes('LUFS'));
+  assert.equal(
+    louderReferenceLoudnessScore?.score,
+    sourceLoudnessScore?.score,
+    'Reference loudness must not change the objective loudness compliance score',
+  );
+});
