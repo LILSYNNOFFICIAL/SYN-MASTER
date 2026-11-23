@@ -1293,15 +1293,21 @@ export function deriveRefinementCommands(
     reasons.push(`Enforce ${safeCeil} dBTP ceiling to clear clipping/ISP`);
   }
 
-  // 2. Calibrate Integrated LUFS with oscillation detection & step-size damping
+  // 2. Calibrate Integrated LUFS with oscillation damping, but do not trade away
+  // source dynamics just to hit a loudness number.
   const lufsDiff = objective.targetLufs - post.integratedLufs;
   const oscillating =
     typeof options?.prevLufsError === 'number' &&
     options.prevLufsError !== 0 &&
     lufsDiff * options.prevLufsError < 0;
   const lufsGainStepScale = oscillating ? 0.42 : 0.72;
+  const sourceDynamicsLimited = pre.dynamicRangeDb < objective.minDynamicRangeDb;
+  const postDynamicsAtRisk =
+    post.dynamicRangeDb < objective.minDynamicRangeDb ||
+    pre.dynamicRangeDb - post.dynamicRangeDb > 2.5;
+  const protectTransients = objective.preserveTransients && (sourceDynamicsLimited || postDynamicsAtRisk);
 
-  if (Math.abs(lufsDiff) > 0.55) {
+  if (Math.abs(lufsDiff) > 0.55 && !(protectTransients && lufsDiff > 0)) {
     if (maxMod) {
       const curTarget = (maxMod.params as { targetLufs: number }).targetLufs;
       const nextTarget = Number(Math.max(-24, Math.min(-6, curTarget + lufsDiff * lufsGainStepScale)).toFixed(2));
@@ -1325,19 +1331,31 @@ export function deriveRefinementCommands(
       });
       reasons.push(`Shift Limiter threshold toward ${nextThresh} dB`);
     }
+  } else if (protectTransients && lufsDiff > 0.55) {
+    reasons.push('Hold additional loudness drive because source/output dynamics are below the transient-preservation guardrail');
   }
 
-  // 3. Protect Dynamic Range & Transients if over-compressed
-  if (post.dynamicRangeDb < objective.minDynamicRangeDb || pre.dynamicRangeDb - post.dynamicRangeDb > 4.2) {
+  // 3. Recover only dynamics lost inside this processing pass. Transient emphasis is
+  // a tone-shaping effect, not reconstruction, so do not use it as a DR repair control.
+  const processingDynamicsCollapse =
+    (post.dynamicRangeDb < objective.minDynamicRangeDb &&
+      pre.dynamicRangeDb - post.dynamicRangeDb > 0.8) ||
+    pre.dynamicRangeDb - post.dynamicRangeDb > 2.5;
+  if (objective.preserveTransients && processingDynamicsCollapse) {
     if (maxMod) {
-      const curTe = (maxMod.params as { transientEmphasis: number }).transientEmphasis;
-      commands.push({
-        op: 'configure',
-        targetId: maxMod.id,
-        processorType: 'maximizer',
-        paramsPatch: { transientEmphasis: Math.min(85, curTe + 18) },
-        rationale: 'Boost Maximizer Transient Emphasis to recover drum punch.',
-      });
+      const currentTarget = (maxMod.params as { targetLufs: number }).targetLufs;
+      const deficitDb = Math.max(0, objective.minDynamicRangeDb - post.dynamicRangeDb);
+      const retreatDb = Number(Math.max(0.5, Math.min(1.5, deficitDb * 0.35)).toFixed(2));
+      const saferTarget = Number(Math.max(-24, currentTarget - retreatDb).toFixed(2));
+      if (saferTarget < currentTarget) {
+        commands.push({
+          op: 'configure',
+          targetId: maxMod.id,
+          processorType: 'maximizer',
+          paramsPatch: { targetLufs: saferTarget },
+          rationale: `Back off Maximizer loudness drive by ${retreatDb.toFixed(2)} LU after measured dynamic-range collapse.`,
+        });
+      }
     }
     if (compMod && !compMod.bypassed) {
       const cp = compMod.params as { ratio: number; thresholdDb: number; attackMs: number };
@@ -1350,10 +1368,10 @@ export function deriveRefinementCommands(
           thresholdDb: Number(Math.min(-8, cp.thresholdDb + 1.5).toFixed(1)),
           attackMs: Math.min(50, cp.attackMs + 6),
         },
-        rationale: 'Relax bus compressor ratio/threshold to restore dynamic crest.',
+        rationale: 'Relax bus compression to recover transient contrast lost during mastering.',
       });
     }
-    reasons.push('Relax compression & boost transient emphasis to recover Dynamic Range');
+    reasons.push('Back off processing-induced loudness/compression to recover measured dynamic range');
   }
 
   // 4. Frequency-localized phase / mono compatibility / L-R balance remediation.
