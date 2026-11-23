@@ -683,7 +683,9 @@ function applyRestore(
     }
   }
 
-  // 4. Adaptive Hiss Reduction (downward high-shelf noise gate above 6.5 kHz)
+  // 4. Adaptive Hiss Reduction (downward high-shelf noise gate above 6.5 kHz).
+  // Fast detector attack opens the shelf for transient detail; slower release keeps
+  // quiet-passage reduction stable instead of chopping ambience at the waveform rate.
   const hiss = (params.hissReduction / 100) * intensityScale;
   if (hiss > 0.01) {
     const hsL = createBiquadState();
@@ -691,13 +693,19 @@ function applyRestore(
     let rmsEnv = 0;
     let hsCut = 0;
     let hsCoeffs = designHighShelf(7000, 0, 0.7, sampleRate);
+    const detectorAttack = Math.exp(-1 / Math.max(1, sampleRate * 0.001));
+    const detectorRelease = Math.exp(-1 / Math.max(1, sampleRate * 0.08));
+    const cutAttack = Math.exp(-1 / Math.max(1, sampleRate * 0.02));
+    const cutRelease = Math.exp(-1 / Math.max(1, sampleRate * 0.005));
     for (let i = 0; i < n; i++) {
       const m = 0.5 * (Math.abs(left[i]) + Math.abs(right[i]));
-      rmsEnv = rmsEnv * 0.995 + m * 0.005;
+      const detectorCoeff = m > rmsEnv ? detectorAttack : detectorRelease;
+      rmsEnv = detectorCoeff * rmsEnv + (1 - detectorCoeff) * m;
       const lvlDb = linearToDb(rmsEnv);
       const target = lvlDb < -44 ? -6.5 * hiss : 0;
-      hsCut = hsCut * 0.98 + target * 0.02;
-      if ((i & 63) === 0) {
+      const gainCoeff = target < hsCut ? cutAttack : cutRelease;
+      hsCut = gainCoeff * hsCut + (1 - gainCoeff) * target;
+      if ((i & 31) === 0) {
         hsCoeffs = designHighShelf(7000, hsCut, 0.7, sampleRate);
       }
       left[i] = processBiquadSample(left[i], hsCoeffs, hsL);
