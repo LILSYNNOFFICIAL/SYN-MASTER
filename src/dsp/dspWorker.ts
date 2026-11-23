@@ -31,7 +31,7 @@ export interface DspWorkerErrorResponse {
 self.onmessage = (ev: MessageEvent<DspWorkerRequest>) => {
   const req = ev.data;
   try {
-    const processed = processChainOffline(req.channels, req.sampleRate, req.chain, req.postFades);
+    const processed = processChainOffline(req.channels, req.sampleRate, req.chain, req.postFades, { takeOwnership: true });
     const analysis = analyzeAudioBuffer(processed.channels, req.sampleRate);
     const peaks =
       req.kind === 'render-and-analyze'

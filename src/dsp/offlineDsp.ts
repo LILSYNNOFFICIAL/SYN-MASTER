@@ -1249,33 +1249,37 @@ function applyMultibandMaximizer(
  * Process stereo/mono Float32Array buffers through the entire SYN-CHAIN
  * without mutating the source buffers.
  */
+export interface OfflineDspOptions {
+  /** The caller has transferred exclusive ownership of these buffers and permits in-place rendering. */
+  takeOwnership?: boolean;
+}
+
 export function processChainOffline(
   sourceChannels: Float32Array[],
   sampleRate: number,
   chain: ProcessorModule[],
   postFades?: FadeSettings | null,
+  options: OfflineDspOptions = {},
 ): OfflineDspResult {
   const numCh = sourceChannels.length;
   const length = sourceChannels[0].length;
-  const left = new Float32Array(sourceChannels[0]);
-  const right = new Float32Array(numCh > 1 ? sourceChannels[1] : sourceChannels[0]);
+  const left = options.takeOwnership ? sourceChannels[0] : new Float32Array(sourceChannels[0]);
+  const right = numCh > 1
+    ? options.takeOwnership ? sourceChannels[1] : new Float32Array(sourceChannels[1])
+    : new Float32Array(sourceChannels[0]);
   const needsMultibandScratch = chain.some((mod) =>
     mod.enabled && !mod.bypassed &&
     (mod.type === 'multiband-comp' || mod.type === 'multiband-maximizer'),
   );
   const multibandScratch = needsMultibandScratch ? createMultibandScratchBuffers(length) : null;
-  const isLimiterModule = (type: ProcessorModule['type']): boolean =>
-    type === 'limiter' || type === 'maximizer' || type === 'multiband-maximizer';
-  // Reuse one stereo pair only for wet/dry snapshots of non-limiter modules.
-  // The limiter reads its source in place with a bounded lookahead window.
+  // One stereo pair serves every sequential wet/dry snapshot, including the limiter.
+  // Each module consumes its snapshot before the next module overwrites the scratch.
   const needsSharedScratch = chain.some((mod) =>
-    mod.enabled && !mod.bypassed && mod.wetDry < 99.5 && !isLimiterModule(mod.type),
+    mod.enabled && !mod.bypassed && mod.wetDry < 99.5,
   );
   const sharedScratch = needsSharedScratch
     ? { dryL: new Float32Array(length), dryR: new Float32Array(length) }
     : null;
-  let limiterDryScratchL: Float32Array | null = null;
-  let limiterDryScratchR: Float32Array | null = null;
 
   const telemetry: ProcessorMeterTelemetry[] = [];
 
@@ -1287,23 +1291,13 @@ export function processChainOffline(
     }
 
     const useWetDry = mod.wetDry < 99.5;
-    const moduleNeedsSeparateDrySnapshot = isLimiterModule(mod.type);
     let dryL: Float32Array | null = null;
     let dryR: Float32Array | null = null;
-    if (useWetDry) {
-      if (moduleNeedsSeparateDrySnapshot) {
-        limiterDryScratchL ??= new Float32Array(length);
-        limiterDryScratchR ??= new Float32Array(length);
-        limiterDryScratchL.set(left);
-        limiterDryScratchR.set(right);
-        dryL = limiterDryScratchL;
-        dryR = limiterDryScratchR;
-      } else if (sharedScratch) {
-        sharedScratch.dryL.set(left);
-        sharedScratch.dryR.set(right);
-        dryL = sharedScratch.dryL;
-        dryR = sharedScratch.dryR;
-      }
+    if (useWetDry && sharedScratch) {
+      sharedScratch.dryL.set(left);
+      sharedScratch.dryR.set(right);
+      dryL = sharedScratch.dryL;
+      dryR = sharedScratch.dryR;
     }
 
     // Input gain stage

@@ -27,6 +27,28 @@ function makeSineStereo(
   return [l, r];
 }
 
+test('offline renderer preserves source buffers by default and reuses explicitly transferred ownership', () => {
+  const [left, right] = makeSineStereo(440, 0.2, 0.1, 48000);
+  const gain = createProcessorModule('parametric-eq');
+  gain.inputGainDb = 6;
+  const source = [left, right];
+  const sampleIndex = 25;
+  const original = left[sampleIndex];
+
+  const copied = processChainOffline(source, 48000, [gain]);
+  assert.notEqual(copied.channels[0], left);
+  assert.equal(left[sampleIndex], original, 'Default processing must not mutate caller-owned source audio');
+  assert.notEqual(copied.channels[0][sampleIndex], original);
+
+  const ownedLeft = new Float32Array(left);
+  const ownedRight = new Float32Array(right);
+  const owned = [ownedLeft, ownedRight];
+  const rendered = processChainOffline(owned, 48000, [gain], null, { takeOwnership: true });
+  assert.equal(rendered.channels[0], ownedLeft);
+  assert.equal(rendered.channels[1], ownedRight);
+  assert.notEqual(ownedLeft[sampleIndex], original, 'Explicit ownership permits in-place DSP on the transferred buffer');
+});
+
 function referenceIntegratedLufs(channels: Float32Array[], sampleRate: number): number {
   const numChannels = channels.length;
   const left = channels[0];

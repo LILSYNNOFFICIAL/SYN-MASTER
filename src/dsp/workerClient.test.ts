@@ -22,10 +22,12 @@ class FakeWorker {
   onmessageerror: ((event: MessageEvent) => void) | null = null;
   terminated = false;
   respond = true;
+  reusedTransferredBuffers = false;
 
   postMessage(message: DspWorkerRequest): void {
     if (!this.respond) return;
-    const processed = processChainOffline(message.channels, message.sampleRate, message.chain);
+    const processed = processChainOffline(message.channels, message.sampleRate, message.chain, null, { takeOwnership: true });
+    this.reusedTransferredBuffers = processed.channels[0] === message.channels[0] && processed.channels[1] === message.channels[1];
     const response: DspWorkerSuccessResponse = {
       id: message.id,
       ok: true,
@@ -75,6 +77,7 @@ test('uses worker results and keeps transferred input clones separate from the s
   assert.equal(result.usedWorker, true);
   assert.equal(result.channels.length, 2);
   assert.equal(source[0][32], before);
+  assert.equal(worker.reusedTransferredBuffers, true, 'The worker renderer must consume transferred buffers without another full-track copy');
   assert.equal(worker.terminated, false);
   client.dispose();
   assert.equal(worker.terminated, true);
