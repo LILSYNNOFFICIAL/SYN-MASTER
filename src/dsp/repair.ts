@@ -11,7 +11,7 @@
  * the Fix-All loop can re-render and re-measure the result.
  */
 import { createBiquadState, designHighPass, processBiquadSample } from './biquad';
-import { findEdgeClick } from './clickDetect';
+import { findEdgeClick, isIsolatedClick } from './clickDetect';
 
 export interface RepairSettings {
   /** 0..100 de-click strength (0 = off). */
@@ -43,7 +43,6 @@ export function repairClicksChannel(
   const n = ch.length;
   if (n < 32) return 0;
   const alpha = 1 - Math.exp(-1 / Math.max(1, sampleRate * 0.005));
-  const after = Math.max(8, Math.round(sampleRate * 0.003));
   let env = 0;
   const prime = Math.min(n, Math.round(sampleRate * 0.01));
   for (let i = 2; i < prime; i++) env += d2(ch, i);
@@ -54,13 +53,9 @@ export function repairClicksChannel(
     const v = d2(ch, i);
     const local = env + 1e-6;
     if (v > floor && v > ratio * local) {
-      // Isolation test: roughness must fall back afterwards (not a drum onset).
-      const s = i + 4;
-      const e = Math.min(n, s + after);
-      let sum = 0;
-      for (let j = s; j < e; j++) sum += d2(ch, j);
-      const meanAfter = e > s ? sum / (e - s) : 0;
-      if (meanAfter < local * 2) {
+      // Same isolation test as the detector: short, and roughness falls straight back
+      // (not a drum / snap / hi-hat onset, which must never be smoothed).
+      if (isIsolatedClick(ch, i, sampleRate)) {
         const a = Math.max(2, i - halfWidth);
         const b = Math.min(n - 3, i + halfWidth);
         bridgeHermite(ch, a, b);

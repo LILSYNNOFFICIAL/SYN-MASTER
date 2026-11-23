@@ -77,8 +77,6 @@ export function detectClicks(
   const alpha = 1 - Math.exp(-1 / Math.max(1, sampleRate * 0.005));
   const flagged = new Uint8Array(Math.ceil(length / refractory) + 1);
   let worstRatio = 0;
-  // Look-ahead window used to tell an isolated spike from a transient onset.
-  const after = Math.max(8, Math.round(sampleRate * 0.003));
 
   const edgeLen = Math.min(length, Math.max(8, Math.round(sampleRate * 0.003)));
   let startClick = false;
@@ -103,7 +101,7 @@ export function detectClicks(
     for (let i = Math.max(2, edgeLen); i < length - edgeLen; i++) {
       const d2 = Math.abs(ch[i] - 2 * ch[i - 1] + ch[i - 2]);
       const local = env + 1e-6;
-      if (d2 > floor && d2 > ratio * local && isIsolatedSpike(ch, i, local, ratio, after)) {
+      if (d2 > floor && d2 > ratio * local && isIsolatedClick(ch, i, sampleRate)) {
         flagged[Math.floor(i / refractory)] = 1;
         const r = d2 / local;
         if (r > worstRatio) worstRatio = r;
@@ -138,22 +136,36 @@ export function detectClicks(
 }
 
 /**
- * A click is a short spike after which the signal's roughness drops back near the
- * level it had before. A drum or hi-hat onset keeps the second difference high for
- * several milliseconds, so it is not counted.
+ * A click is a SHORT spike after which the signal's roughness drops straight back to the
+ * level it had before. Drum, snap and hi-hat onsets keep the second difference high for
+ * several milliseconds (measured on a real Suno track: 1.6-14x the prior roughness over the
+ * next 3 ms, and 6-33 samples above 30% of the peak at 48 kHz), so they are not counted.
+ *
+ * Tests, all on the second difference d2:
+ *  - width: samples within ±1 ms whose d2 exceeds 30% of the spike stay ≤ ~0.1 ms + 3,
+ *  - recovery: mean d2 over 0.1-3 ms after the spike < 1.5x the mean over 2-12 ms before.
+ * Shared by the detector and the de-click repair so the repair never smooths an onset
+ * the detector would not call a click.
  */
-function isIsolatedSpike(
-  ch: Float32Array,
-  index: number,
-  localBefore: number,
-  ratio: number,
-  after: number,
-): boolean {
-  const start = index + 4;
-  const end = Math.min(ch.length, start + after);
-  if (end - start < 4) return true;
-  let sum = 0;
-  for (let j = start; j < end; j++) sum += Math.abs(ch[j] - 2 * ch[j - 1] + ch[j - 2]);
-  const meanAfter = sum / (end - start);
-  return meanAfter < localBefore * 2;
+export function isIsolatedClick(ch: Float32Array, index: number, sampleRate: number): boolean {
+  const n = ch.length;
+  const d = (j: number) => (j < 2 || j >= n ? 0 : Math.abs(ch[j] - 2 * ch[j - 1] + ch[j - 2]));
+  const peak = d(index);
+  const ms = sampleRate / 1000;
+  const span = Math.max(4, Math.round(ms));
+  let width = 0;
+  for (let j = index - span; j <= index + span; j++) if (d(j) > 0.3 * peak) width++;
+  if (width > Math.round(0.1 * ms) + 3) return false;
+  const bA = Math.max(2, index - Math.round(12 * ms));
+  const bB = Math.max(2, index - Math.round(2 * ms));
+  const aA = Math.min(n, index + Math.max(4, Math.round(0.1 * ms)));
+  const aB = Math.min(n, index + Math.max(8, Math.round(3 * ms)));
+  if (aB - aA < 4) return true; // file ends right after the spike
+  let before = 0;
+  for (let j = bA; j < bB; j++) before += d(j);
+  before = bB > bA ? before / (bB - bA) : 0;
+  let after = 0;
+  for (let j = aA; j < aB; j++) after += d(j);
+  after /= aB - aA;
+  return after < 1.5 * before + 1e-6;
 }
