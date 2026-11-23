@@ -327,6 +327,41 @@ export function analyzeAudioBuffer(
     Math.max(0, Math.min(100, ((phaseCorrelation + 1) * 0.5) * 70 + ((lowEndCorrelation + 1) * 0.5) * 30)),
   );
 
+  // Frequency-localized correlation catches cancellation hidden by whole-program averages.
+  const midHpL = new Float32Array(length);
+  const midHpR = new Float32Array(length);
+  const midL = new Float32Array(length);
+  const midR = new Float32Array(length);
+  const highL = new Float32Array(length);
+  const highR = new Float32Array(length);
+  const hp120 = designHighPass(120, Math.SQRT1_2, sampleRate);
+  const lp2000 = designLowPass(2000, Math.SQRT1_2, sampleRate);
+  const hp2000 = designHighPass(2000, Math.SQRT1_2, sampleRate);
+  processBiquadBuffer(left, midHpL, hp120);
+  processBiquadBuffer(right, midHpR, hp120);
+  processBiquadBuffer(midHpL, midL, lp2000);
+  processBiquadBuffer(midHpR, midR, lp2000);
+  processBiquadBuffer(left, highL, hp2000);
+  processBiquadBuffer(right, highR, hp2000);
+
+  const measureCorrelation = (a: Float32Array, b: Float32Array): number => {
+    let aa = 0;
+    let bb = 0;
+    let ab = 0;
+    for (let i = 0; i < length; i++) {
+      aa += a[i] * a[i];
+      bb += b[i] * b[i];
+      ab += a[i] * b[i];
+    }
+    const d = Math.sqrt(aa * bb);
+    return d > 1e-12 ? Math.max(-1, Math.min(1, ab / d)) : 1;
+  };
+  const stereoBandCorrelation = {
+    low: Number(lowEndCorrelation.toFixed(3)),
+    mid: Number(measureCorrelation(midL, midR).toFixed(3)),
+    high: Number(measureCorrelation(highL, highR).toFixed(3)),
+  };
+
   // 3. ITU-R BS.1770-4 K-Weighted LUFS
   const { shelf, rlb } = designKWeightingFilters(sampleRate);
   const tmpL = new Float32Array(length);
@@ -710,6 +745,7 @@ export function analyzeAudioBuffer(
     midSideRatioDb: Number(midSideRatioDb.toFixed(2)),
     phaseCorrelation: Number(phaseCorrelation.toFixed(3)),
     lowEndCorrelation: Number(lowEndCorrelation.toFixed(3)),
+    stereoBandCorrelation,
     lrBalanceDb: Number(lrBalanceDb.toFixed(2)),
     monoCompatibilityScore,
     clippedSamples,
