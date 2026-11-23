@@ -1020,22 +1020,39 @@ export function evaluateMultiObjectiveMetrics(
   });
 
   // 8. Noise Floor
+  // Normalize the measured noise floor to the selected delivery loudness. Uniform
+  // attenuation then leaves this dimension unchanged instead of masquerading as denoising.
   const nf = post.noiseFloorDb ?? -72;
+  const preNf = pre.noiseFloorDb ?? -72;
   const nfHasMargin = post.rmsDb - nf >= 12;
-  const noiseScore = !nfHasMargin || nf <= -58 ? 100 : Math.max(0, Math.round(100 - (nf + 58) * 3.5));
+  const noiseFloorAtTargetLufs = nf + (objective.targetLufs - post.integratedLufs);
+  const preNoiseFloorAtTargetLufs = preNf + (objective.targetLufs - pre.integratedLufs);
+  const snrGainDb = (post.rmsDb - nf) - (pre.rmsDb - preNf);
+  const noiseScore = !nfHasMargin || noiseFloorAtTargetLufs <= -58
+    ? 100
+    : Math.max(0, Math.round(100 - (noiseFloorAtTargetLufs + 58) * 3.5));
   dimensions.push({
     key: 'noise',
     label: 'Noise Floor',
-    status: !nfHasMargin || nf <= -52 ? 'optimal' : nf <= -44 ? 'acceptable' : 'attention',
+    status: !nfHasMargin || noiseFloorAtTargetLufs <= -52
+      ? 'optimal'
+      : noiseFloorAtTargetLufs <= -44
+        ? 'acceptable'
+        : 'attention',
     score: noiseScore,
-    measuredSummary: nfHasMargin ? `${nf.toFixed(1)} dBFS` : 'Continuous program',
-    targetSummary: '<= -52.0 dBFS',
+    measuredSummary: nfHasMargin
+      ? `${nf.toFixed(1)} dBFS raw · ${noiseFloorAtTargetLufs.toFixed(1)} dBFS at target loudness · SNR Δ ${snrGainDb >= 0 ? '+' : ''}${snrGainDb.toFixed(1)} dB`
+      : 'Continuous program · no reliable quiet-passage noise margin',
+    targetSummary: '<= -52.0 dBFS normalized to delivery LUFS',
     note: !nfHasMargin
-      ? 'No silent noise gaps present.'
-      : nf > -48
-        ? 'Elevated quiet-passage noise floor.'
-        : 'Clean noise floor.',
+      ? 'No sufficiently quiet passages to estimate a separate noise floor.'
+      : noiseFloorAtTargetLufs > -48
+        ? 'Elevated level-matched quiet-passage noise floor.'
+        : 'Level-matched noise floor is controlled.',
   });
+  if (nfHasMargin && noiseFloorAtTargetLufs > -48) {
+    limitingFactors.push('Level-matched quiet-passage noise floor remains elevated');
+  }
 
   // 9. Clipping Prevention
   const clipScore = post.clippedSamples === 0 && post.interSamplePeaks === 0 ? 100 : Math.max(0, 100 - post.clippedSamples * 5 - post.interSamplePeaks * 3);
