@@ -423,19 +423,6 @@ function applyMultibandCompressor(
   const highL = new Float32Array(n);
   const highR = new Float32Array(n);
 
-  let inputPowerL = 0;
-  let inputPowerR = 0;
-  for (let i = 0; i < n; i++) {
-    inputPowerL += left[i] * left[i];
-    inputPowerR += right[i] * right[i];
-  }
-  const inputRmsL = Math.sqrt(inputPowerL / Math.max(1, n));
-  const inputRmsR = Math.sqrt(inputPowerR / Math.max(1, n));
-  const hasUsableInputBalance = inputRmsL > 1e-9 && inputRmsR > 1e-9;
-  const targetBalanceDb = hasUsableInputBalance
-    ? 20 * Math.log10(inputRmsR / inputRmsL) + params.lrBalanceDb * intensityScale
-    : 0;
-
   const s = Array.from({ length: 18 }, () => createBiquadState());
 
   for (let i = 0; i < n; i++) {
@@ -594,6 +581,19 @@ function applyStereoImager(
   const balL = params.lrBalanceDb < 0 ? 1 : dbToLinear(-params.lrBalanceDb * intensityScale);
   const balR = params.lrBalanceDb > 0 ? 1 : dbToLinear(params.lrBalanceDb * intensityScale);
 
+  let inputPowerL = 0;
+  let inputPowerR = 0;
+  for (let i = 0; i < n; i++) {
+    inputPowerL += left[i] * left[i];
+    inputPowerR += right[i] * right[i];
+  }
+  const inputRmsL = Math.sqrt(inputPowerL / Math.max(1, n));
+  const inputRmsR = Math.sqrt(inputPowerR / Math.max(1, n));
+  const hasUsableInputBalance = inputRmsL > 1e-9 && inputRmsR > 1e-9;
+  const targetBalanceDb = hasUsableInputBalance
+    ? 20 * Math.log10(inputRmsR / inputRmsL) + params.lrBalanceDb * intensityScale
+    : 0;
+
   const s = Array.from({ length: 18 }, () => createBiquadState());
 
   for (let i = 0; i < n; i++) {
@@ -633,9 +633,9 @@ function applyStereoImager(
     right[i] = totalM - totalS;
   }
 
-  // Width and mono-bass filtering can change the integrated L/R energy ratio,
-  // even when the input channels are balanced. Preserve the intended balance
-  // after all M/S processing, including any deliberate user-requested trim.
+  // Width and mono-bass filtering can change the integrated L/R energy ratio.
+  // Restore the intended balance after M/S processing without altering the
+  // requested width or the user's explicit channel-balance trim.
   if (hasUsableInputBalance) {
     let outputPowerL = 0;
     let outputPowerR = 0;
