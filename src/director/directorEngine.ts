@@ -2645,6 +2645,28 @@ export function deriveGateRepairCommands(
   const restoreMod = chain.find((m) => m.type === 'restore');
   const wantsClicks = failed.has('clicks');
   const wantsDc = failed.has('dc-offset');
+  // Crest-factor collapse: give transients back with a transient shaper before the limiter.
+  if (failed.has('crest')) {
+    const ts = chain.find((m) => m.type === 'transient-shaper');
+    const limIdx = chain.findIndex((m) => m.type === 'limiter' || m.type === 'maximizer' || m.type === 'multiband-maximizer');
+    if (ts) {
+      const tp = ts.params as { attackDb: number };
+      if (tp.attackDb < 6) {
+        commands.push({ op: 'configure', targetId: ts.id, processorType: 'transient-shaper', paramsPatch: { attackDb: Math.min(6, tp.attackDb + 1.5) }, rationale: 'Restore transient punch lost to limiting (crest-factor gate).' });
+        reasons.push(`Transient shaper attack +1.5 dB (crest ${post.crestFactorDb.toFixed(1)} dB)`);
+      }
+    } else {
+      commands.push({
+        op: 'add',
+        processorType: 'transient-shaper',
+        position: limIdx >= 0 ? limIdx : undefined,
+        name: 'Transient Shaper (punch restore)',
+        params: { attackDb: 2, sustainDb: 0, speedMs: 15, lowCutHz: 80 },
+        rationale: 'Crest factor collapsed under limiting; add attack before the limiter.',
+      });
+      reasons.push('Add transient shaper before the limiter (crest-factor gate)');
+    }
+  }
   if (!wantsClicks && !wantsDc) return { commands, reasons };
   if (restoreMod) {
     const rp = restoreMod.params as RestoreParams;

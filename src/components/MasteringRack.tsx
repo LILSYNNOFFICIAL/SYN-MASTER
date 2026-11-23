@@ -45,6 +45,9 @@ const NATIVE_PROCESSOR_TYPES: ProcessorType[] = [
   'bass-enhancer',
   'limiter',
   'maximizer',
+  'transient-shaper',
+  'clipper',
+  'multiband-maximizer',
 ];
 
 export const MasteringRack: React.FC<Props> = React.memo(

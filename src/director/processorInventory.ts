@@ -186,6 +186,48 @@ export const VERIFIED_NATIVE_PROCESSOR_INVENTORY: Record<
       truePeak: { defaultValue: true },
     },
   },
+  'transient-shaper': {
+    type: 'transient-shaper',
+    displayName: PROCESSOR_DEFAULT_NAMES['transient-shaper'],
+    role: 'dynamics',
+    realtimeSupported: false,
+    offlineSupported: true,
+    maxRecommendedInstances: 1,
+    parameters: {
+      attackDb: { min: -12, max: 12, defaultValue: 2, unit: 'dB' },
+      sustainDb: { min: -12, max: 12, defaultValue: 0, unit: 'dB' },
+      speedMs: { min: 2, max: 60, defaultValue: 15, unit: 'ms' },
+      lowCutHz: { min: 20, max: 300, defaultValue: 80, unit: 'Hz' },
+    },
+  },
+  clipper: {
+    type: 'clipper',
+    displayName: PROCESSOR_DEFAULT_NAMES.clipper,
+    role: 'limiting',
+    realtimeSupported: false,
+    offlineSupported: true,
+    maxRecommendedInstances: 1,
+    parameters: {
+      ceilingDb: { min: -6, max: 0, defaultValue: -0.8, unit: 'dBFS' },
+      driveDb: { min: 0, max: 12, defaultValue: 1.5, unit: 'dB' },
+      softness: { min: 0, max: 100, defaultValue: 60, unit: '%' },
+      oversampling: { options: ['1', '2', '4'], defaultValue: 4 },
+    },
+  },
+  'multiband-maximizer': {
+    type: 'multiband-maximizer',
+    displayName: PROCESSOR_DEFAULT_NAMES['multiband-maximizer'],
+    role: 'limiting',
+    realtimeSupported: false,
+    offlineSupported: true,
+    maxRecommendedInstances: 1,
+    parameters: {
+      lowCrossHz: { min: 40, max: 600, defaultValue: 150, unit: 'Hz' },
+      highCrossHz: { min: 800, max: 12000, defaultValue: 4000, unit: 'Hz' },
+      ceilingDb: { min: -3, max: -0.1, defaultValue: -1, unit: 'dBTP' },
+      releaseMs: { min: 10, max: 500, defaultValue: 80, unit: 'ms' },
+    },
+  },
 };
 
 export interface InventoryValidationResult {

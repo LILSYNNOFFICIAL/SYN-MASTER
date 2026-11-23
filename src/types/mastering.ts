@@ -9,6 +9,9 @@ export type ProcessorType =
   | 'bass-enhancer'
   | 'limiter'
   | 'maximizer'
+  | 'transient-shaper'
+  | 'clipper'
+  | 'multiband-maximizer'
   | 'external-vst3';
 
 export type MasteringMode =
@@ -147,6 +150,40 @@ export interface LimiterParams {
   oversampling: 1 | 2 | 4;
 }
 
+export interface TransientShaperParams {
+  attackDb: number; // -12 to +12: punch added/removed on transients
+  sustainDb: number; // -12 to +12: body/tail added/removed
+  speedMs: number; // 2 to 60: detector release (how long a "transient" lasts)
+  lowCutHz: number; // 20 to 300: detector ignores sub energy below this
+}
+
+export interface ClipperParams {
+  ceilingDb: number; // -6 to 0
+  driveDb: number; // 0 to 12
+  softness: number; // 0 (hard) to 100 (soft knee)
+  oversampling: 1 | 2 | 4;
+}
+
+export interface MultibandMaximizerBand {
+  preGainDb: number; // -6 to +12 (Maximus "pre")
+  thresholdDb: number; // -36 to 0
+  ratio: number; // 1 to 20
+  attackMs: number;
+  releaseMs: number;
+  postGainDb: number; // -12 to +6
+  bypass: boolean;
+}
+
+export interface MultibandMaximizerParams {
+  lowCrossHz: number;
+  highCrossHz: number;
+  low: MultibandMaximizerBand;
+  mid: MultibandMaximizerBand;
+  high: MultibandMaximizerBand;
+  ceilingDb: number; // master ceiling (-3 to -0.1)
+  releaseMs: number; // master limiter release
+}
+
 export interface MaximizerParams {
   character: 'transparent' | 'punchy' | 'aggressive' | 'smooth';
   targetLufs: number; // -24 to -5
@@ -196,6 +233,9 @@ export type ProcessorParams =
   | { type: 'bass-enhancer'; data: BassEnhancerParams }
   | { type: 'limiter'; data: LimiterParams }
   | { type: 'maximizer'; data: MaximizerParams }
+  | { type: 'transient-shaper'; data: TransientShaperParams }
+  | { type: 'clipper'; data: ClipperParams }
+  | { type: 'multiband-maximizer'; data: MultibandMaximizerParams }
   | { type: 'external-vst3'; data: ExternalVST3Params };
 
 export interface ProcessorModule {

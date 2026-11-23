@@ -21,6 +21,10 @@ import type {
   ProcessorModule,
   RestoreParams,
   SaturationParams,
+  TransientShaperParams,
+  ClipperParams,
+  MultibandMaximizerParams,
+  MultibandMaximizerBand,
   StereoImagerParams,
 } from '../types/mastering';
 import type { ProcessorMeterTelemetry } from '../dsp/offlineDsp';
@@ -258,6 +262,12 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                 'Lookahead True Peak brickwall ceiling protecting against inter-sample clipping.'}
               {module.type === 'maximizer' &&
                 'Targets integrated LUFS loudness transparently while honoring True Peak ceiling.'}
+              {module.type === 'transient-shaper' &&
+                'Adds or removes punch (attack) and body (sustain) from transients.'}
+              {module.type === 'clipper' &&
+                'Oversampled peak clipper that shaves transients before the limiter.'}
+              {module.type === 'multiband-maximizer' &&
+                'Maximus-style 3-band maximizer: per-band drive and compression into a true-peak ceiling.'}
               {module.type === 'external-vst3' &&
                 'Processes audio through an isolated out-of-process Windows VST3 plugin worker.'}
             </p>
@@ -1129,6 +1139,69 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                     />
                   </div>
                 </div>
+              </div>
+            );
+          })()}
+
+          {module.type === 'transient-shaper' && (() => {
+            const p = module.params as TransientShaperParams;
+            return (
+              <div className="p-2.5 rounded bg-[#10131B] border border-[#222634] grid grid-cols-2 gap-x-2 gap-y-3">
+                <RotaryKnob label="Attack" value={p.attackDb} min={-12} max={12} step={0.1} defaultValue={2} unit="dB" size="sm" onChange={(v) => setParam<TransientShaperParams>({ attackDb: v })} />
+                <RotaryKnob label="Sustain" value={p.sustainDb} min={-12} max={12} step={0.1} defaultValue={0} unit="dB" size="sm" onChange={(v) => setParam<TransientShaperParams>({ sustainDb: v })} />
+                <RotaryKnob label="Speed" value={p.speedMs} min={2} max={60} step={1} defaultValue={15} unit="ms" size="sm" onChange={(v) => setParam<TransientShaperParams>({ speedMs: v })} />
+                <RotaryKnob label="Detector HPF" value={p.lowCutHz} min={20} max={300} step={1} defaultValue={80} unit="Hz" size="sm" scale="logarithmic" onChange={(v) => setParam<TransientShaperParams>({ lowCutHz: v })} />
+              </div>
+            );
+          })()}
+
+          {module.type === 'clipper' && (() => {
+            const p = module.params as ClipperParams;
+            return (
+              <div className="flex flex-col gap-2.5">
+                <label className="flex items-center justify-between gap-2 text-[11px] text-[#9CA3AF]">
+                  <span>Oversampling</span>
+                  <select aria-label="Clipper oversampling" value={p.oversampling} onChange={(e) => setParam<ClipperParams>({ oversampling: Number(e.target.value) as 1 | 2 | 4 })} className="bg-[#161923] border border-[#2D3343] rounded px-2 py-1 text-xs text-[#F7F8FA]">
+                    <option value={1}>1x</option><option value={2}>2x</option><option value={4}>4x</option>
+                  </select>
+                </label>
+                <div className="p-2.5 rounded bg-[#10131B] border border-[#222634] grid grid-cols-3 gap-x-2 gap-y-3">
+                  <RotaryKnob label="Drive" value={p.driveDb} min={0} max={12} step={0.1} defaultValue={1.5} unit="dB" size="sm" onChange={(v) => setParam<ClipperParams>({ driveDb: v })} />
+                  <RotaryKnob label="Ceiling" value={p.ceilingDb} min={-6} max={0} step={0.1} defaultValue={-0.8} unit="dB" size="sm" onChange={(v) => setParam<ClipperParams>({ ceilingDb: v })} />
+                  <RotaryKnob label="Softness" value={p.softness} min={0} max={100} step={1} defaultValue={60} unit="%" size="sm" onChange={(v) => setParam<ClipperParams>({ softness: v })} />
+                </div>
+              </div>
+            );
+          })()}
+
+          {module.type === 'multiband-maximizer' && (() => {
+            const p = module.params as MultibandMaximizerParams;
+            const setBand = (key: 'low' | 'mid' | 'high', patch: Partial<MultibandMaximizerBand>) =>
+              setParam<MultibandMaximizerParams>({ [key]: { ...p[key], ...patch } } as Partial<MultibandMaximizerParams>);
+            return (
+              <div className="flex flex-col gap-2.5">
+                <div className="p-2.5 rounded bg-[#10131B] border border-[#222634] grid grid-cols-4 gap-x-2 gap-y-3">
+                  <RotaryKnob label="Low X-over" value={p.lowCrossHz} min={40} max={600} step={1} defaultValue={150} unit="Hz" size="sm" scale="logarithmic" onChange={(v) => setParam<MultibandMaximizerParams>({ lowCrossHz: v })} />
+                  <RotaryKnob label="High X-over" value={p.highCrossHz} min={800} max={12000} step={10} defaultValue={4000} unit="Hz" size="sm" scale="logarithmic" onChange={(v) => setParam<MultibandMaximizerParams>({ highCrossHz: v })} />
+                  <RotaryKnob label="Ceiling" value={p.ceilingDb} min={-3} max={-0.1} step={0.1} defaultValue={-1} unit="dBTP" size="sm" onChange={(v) => setParam<MultibandMaximizerParams>({ ceilingDb: v })} />
+                  <RotaryKnob label="Release" value={p.releaseMs} min={10} max={500} step={1} defaultValue={80} unit="ms" size="sm" onChange={(v) => setParam<MultibandMaximizerParams>({ releaseMs: v })} />
+                </div>
+                {(['low', 'mid', 'high'] as const).map((key) => (
+                  <div key={key} className="p-2.5 rounded bg-[#10131B] border border-[#222634]">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#F2CA52]">{key} band</span>
+                      <ToggleSwitch label="Bypass" compact checked={p[key].bypass} onChange={(checked) => setBand(key, { bypass: checked })} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-x-2 gap-y-3">
+                      <RotaryKnob label="Pre" value={p[key].preGainDb} min={-6} max={12} step={0.1} defaultValue={1.5} unit="dB" size="sm" onChange={(v) => setBand(key, { preGainDb: v })} />
+                      <RotaryKnob label="Thresh" value={p[key].thresholdDb} min={-36} max={0} step={0.5} defaultValue={-18} unit="dB" size="sm" onChange={(v) => setBand(key, { thresholdDb: v })} />
+                      <RotaryKnob label="Ratio" value={p[key].ratio} min={1} max={20} step={0.1} defaultValue={2.5} unit=":1" size="sm" onChange={(v) => setBand(key, { ratio: v })} />
+                      <RotaryKnob label="Attack" value={p[key].attackMs} min={0.5} max={200} step={0.5} defaultValue={12} unit="ms" scale="logarithmic" size="sm" onChange={(v) => setBand(key, { attackMs: v })} />
+                      <RotaryKnob label="Release" value={p[key].releaseMs} min={10} max={1000} step={1} defaultValue={120} unit="ms" scale="logarithmic" size="sm" onChange={(v) => setBand(key, { releaseMs: v })} />
+                      <RotaryKnob label="Post" value={p[key].postGainDb} min={-12} max={6} step={0.1} defaultValue={0} unit="dB" size="sm" onChange={(v) => setBand(key, { postGainDb: v })} />
+                    </div>
+                  </div>
+                ))}
               </div>
             );
           })()}

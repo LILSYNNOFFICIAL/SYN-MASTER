@@ -613,6 +613,11 @@ export class SynAudioEngine {
         ceilGain.connect(wetGain);
         this.compressorMonitors.push(lim);
         trackNodes([driveGain, lim, ceilGain]);
+      } else {
+        // Offline-only processors (transient shaper, clipper, multiband maximizer):
+        // the live approximation passes through; "Mastered" playback uses the exact
+        // verified offline render.
+        stageIn.connect(wetGain);
       }
 
       wetGain.connect(stageOut);

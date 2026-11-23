@@ -64,9 +64,9 @@ Priority order. Tick as done; note open problems inline.
 - [ ] New black + gold layout and CSS
 - [x] Floating draggable/resizable FX rack window with reorder (drag or arrows), bypass, duplicate, remove and a categorized "Add module" dropdown (`FxRackWindow.tsx`, `FloatingWindow.tsx`, `moduleCatalog.ts`)
 - [x] FL-style parametric EQ (spectrum, coloured draggable nodes, wheel = Q, 6 band types, up to 8 bands) in `ParametricEQ2.tsx`, shown when an EQ slot is expanded in the FX rack
-- [ ] Dynamics modules with knobs (compressor, multiband, limiter/maximizer, clipper, transient shaper, de-esser, dynamic EQ)
+- [x] Dynamics modules with knobs (compressor, multiband, limiter/maximizer, dynamic EQ already existed; NEW `clipper` and `transient-shaper` processors in `src/dsp/extraProcessors.ts`; de-esser via SYN-Restore and the rack's De-esser template)
 - [x] Draggable fade-in / fade-out lines on the waveform (gold corner handles; S-curve/linear/exponential; applied to every render and the export via `src/dsp/fades.ts`)
-- [ ] Maximus-style multiband maximizer
+- [x] Maximus-style multiband maximizer (`multiband-maximizer`: LR4 3-band split, per-band pre-gain/threshold/ratio/attack/release/post, true-peak master ceiling)
 - [x] Loudness target presets (Spotify / Spotify Loud / Apple / YouTube / Tidal / Amazon / SoundCloud / Club / EBU R128) in `src/dsp/loudnessTargets.ts`, selectable on the Fix-It stage
 - [x] A/B compare (Original vs Master toggle on the Fix-It stage; loudness-matched when the Preferences option is on)
 - [ ] Remaining tools (HPF/LPF, crossovers, imager, saturation/exciter, dither) exposed in manual mode and controllable by the AI

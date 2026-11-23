@@ -33,6 +33,9 @@ const TYPE_BADGE: Record<ProcessorType, string> = {
   'bass-enhancer': 'BASS',
   limiter: 'LIM',
   maximizer: 'MAX',
+  'transient-shaper': 'TRNS',
+  clipper: 'CLIP',
+  'multiband-maximizer': 'MBMX',
   'external-vst3': 'VST3',
 };
 

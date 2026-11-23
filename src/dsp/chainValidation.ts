@@ -8,6 +8,10 @@ import type {
   LimiterParams,
   MaximizerParams,
   MultibandBandParams,
+  MultibandMaximizerBand,
+  MultibandMaximizerParams,
+  TransientShaperParams,
+  ClipperParams,
   MultibandCompParams,
   ParametricEQParams,
   ProcessorModule,
@@ -33,6 +37,9 @@ export const PROCESSOR_DEFAULT_NAMES: Record<ProcessorType, string> = {
   'bass-enhancer': 'Sub-Bass & Low-End Sculptor',
   limiter: 'True Peak Lookahead Limiter',
   maximizer: 'Intelligent Maximizer',
+  'transient-shaper': 'Transient Shaper',
+  clipper: 'Peak Clipper',
+  'multiband-maximizer': 'Multiband Maximizer (Maximus-style)',
   'external-vst3': 'External VST3 Plugin',
 };
 
@@ -135,6 +142,20 @@ export function createDefaultParams(type: ProcessorType): ProcessorModule['param
         transientEmphasis: 25,
         truePeak: true,
       } satisfies MaximizerParams;
+    case 'transient-shaper':
+      return { attackDb: 2, sustainDb: 0, speedMs: 15, lowCutHz: 80 } satisfies TransientShaperParams;
+    case 'clipper':
+      return { ceilingDb: -0.8, driveDb: 1.5, softness: 60, oversampling: 4 } satisfies ClipperParams;
+    case 'multiband-maximizer':
+      return {
+        lowCrossHz: 150,
+        highCrossHz: 4000,
+        low: { preGainDb: 1.5, thresholdDb: -16, ratio: 3, attackMs: 25, releaseMs: 160, postGainDb: 0, bypass: false },
+        mid: { preGainDb: 1.5, thresholdDb: -18, ratio: 2.5, attackMs: 12, releaseMs: 120, postGainDb: 0, bypass: false },
+        high: { preGainDb: 1, thresholdDb: -20, ratio: 2.5, attackMs: 6, releaseMs: 90, postGainDb: 0, bypass: false },
+        ceilingDb: -1,
+        releaseMs: 80,
+      } satisfies MultibandMaximizerParams;
     case 'external-vst3':
       return {
         uid: '',
@@ -351,6 +372,50 @@ export function validateProcessorParams(
         truePeak: src.truePeak !== false,
       };
     }
+    case 'transient-shaper': {
+      const def = defaults as TransientShaperParams;
+      return {
+        attackDb: clamp(Number(src.attackDb), -12, 12, def.attackDb),
+        sustainDb: clamp(Number(src.sustainDb), -12, 12, def.sustainDb),
+        speedMs: clamp(Number(src.speedMs), 2, 60, def.speedMs),
+        lowCutHz: clamp(Number(src.lowCutHz), 20, 300, def.lowCutHz),
+      };
+    }
+    case 'clipper': {
+      const def = defaults as ClipperParams;
+      const os = Number(src.oversampling);
+      return {
+        ceilingDb: clamp(Number(src.ceilingDb), -6, 0, def.ceilingDb),
+        driveDb: clamp(Number(src.driveDb), 0, 12, def.driveDb),
+        softness: clamp(Number(src.softness), 0, 100, def.softness),
+        oversampling: os === 1 || os === 2 || os === 4 ? os : def.oversampling,
+      };
+    }
+    case 'multiband-maximizer': {
+      const def = defaults as MultibandMaximizerParams;
+      const band = (raw: unknown, d: MultibandMaximizerBand): MultibandMaximizerBand => {
+        const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+        return {
+          preGainDb: clamp(Number(b.preGainDb), -6, 12, d.preGainDb),
+          thresholdDb: clamp(Number(b.thresholdDb), -36, 0, d.thresholdDb),
+          ratio: clamp(Number(b.ratio), 1, 20, d.ratio),
+          attackMs: clamp(Number(b.attackMs), 0.5, 200, d.attackMs),
+          releaseMs: clamp(Number(b.releaseMs), 10, 1000, d.releaseMs),
+          postGainDb: clamp(Number(b.postGainDb), -12, 6, d.postGainDb),
+          bypass: b.bypass === true,
+        };
+      };
+      const lowCross = clamp(Number(src.lowCrossHz), 40, 600, def.lowCrossHz);
+      return {
+        lowCrossHz: lowCross,
+        highCrossHz: clamp(Number(src.highCrossHz), lowCross + 250, 12000, def.highCrossHz),
+        low: band(src.low, def.low),
+        mid: band(src.mid, def.mid),
+        high: band(src.high, def.high),
+        ceilingDb: clamp(Number(src.ceilingDb), -3, -0.1, def.ceilingDb),
+        releaseMs: clamp(Number(src.releaseMs), 10, 500, def.releaseMs),
+      };
+    }
     case 'external-vst3': {
       const def = defaults as ExternalVST3Params;
       const rawParams = Array.isArray(src.parameters) ? src.parameters : [];
@@ -408,6 +473,9 @@ const VALID_TYPES = new Set<ProcessorType>([
   'bass-enhancer',
   'limiter',
   'maximizer',
+  'transient-shaper',
+  'clipper',
+  'multiband-maximizer',
   'external-vst3',
 ]);
 

@@ -76,7 +76,7 @@ const PROCESSOR_SCHEMA = {
     type: {
       type: Type.STRING,
       description:
-        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer',
+        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer',
     },
     name: { type: Type.STRING },
     intensity: { type: Type.NUMBER, description: '0 to 100' },
@@ -145,7 +145,10 @@ Valid paramsJson schemas by processor type:
 7. "restore": {"dcOffset":boolean,"humRemovalHz":0|50|60,"hissReduction":number,"deEssAmount":number,"deEssFreqHz":number,"resonanceSuppress":number,"mode":"conservative"|"aggressive","declick":0-100,"decrackle":0-100,"spikeRepair":boolean,"deShimmer":0-100} (declick/decrackle/spikeRepair fix measured clickCount; deShimmer reduces metallic AI-generation artifacts above 9 kHz)
 8. "bass-enhancer": {"subFreqHz":number,"subGainDb":number,"harmonicDrive":number,"tightness":number,"monoFocus":boolean}
 9. "limiter": {"ceilingDb":number,"thresholdDb":number,"releaseMs":number,"lookaheadMs":number,"truePeak":true,"oversampling":4}
-10. "maximizer": {"character":"transparent"|"punchy"|"aggressive"|"smooth","targetLufs":number,"ceilingDb":number,"transientEmphasis":number,"truePeak":true}`;
+10. "maximizer": {"character":"transparent"|"punchy"|"aggressive"|"smooth","targetLufs":number,"ceilingDb":number,"transientEmphasis":number,"truePeak":true}
+11. "transient-shaper": {"attackDb":-12..12,"sustainDb":-12..12,"speedMs":2..60,"lowCutHz":20..300}
+12. "clipper": {"ceilingDb":-6..0,"driveDb":0..12,"softness":0..100,"oversampling":1|2|4} (place before the limiter)
+13. "multiband-maximizer": {"lowCrossHz":number,"highCrossHz":number,"low":{"preGainDb":number,"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"postGainDb":number,"bypass":false},"mid":{...same},"high":{...same},"ceilingDb":number,"releaseMs":number}`;
 
 function parseAiChain(
   rawProcessors: Array<{

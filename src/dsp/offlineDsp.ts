@@ -1,3 +1,4 @@
+import { applyClipper, applyTransientShaper } from './extraProcessors';
 import { applyRepair } from './repair';
 import type {
   BassEnhancerParams,
@@ -6,6 +7,9 @@ import type {
   EQBand,
   LimiterParams,
   MaximizerParams,
+  TransientShaperParams,
+  ClipperParams,
+  MultibandMaximizerParams,
   MultibandBandParams,
   MultibandCompParams,
   ParametricEQParams,
@@ -1119,6 +1123,71 @@ function applyMaximizer(
 }
 
 /**
+ * Maximus-style multiband maximizer: LR4 3-band split, per-band pre-gain into a
+ * compressor/limiter stage with its own post gain, then a true-peak master limiter.
+ */
+function applyMultibandMaximizer(
+  left: Float32Array,
+  right: Float32Array,
+  params: MultibandMaximizerParams,
+  sampleRate: number,
+  intensityScale: number,
+): number {
+  const n = left.length;
+  const bwQ = Math.SQRT1_2;
+  const lpLow = designLowPass(params.lowCrossHz, bwQ, sampleRate);
+  const hpLow = designHighPass(params.lowCrossHz, bwQ, sampleRate);
+  const lpHigh = designLowPass(params.highCrossHz, bwQ, sampleRate);
+  const hpHigh = designHighPass(params.highCrossHz, bwQ, sampleRate);
+  const apHigh = designAllPass(params.highCrossHz, bwQ, sampleRate);
+  const bandsL = [new Float32Array(n), new Float32Array(n), new Float32Array(n)];
+  const bandsR = [new Float32Array(n), new Float32Array(n), new Float32Array(n)];
+  const s = Array.from({ length: 18 }, () => createBiquadState());
+  for (let i = 0; i < n; i++) {
+    const l = left[i];
+    const r = right[i];
+    const lLow = processBiquadSample(processBiquadSample(processBiquadSample(l, lpLow, s[0]), lpLow, s[1]), apHigh, s[12]);
+    const rLow = processBiquadSample(processBiquadSample(processBiquadSample(r, lpLow, s[2]), lpLow, s[3]), apHigh, s[13]);
+    const restL = processBiquadSample(processBiquadSample(l, hpLow, s[4]), hpLow, s[5]);
+    const restR = processBiquadSample(processBiquadSample(r, hpLow, s[6]), hpLow, s[7]);
+    bandsL[0][i] = lLow;
+    bandsR[0][i] = rLow;
+    bandsL[1][i] = processBiquadSample(processBiquadSample(restL, lpHigh, s[8]), lpHigh, s[9]);
+    bandsR[1][i] = processBiquadSample(processBiquadSample(restR, lpHigh, s[10]), lpHigh, s[11]);
+    bandsL[2][i] = processBiquadSample(processBiquadSample(restL, hpHigh, s[14]), hpHigh, s[15]);
+    bandsR[2][i] = processBiquadSample(processBiquadSample(restR, hpHigh, s[16]), hpHigh, s[17]);
+  }
+  let maxGr = 0;
+  const cfg = [params.low, params.mid, params.high];
+  for (let b = 0; b < 3; b++) {
+    const band = cfg[b];
+    if (band.bypass) continue;
+    const pre = dbToLinear(band.preGainDb * intensityScale);
+    const L = bandsL[b];
+    const R = bandsR[b];
+    for (let i = 0; i < n; i++) {
+      L[i] *= pre;
+      R[i] *= pre;
+    }
+    const gr = compressMonoBand(L, R, {
+      thresholdDb: band.thresholdDb,
+      ratio: band.ratio,
+      attackMs: band.attackMs,
+      releaseMs: band.releaseMs,
+      gainDb: band.postGainDb,
+      bypass: false,
+    }, sampleRate, intensityScale);
+    if (gr > maxGr) maxGr = gr;
+  }
+  for (let i = 0; i < n; i++) {
+    left[i] = bandsL[0][i] + bandsL[1][i] + bandsL[2][i];
+    right[i] = bandsR[0][i] + bandsR[1][i] + bandsR[2][i];
+  }
+  const limGr = applyLookaheadLimiter(left, right, params.ceilingDb, 0, params.releaseMs, 3, sampleRate, 1, true, 4);
+  return Number(Math.max(maxGr, limGr).toFixed(2));
+}
+
+/**
  * Process stereo/mono Float32Array buffers through the entire SYN-CHAIN
  * without mutating the source buffers.
  */
@@ -1199,6 +1268,15 @@ export function processChainOffline(
       }
       case 'maximizer':
         grDb = applyMaximizer(left, right, mod.params as MaximizerParams, sampleRate, intensityScale);
+        break;
+      case 'transient-shaper':
+        grDb = applyTransientShaper(left, right, mod.params as TransientShaperParams, sampleRate, intensityScale);
+        break;
+      case 'clipper':
+        grDb = applyClipper(left, right, mod.params as ClipperParams, sampleRate, intensityScale);
+        break;
+      case 'multiband-maximizer':
+        grDb = applyMultibandMaximizer(left, right, mod.params as MultibandMaximizerParams, sampleRate, intensityScale);
         break;
     }
 
