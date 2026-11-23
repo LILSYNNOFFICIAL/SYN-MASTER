@@ -139,7 +139,7 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **P1-3: Harden codec export resource handling.** Streamed input/output, 512 MiB ceiling, two-job global cap, same-origin browser guard, existing per-client rate limiter, and temp cleanup are implemented. Integration tests cover same-origin export, cross-origin rejection, declared oversize rejection, and two-active-job concurrency. CI run 45281206214 passed unit tests, TypeScript, and production build.
 - [x] **P1-4: Make FFmpeg-dependent tests portable.** The export integration test probes FFmpeg and ffprobe once and skips with an explicit reason only when either is absent. CI continues installing both tools and exercising the integration test. CI run 45280105660 passed.
 - [x] **P1-5: Discover tests automatically.** `npm test` now passes recursive `src/**/*.test.ts` and `src/**/*.test.mjs` patterns to the Node test runner instead of maintaining a manual file list. CI run 45280105660 passed.
-- [ ] **P1-6: Enable TypeScript strictness incrementally.** Stage 1 enables `strict` only; run the full Node 22 CI suite, fix actual diagnostics without broad casts or suppressions, and keep `noUncheckedIndexedAccess` as a separate later stage. Preserve AI Studio's entry/build chain.
+- [x] **P1-6: Enable TypeScript strictness incrementally.** Stage 1: `strict: true` enabled without `noUncheckedIndexedAccess`. Node 22 CI run 45281813691 passed unit tests, TypeScript, and production build with no type corrections or suppressions required. Keep `noUncheckedIndexedAccess` as a separate later stage.
 - [ ] **P1-7: Inspect the `npm start` runtime path.** Verify Node 22 deployment behavior before changing `node server.ts`; `npm run dev` remains `tsx server.ts`.
 - [ ] **P2: Defer broad App/director refactors, lint/format toolchain additions, native cross-platform work, and cosmetic repository cleanup** until mastering correctness and mobile resource use have regression coverage.
 
@@ -168,8 +168,8 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **test: verify in-place true-peak limiter and export concurrency** — [\`cc4331a1\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/cc4331a11d245ea20de02f30600488d7910a0f7f); compares in-place true-peak limiting against the prior driven-buffer reference and proves a third upload is rejected while two exports are active. CI run 45281206214 passed unit tests, TypeScript, and production build.
 - [x] **docs: record completed engineering verification** — [\`67bc4f0e\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/67bc4f0e9ce757a52bb9a5cadb21863670269a92); recorded CI outcomes and separated code-complete items from Android / real-track verification still pending.
 - [x] **docs: close current commit ledger** — [\`045bcb70\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/045bcb70418b7737b4d8889d1deaa644216dd6cc); recorded the completed CI evidence and current worklist state.
-- [ ] **docs: record latest main head** — this commit; keep the README commit ledger aligned with the current main head.
-- [ ] **build: enable TypeScript strict mode** — this commit; `strict: true` only, CI and any resulting type corrections pending.
+- [x] **build: enable TypeScript strict mode** — [`17a6f21d`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/17a6f21dfd4c4a89122f7ca42f0e1325a8846b3d); enabled `strict: true` only. Node 22 CI run 45281813691 passed unit tests, TypeScript, and production build.
+- [ ] **docs: record strict TypeScript CI evidence** — this commit; update P1-6 and record CI run 45281813691.
 
 # Reference: existing capabilities and setup
 
