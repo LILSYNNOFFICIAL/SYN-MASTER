@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:net';
+import { request as httpRequest } from 'node:http';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -87,7 +88,7 @@ async function waitForEndpoint(baseUrl, child, getDiagnostics) {
     try {
       const response = await fetch(baseUrl + '/api/export/encode?format=invalid', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
+        headers: { 'Content-Type': 'application/octet-stream', Origin: baseUrl },
         body: Buffer.alloc(44),
       });
       if (response.status === 400) return;
@@ -185,6 +186,35 @@ test('SYN-MASTER export endpoint creates measurable contract-format files', { ti
   });
 
   await waitForEndpoint(baseUrl, child, () => diagnostics);
+
+  const crossOrigin = await fetch(baseUrl + '/api/export/encode?format=wav', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', Origin: 'https://attacker.example' },
+    body: Buffer.alloc(44),
+  });
+  assert.equal(crossOrigin.status, 403, 'Cross-origin browser uploads must be rejected.');
+
+  const oversizedStatus = await new Promise((resolve, reject) => {
+    let responseStarted = false;
+    const request = httpRequest(baseUrl + '/api/export/encode?format=wav', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        Origin: baseUrl,
+        'Content-Length': String(512 * 1024 * 1024 + 1),
+      },
+    }, (response) => {
+      responseStarted = true;
+      response.resume();
+      response.on('end', () => {
+        request.destroy();
+        resolve(response.statusCode);
+      });
+    });
+    request.on('error', (error) => { if (!responseStarted) reject(error); });
+    request.flushHeaders();
+  });
+  assert.equal(oversizedStatus, 413, 'Declared uploads over 512 MiB must be rejected before buffering.');
   const source48 = createFloatWav(48000);
   const source48Path = path.join(tempDir, 'source-48000-float.wav');
   await writeFile(source48Path, source48);
