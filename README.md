@@ -140,7 +140,7 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **P1-4: Make FFmpeg-dependent tests portable.** The export integration test probes FFmpeg and ffprobe once and skips with an explicit reason only when either is absent. CI continues installing both tools and exercising the integration test. CI run 45280105660 passed.
 - [x] **P1-5: Discover tests automatically.** `npm test` now passes recursive `src/**/*.test.ts` and `src/**/*.test.mjs` patterns to the Node test runner instead of maintaining a manual file list. CI run 45280105660 passed.
 - [x] **P1-6: Enable TypeScript strictness incrementally.** Stage 1: `strict: true` enabled without `noUncheckedIndexedAccess`. Node 22 CI run 45281813691 passed unit tests, TypeScript, and production build with no type corrections or suppressions required. Keep `noUncheckedIndexedAccess` as a separate later stage.
-- [ ] **P1-7: Inspect the `npm start` runtime path.** Verify Node 22 deployment behavior before changing `node server.ts`; `npm run dev` remains `tsx server.ts`.
+- [ ] **P1-7: Verify the `npm start` runtime path.** The web CI now runs the production build, starts the app through the exact `npm start` command on Node 22, and checks both `/api/health` and the production root page. Keep open until this new smoke test passes; `npm run dev` remains `tsx server.ts`.
 - [ ] **P2: Defer broad App/director refactors, lint/format toolchain additions, native cross-platform work, and cosmetic repository cleanup** until mastering correctness and mobile resource use have regression coverage.
 
 ### Commit policy and implementation ledger
@@ -169,7 +169,9 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **docs: record completed engineering verification** — [\`67bc4f0e\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/67bc4f0e9ce757a52bb9a5cadb21863670269a92); recorded CI outcomes and separated code-complete items from Android / real-track verification still pending.
 - [x] **docs: close current commit ledger** — [\`045bcb70\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/045bcb70418b7737b4d8889d1deaa644216dd6cc); recorded the completed CI evidence and current worklist state.
 - [x] **build: enable TypeScript strict mode** — [`17a6f21d`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/17a6f21dfd4c4a89122f7ca42f0e1325a8846b3d); enabled `strict: true` only. Node 22 CI run 45281813691 passed unit tests, TypeScript, and production build.
-- [ ] **docs: record strict TypeScript CI evidence** — this commit; update P1-6 and record CI run 45281813691.
+- [x] **docs: record strict TypeScript CI evidence** — [`e8807b6f`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/e8807b6f7e7ddc9f4796d1844daa62d6c56d23a7); P1-6 updated with Node 22 CI run 45281813691.
+
+- [ ] **test: verify production npm start on Node 22** — this commit; CI smoke test pending.
 
 # Reference: existing capabilities and setup
 
@@ -337,3 +339,4 @@ The live `/api/health` response only verifies configuration presence, not full A
 - Do not leave a remote Gemini-backed endpoint openly callable. Enforce access at the deployment/network boundary; Cloud Run IAM/IAP is an option when Google-identity sign-in is acceptable, otherwise use local-only hosting or a private gateway.
 - A shared rate limiter is still needed if the service is later scaled across multiple server instances.
 - Avoid logging request bodies, audio, or credentials.
+
