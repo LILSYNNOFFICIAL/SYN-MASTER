@@ -136,7 +136,9 @@ export function runQualityControl(
 
   // 5. Phase Correlation & Mono Compatibility
   const localizedBandPhaseRisk = post.stereoBandCorrelation
-    ? post.stereoBandCorrelation.mid < 0 || post.stereoBandCorrelation.high < 0
+    ? post.stereoBandCorrelation.low < 0.45 ||
+      post.stereoBandCorrelation.mid < 0 ||
+      post.stereoBandCorrelation.high < 0
     : false;
   const phaseStatus =
     post.phaseCorrelation < 0
@@ -157,7 +159,7 @@ export function runQualityControl(
       phaseStatus === 'pass'
         ? 'Strong stereo coherence with reliable mono fold-down across measured bands.'
         : localizedBandPhaseRisk
-          ? 'At least one mid/high frequency band has negative L/R correlation. This may be intentional stereo design, but audition the band-limited mono fold-down for audible cancellation.'
+          ? 'At least one frequency band has weak or negative L/R correlation. This may be intentional stereo design, but audition the band-limited mono fold-down for audible cancellation.'
           : 'Wide out-of-phase components or unfocused low-end stereo may cancel in mono playback.',
     suggestedFix:
       phaseStatus === 'pass'
