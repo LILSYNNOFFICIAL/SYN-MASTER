@@ -1356,21 +1356,44 @@ export function deriveRefinementCommands(
     reasons.push('Relax compression & boost transient emphasis to recover Dynamic Range');
   }
 
-  // 4. Phase / Low-End Correlation / L-R Balance Remediation
+  // 4. Frequency-localized phase / mono compatibility / L-R balance remediation.
+  // Do not narrow healthy bands or move the mono-bass crossover to fix a high-band issue.
   const qcPhaseFail = qcReport.checks.some((c) => (c.id === 'qc-phase' || c.id === 'qc-lr-balance') && c.status !== 'pass');
-  if (qcPhaseFail || post.lowEndCorrelation < 0.45 || Math.abs(post.lrBalanceDb) > 0.65) {
+  const bandPhase = post.stereoBandCorrelation;
+  const globalPhaseRisk = post.phaseCorrelation < 0;
+  const lowPhaseRisk = globalPhaseRisk || (bandPhase ? bandPhase.low < 0.45 : post.lowEndCorrelation < 0.45);
+  const midPhaseRisk = globalPhaseRisk || (bandPhase ? bandPhase.mid < 0 : post.phaseCorrelation < 0.25);
+  const highPhaseRisk = globalPhaseRisk || (bandPhase ? bandPhase.high < 0 : post.phaseCorrelation < 0.25);
+  const lrBalanceRisk = Math.abs(post.lrBalanceDb) > 0.65;
+  if (qcPhaseFail || lowPhaseRisk || midPhaseRisk || highPhaseRisk || lrBalanceRisk) {
+    const reducedWidth = (current: number, floor: number) => Math.max(floor, current - 15);
+    const affectedBands = [
+      ...(lowPhaseRisk ? ['low'] : []),
+      ...(midPhaseRisk ? ['mid'] : []),
+      ...(highPhaseRisk ? ['high'] : []),
+    ];
     if (imgMod) {
-      const ip = imgMod.params as { monoBassBelowHz: number; midWidth: number; lrBalanceDb: number };
+      const ip = imgMod.params as {
+        lowWidth: number;
+        midWidth: number;
+        highWidth: number;
+        monoBassBelowHz: number;
+        lrBalanceDb: number;
+      };
       commands.push({
         op: 'configure',
         targetId: imgMod.id,
         processorType: 'stereo-imager',
         paramsPatch: {
-          monoBassBelowHz: Math.min(140, Math.max(95, ip.monoBassBelowHz + 15)),
-          midWidth: post.phaseCorrelation < 0.25 ? Math.max(80, ip.midWidth - 15) : ip.midWidth,
-          lrBalanceDb: Number((ip.lrBalanceDb - post.lrBalanceDb * 0.7).toFixed(2)),
+          lowWidth: lowPhaseRisk ? reducedWidth(ip.lowWidth, 50) : ip.lowWidth,
+          midWidth: midPhaseRisk ? reducedWidth(ip.midWidth, 70) : ip.midWidth,
+          highWidth: highPhaseRisk ? reducedWidth(ip.highWidth, 70) : ip.highWidth,
+          monoBassBelowHz: lowPhaseRisk ? Math.min(140, Math.max(95, ip.monoBassBelowHz + 15)) : ip.monoBassBelowHz,
+          lrBalanceDb: lrBalanceRisk
+            ? Number((ip.lrBalanceDb - post.lrBalanceDb * 0.7).toFixed(2))
+            : ip.lrBalanceDb,
         },
-        rationale: 'Tighten mono bass crossover & trim L/R offset per measured stereo telemetry.',
+        rationale: 'Reduce width only in phase-risk band(s) ' + (affectedBands.join(', ') || 'none') + ' and correct measured L/R balance.',
       });
     } else {
       commands.push({
@@ -1378,19 +1401,23 @@ export function deriveRefinementCommands(
         processorType: 'stereo-imager',
         name: 'QC Stereo Correction',
         params: {
-          lowWidth: 65,
-          midWidth: 98,
-          highWidth: 105,
+          lowWidth: lowPhaseRisk ? 65 : 100,
+          midWidth: midPhaseRisk ? 83 : 100,
+          highWidth: highPhaseRisk ? 90 : 100,
           lowCrossHz: 150,
           highCrossHz: 3500,
-          monoBassBelowHz: 110,
-          lrBalanceDb: Number((-post.lrBalanceDb * 0.75).toFixed(2)),
+          monoBassBelowHz: lowPhaseRisk ? 110 : 0,
+          lrBalanceDb: lrBalanceRisk ? Number((-post.lrBalanceDb * 0.75).toFixed(2)) : 0,
           midSideGainDb: 0,
         },
-        rationale: 'Insert Stereo Imager to fix phase correlation or L/R channel balance.',
+        rationale: 'Insert targeted Stereo Imager correction for phase-risk band(s) ' + (affectedBands.join(', ') || 'none') + '.',
       });
     }
-    reasons.push('Tighten mono bass & L/R channel balance');
+    reasons.push(
+      affectedBands.length > 0
+        ? 'Narrow only phase-risk ' + affectedBands.join('/') + ' band(s)'
+        : 'Correct measured left/right channel imbalance',
+    );
   }
 
   // 5. Distortion Control
