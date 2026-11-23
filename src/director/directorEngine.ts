@@ -1635,7 +1635,7 @@ export async function runAutonomousDirectorLoop(
   opts: RunAutonomousDirectorOptions,
 ): Promise<MasterFinalReport> {
   const startMs = Date.now();
-  const maxIterations = Math.max(1, Math.min(6, opts.maxIterations ?? 3));
+  const maxIterations = Math.max(1, Math.min(10, opts.maxIterations ?? 3));
   const maxCpuBudgetMs = Math.max(2000, opts.maxCpuBudgetMs ?? 30000);
   const convergenceThreshold = Math.max(0.2, opts.convergenceThreshold ?? 0.8);
 
@@ -1980,8 +1980,8 @@ export async function runAutonomousDirectorLoop(
 
     if (pass > 1 && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold && qcReport.failCount === 0) {
       if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
-      finalStatus = 'converged';
-      stopReason = `Stopped early after Pass ${pass}: diminishing returns (ΔFit ${(multiObjective.engineeringFitIndex - lastFit).toFixed(2)} < ${convergenceThreshold}).`;
+      finalStatus = 'completed';
+      stopReason = `Stopped safely after Pass ${pass}: refinement reached a plateau (ΔFit ${(multiObjective.engineeringFitIndex - lastFit).toFixed(2)} < ${convergenceThreshold}). Remaining deviations are retained in verification; this is not labeled target convergence.`;
       emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
       break;
     }
@@ -2068,8 +2068,8 @@ export async function runAutonomousDirectorLoop(
         prevLufsError = objective.targetLufs - refinementSourcePost.integratedLufs;
 
         if (commands.length === 0) {
-          finalStatus = 'converged';
-          stopReason = `No further parameter corrections required after Pass ${pass}.`;
+          finalStatus = 'completed';
+          stopReason = `No additional safe parameter corrections were identified after Pass ${pass}. Any remaining deviations are reported for engineer review; the audio is not marked as perfect.`;
           emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
           break;
         }
@@ -2091,6 +2091,17 @@ export async function runAutonomousDirectorLoop(
           'Building chain',
         );
       }
+    }
+  }
+
+  if (finalStatus === 'completed' && loopMax > 0 && iterationsExecuted >= loopMax) {
+    const bestMeetsTargets =
+      Math.abs(bestCheckpoint.analysis.integratedLufs - objective.targetLufs) <= 0.65 &&
+      bestCheckpoint.analysis.truePeakDb <= objective.maxTruePeakDb + 0.05 &&
+      bestCheckpoint.qcReport.overallStatus === 'pass' &&
+      bestCheckpoint.multiObjective.engineeringFitIndex >= 90;
+    if (!bestMeetsTargets) {
+      stopReason = `Reached the configured ${loopMax}-pass safety limit. Best validated pass #${bestCheckpoint.passNumber} was retained; remaining deviations are reported in post-fix verification.`;
     }
   }
 

@@ -517,7 +517,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
           drawSpectrumCurve(
             referenceAnalysis.spectrumBinsFreq,
             referenceAnalysis.spectrumBinsDb,
-            'rgba(52, 211, 153, 0.72)',
+            'rgba(212, 175, 55, 0.48)',
             undefined,
             true,
           );

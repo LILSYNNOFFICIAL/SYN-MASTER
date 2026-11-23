@@ -147,7 +147,7 @@ export const MasteringRack: React.FC<Props> = React.memo(
     return (
       <aside
         aria-label="Mastering Chain Rack"
-        className="w-full lg:w-[384px] shrink-0 bg-[#0D0E13] border-t lg:border-t-0 lg:border-l border-[#222530] flex flex-col lg:h-full overflow-visible lg:overflow-hidden"
+        className="w-full min-w-0 shrink-0 bg-[#0D0B06] flex flex-col overflow-visible"
       >
         {/* Rack Header */}
         <div className="px-3.5 py-3 border-b border-[#222530] flex items-center justify-between gap-2 bg-[#111217]">

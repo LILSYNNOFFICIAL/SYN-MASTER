@@ -17,7 +17,7 @@ export function resampleChannel(
 
   //Cutoff relative to input sample rate: 0.43 * min(fromRate, toRate) / fromRate
   const bwScale = toRate < fromRate ? Math.max(0.05, (0.86 * toRate) / fromRate) : 0.92;
-  const halfWidth = 28; // 56-tap windowed sinc kernel
+  const halfWidth = 28; // 56-tap windowed sinc kernel; production delivery SRC is delegated to server FFmpeg
 
   for (let i = 0; i < outLen; i++) {
     const center = i * ratio;

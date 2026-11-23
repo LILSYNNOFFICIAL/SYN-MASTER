@@ -469,19 +469,20 @@ export const AiMasterView: React.FC<Props> = ({
             {showAdvanced && (
               <div className="flex flex-wrap items-center gap-4 p-2.5 rounded bg-[#0C0D12] border border-[#242732] text-xs">
                 <label className="flex items-center gap-1.5 text-[#C5CDD8]">
-                  Max Iterations:
+                  Max Passes:
                   <select
                     aria-label="Max Autonomous Iterations"
                     value={maxIterations}
                     onChange={(e) => onChangeMaxIterations(Number(e.target.value))}
                     className="bg-[#161820] border border-[#2B2E3A] rounded px-2 py-1 font-mono-tabular text-[#F7F8FA]"
                   >
-                    <option value={2}>2</option>
-                    <option value={3}>3</option>
                     <option value={4}>4</option>
-                    <option value={5}>5</option>
+                    <option value={6}>6</option>
+                    <option value={8}>8</option>
+                    <option value={10}>10</option>
                   </select>
                 </label>
+                <span className="text-[10px] text-[#B6A780]">FIX ALL runs up to 10 passes and stops on verified targets, a safe plateau, or its execution budget.</span>
                 <label className="flex items-center gap-1.5 text-[#C5CDD8]">
                   Convergence Δ:
                   <input

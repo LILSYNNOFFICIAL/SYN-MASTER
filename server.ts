@@ -2,6 +2,9 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
+import os from 'node:os';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import {
   AiConfigError,
@@ -44,6 +47,8 @@ function aiRateLimiter(
 }
 // Apply the AI limiter before JSON parsing so malformed or oversized requests are rate-limited too.
 app.use('/api/ai', aiRateLimiter);
+// Offline codec jobs are CPU-intensive; apply the same per-client protection.
+app.use('/api/export', aiRateLimiter);
 app.use(express.json({ limit: '4mb' }));
 
 function sendSanitizedAiError(res: express.Response, err: unknown): void {
@@ -63,6 +68,112 @@ function sendSanitizedAiError(res: express.Response, err: unknown): void {
   console.error('[SYN-AI] Endpoint error:', msg);
   res.status(500).json({ error: 'AI mastering service could not complete the request.' });
 }
+
+app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', limit: '256mb' }), async (req, res) => {
+  const allowedFormats = new Set(['wav', 'mp3', 'ogg', 'flac', 'm4a', 'webm-opus']);
+  const format = String(req.query.format ?? '');
+  if (!allowedFormats.has(format)) {
+    res.status(400).json({ error: 'Unsupported audio export format.' });
+    return;
+  }
+  if (!Buffer.isBuffer(req.body) || req.body.length < 44 || req.body.toString('ascii', 0, 4) !== 'RIFF' || req.body.toString('ascii', 8, 12) !== 'WAVE') {
+    res.status(400).json({ error: 'A valid rendered WAV source is required for audio export.' });
+    return;
+  }
+
+  const sampleRate = Number(req.query.sampleRate ?? 44100);
+  const channelMode = String(req.query.channels ?? 'stereo');
+  const wavBitDepth = Number(req.query.wavBitDepth ?? 24);
+  const flacBitDepth = Number(req.query.flacBitDepth ?? 24);
+  const flacCompression = Number(req.query.flacCompression ?? 5);
+  const mp3Bitrate = Number(req.query.mp3BitrateKbps ?? 320);
+  const oggBitrate = Number(req.query.oggBitrateKbps ?? 192);
+  const ditherMode = String(req.query.dither ?? 'tpdf') === 'tpdf' ? 'triangular' : 'none';
+  if (![44100, 48000, 88200, 96000].includes(sampleRate) || !['stereo', 'mono'].includes(channelMode) ||
+      ![16, 24, 32].includes(wavBitDepth) || ![16, 24].includes(flacBitDepth) || !Number.isInteger(flacCompression) || flacCompression < 0 || flacCompression > 8 ||
+      ![128, 192, 256, 320].includes(mp3Bitrate) || ![96, 128, 160, 192, 256, 320].includes(oggBitrate)) {
+    res.status(400).json({ error: 'One or more export settings are outside the supported range.' });
+    return;
+  }
+
+  const cleanMetadata = (value: unknown, fallback: string) =>
+    String(value ?? fallback).replace(/[\x00-\x1f]/g, ' ').slice(0, 160);
+  const title = cleanMetadata(req.query.metadataTitle, 'SYN MASTER');
+  const artist = cleanMetadata(req.query.metadataArtist, 'SYN MASTER');
+  const extension = format === 'webm-opus' ? 'webm' : format;
+  const mimeTypes: Record<string, string> = {
+    wav: 'audio/wav', mp3: 'audio/mpeg', ogg: 'audio/ogg', flac: 'audio/flac', m4a: 'audio/mp4', 'webm-opus': 'audio/webm',
+  };
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'syn-master-export-'));
+  const inputPath = path.join(tempDir, 'master-intermediate.wav');
+  const outputPath = path.join(tempDir, 'master.' + extension);
+
+  try {
+    await writeFile(inputPath, req.body);
+    const resampleOptions = [
+      'aresample=' + sampleRate,
+      'resampler=swr',
+      'filter_size=512',
+      'filter_type=blackman_nuttall',
+      'phase_shift=10',
+      'linear_interp=0',
+    ];
+    if (format === 'wav' && wavBitDepth < 32) {
+      resampleOptions.push('osf=' + (wavBitDepth === 24 ? 's32' : 's16'));
+      resampleOptions.push('output_sample_bits=' + wavBitDepth);
+      if (ditherMode === 'triangular') resampleOptions.push('dither_method=triangular');
+    }
+    if (format === 'flac') {
+      resampleOptions.push('osf=' + (flacBitDepth === 24 ? 's32' : 's16'));
+      if (flacBitDepth === 24) resampleOptions.push('output_sample_bits=24');
+      if (ditherMode === 'triangular') resampleOptions.push('dither_method=triangular');
+    }
+    const args = [
+      '-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath, '-vn',
+      '-af', resampleOptions.join(':'),
+      '-ar', String(sampleRate), '-ac', channelMode === 'mono' ? '1' : '2',
+      '-metadata', 'title=' + title, '-metadata', 'artist=' + artist,
+    ];
+    if (format === 'wav') args.push('-codec:a', wavBitDepth === 16 ? 'pcm_s16le' : wavBitDepth === 24 ? 'pcm_s24le' : 'pcm_f32le');
+    if (format === 'mp3') args.push('-codec:a', 'libmp3lame', '-b:a', mp3Bitrate + 'k', '-id3v2_version', '3');
+    if (format === 'ogg') args.push('-codec:a', 'libvorbis', '-b:a', oggBitrate + 'k');
+    if (format === 'flac') args.push('-codec:a', 'flac', '-sample_fmt', flacBitDepth === 24 ? 's32' : 's16', '-bits_per_raw_sample', String(flacBitDepth), '-compression_level', String(flacCompression));
+    if (format === 'm4a') args.push('-codec:a', 'aac', '-b:a', '320k', '-movflags', '+faststart', '-f', 'ipod');
+    if (format === 'webm-opus') args.push('-codec:a', 'libopus', '-b:a', '192k', '-f', 'webm');
+    args.push(outputPath);
+
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      const timeout = setTimeout(() => child.kill('SIGKILL'), 120_000);
+      child.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-4000); });
+      child.once('error', (error: NodeJS.ErrnoException) => {
+        clearTimeout(timeout);
+        if (error.code === 'ENOENT') reject(new Error('FFmpeg is not installed on the SYN MASTER server. Install FFmpeg and ensure the ffmpeg executable is on PATH to enable WAV, MP3, OGG, FLAC and M4A export.'));
+        else reject(error);
+      });
+      child.once('close', (code) => {
+        clearTimeout(timeout);
+        if (code === 0) resolve();
+        else reject(new Error(stderr || 'FFmpeg encoder exited with status ' + (code ?? 'unknown') + '.'));
+      });
+    });
+
+    const output = await readFile(outputPath);
+    res.setHeader('Content-Type', mimeTypes[format]);
+    res.setHeader('Content-Disposition', 'attachment; filename="SYN_Master.' + extension + '"');
+    res.send(output);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Audio codec export failed.';
+    const unavailable = message.includes('FFmpeg is not installed');
+    console.error('[SYN-RENDER] Codec export failed:', message);
+    res.status(unavailable ? 503 : 500).json({
+      error: unavailable ? message : 'The selected audio codec could not render this master. Check FFmpeg codec support on the server.',
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({

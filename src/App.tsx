@@ -64,6 +64,8 @@ import { applyStructuredChainCommands } from './director/chainCommands';
 import { inspectPluginInventory } from './director/pluginIntelligence';
 import { validateChainAgainstInventory } from './director/processorInventory';
 import { encodeWavBlob } from './dsp/wavEncoder';
+import { encodeMidiTempoFile } from './dsp/midiEncoder';
+import { createTemporaryMasteringWorkspace } from './director/tempMasteringWorkspace';
 import { SynAudioEngine, type AuditionTarget } from './engine/audioEngine';
 import { telemetryStore } from './engine/telemetryStore';
 import { SynHostBridge, type HostBridgeSnapshot } from './services/hostBridge';
@@ -122,9 +124,17 @@ const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   filename: 'SYN_Master_Output',
   format: 'wav',
   wavBitDepth: 24,
+  flacBitDepth: 24,
+  flacCompression: 5,
+  mp3BitrateKbps: 320,
+  oggBitrateKbps: 192,
   sampleRate: 44100,
   channels: 'stereo',
   dither: 'tpdf',
+  resampler: 'sinc-512',
+  includeMasteringChain: true,
+  saveLoopMarkers: true,
+  midiTempoBpm: 120,
   normalizeToTarget: false,
   targetLufs: -14,
   ceilingDb: -1.0,
@@ -226,7 +236,7 @@ export default function App() {
     preserveTransients: true,
   });
   const [useGeminiCloud, setUseGeminiCloud] = useState(false);
-  const [maxIterations, setMaxIterations] = useState(3);
+  const [maxIterations, setMaxIterations] = useState(10);
   const [convergenceThreshold, setConvergenceThreshold] = useState(0.8);
   const [directorPlan, setDirectorPlan] = useState<ExplainableMasterPlan | null>(null);
   const [directorReport, setDirectorReport] = useState<MasterFinalReport | null>(null);
@@ -1318,6 +1328,31 @@ export default function App() {
       }
     }
 
+    let tempWorkspace: Awaited<ReturnType<typeof createTemporaryMasteringWorkspace>> | null = null;
+    let tempWriteQueue: Promise<void> = Promise.resolve();
+    const writeTempNote = (relativePath: string, value: unknown) => {
+      if (!tempWorkspace) return;
+      tempWriteQueue = tempWriteQueue
+        .then(async () => { if (tempWorkspace) await tempWorkspace.writeJson(relativePath, value); })
+        .catch(() => undefined);
+    };
+    try {
+      tempWorkspace = await createTemporaryMasteringWorkspace('fix-all-' + sourceTrackId + '-' + Date.now());
+      writeTempNote('session.json', {
+        trackId: sourceTrackId,
+        trackName: activeTrack.name,
+        createdAt: new Date().toISOString(),
+        objectiveId,
+        operatingMode: runOperatingMode,
+        scratchStorage: tempWorkspace.storage,
+      });
+      writeTempNote('baseline/analysis.json', activeTrack.analysis);
+      writeTempNote('baseline/diagnosis.json', plan.diagnosis);
+      writeTempNote('proposed/initial-chain.json', geminiInitialChain ?? plan.chain);
+    } catch {
+      tempWorkspace = null;
+    }
+
     try {
       const report = await runAutonomousDirectorLoop({
         sourceChannels: src,
@@ -1332,7 +1367,8 @@ export default function App() {
         hostConnected: hostSnapshot.status === 'connected',
         initialChain: geminiInitialChain ?? (runOperatingMode === 'assisted' ? chain : undefined),
         externalProcessor: processExternalStage,
-        maxIterations,
+        maxIterations: forceAutonomous ? 10 : maxIterations,
+        maxCpuBudgetMs: forceAutonomous ? 120_000 : 60_000,
         convergenceThreshold,
         isPaused: () => directorPauseRef.current,
         shouldStop: () => directorStopRef.current || isStale(),
@@ -1357,15 +1393,27 @@ export default function App() {
           setDirectorPass(upd.passNumber);
           if (upd.activityEntry) {
             setDirectorActivityLog((prev) => [...prev, upd.activityEntry!]);
+            writeTempNote('activity/' + String(upd.activityEntry.timestamp) + '-' + upd.activityEntry.id + '.json', upd.activityEntry);
           }
           if (upd.checkpoint) {
             setDirectorCheckpoints((prev) => [...prev, upd.checkpoint!]);
+            writeTempNote('passes/pass-' + String(upd.checkpoint.passNumber).padStart(2, '0') + '.json', upd.checkpoint);
           }
         },
       });
 
       if (isStale()) return;
 
+      writeTempNote('final/verification.json', {
+        status: report.status,
+        stopReason: report.stopReason,
+        bestPassNumber: report.bestPassNumber,
+        iterationsExecuted: report.iterationsExecuted,
+        preAnalysis: report.preAnalysis,
+        postAnalysis: report.postAnalysis,
+        qualityControl: report.qcReport,
+        postFixVerification: report.postFixVerification,
+      });
       setDirectorReport(report);
       setDirectorCheckpoints(report.checkpoints);
       setDirectorActivityLog(report.activityLog);
@@ -1405,6 +1453,8 @@ export default function App() {
         setAiError(err instanceof Error ? err.message : 'Mastering Director execution failed');
       }
     } finally {
+      await tempWriteQueue.catch(() => undefined);
+      await tempWorkspace?.cleanup().catch(() => undefined);
       if (directorRunIdRef.current === runId) {
         directorRunningRef.current = false;
         setDirectorRunning(false);
@@ -1526,17 +1576,61 @@ export default function App() {
     if (!src || !activeTrack) return;
     setRenderingExport(true);
     try {
-      const effectiveChain = chainBypassed ? [] : chain;
-      const processed = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage);
-      const blob = encodeWavBlob(processed.channels, activeTrack.sampleRate, exportConfig);
+      const safeStem = (exportConfig.filename.trim() || 'SYN_Master').replace(/[<>:"/\\|?*]/g, '_');
+      let blob: Blob;
+      let extension: string;
+
+      if (exportConfig.format === 'mid') {
+        blob = encodeMidiTempoFile(safeStem, activeTrack.durationSec, exportConfig.midiTempoBpm ?? 120, exportConfig.saveLoopMarkers ?? true);
+        extension = 'mid';
+      } else {
+        const effectiveChain = exportConfig.includeMasteringChain !== false && !chainBypassed ? chain : [];
+        const processed = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage);
+
+        // Pass an untouched 32-bit float source-rate WAV to FFmpeg. It performs the
+        // selected 512-point sinc sample-rate conversion and final PCM/codec encoding.
+        const intermediateConfig: ExportConfig = {
+          ...exportConfig,
+          format: 'wav',
+          wavBitDepth: 32,
+          sampleRate: activeTrack.sampleRate as ExportConfig['sampleRate'],
+          dither: 'none',
+        };
+        const intermediateWav = encodeWavBlob(processed.channels, activeTrack.sampleRate, intermediateConfig);
+        const params = new URLSearchParams({
+          format: exportConfig.format,
+          sampleRate: String(exportConfig.sampleRate),
+          channels: exportConfig.channels,
+          wavBitDepth: String(exportConfig.wavBitDepth),
+          flacBitDepth: String(exportConfig.flacBitDepth ?? 24),
+          flacCompression: String(exportConfig.flacCompression ?? 5),
+          mp3BitrateKbps: String(exportConfig.mp3BitrateKbps ?? 320),
+          oggBitrateKbps: String(exportConfig.oggBitrateKbps ?? 192),
+          dither: exportConfig.dither,
+          metadataTitle: exportConfig.metadataTitle,
+          metadataArtist: exportConfig.metadataArtist,
+        });
+        const response = await fetch('/api/export/encode?' + params.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: intermediateWav,
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({})) as { error?: string };
+          throw new Error(payload.error || 'Audio export failed (HTTP ' + response.status + ').');
+        }
+        blob = await response.blob();
+        extension = exportConfig.format === 'webm-opus' ? 'webm' : exportConfig.format;
+      }
+
       if (exportDownloadUrl) URL.revokeObjectURL(exportDownloadUrl);
       const url = URL.createObjectURL(blob);
-      const safeName = (exportConfig.filename.trim() || 'SYN_Master') + '.wav';
+      const safeName = safeStem + '.' + extension;
       setExportDownloadUrl(url);
       setExportDownloadName(safeName);
-      setStatusNotice(`Rendered WAV master "${safeName}".`);
+      setStatusNotice('Rendered ' + exportConfig.format.toUpperCase() + ' master "' + safeName + '".');
     } catch (err) {
-      setStatusNotice(err instanceof Error ? err.message : 'WAV export render failed');
+      setStatusNotice(err instanceof Error ? err.message : 'Master export failed');
     } finally {
       setRenderingExport(false);
     }
@@ -1846,6 +1940,43 @@ export default function App() {
 
         {/* Center Mastering Stage */}
         <main className="lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">
+          {activeTrack && (
+            <section data-testid="mastering-control-desk" aria-label="Mastering Control Desk"
+              className="rounded-xl border border-[#D4AF37]/65 bg-gradient-to-br from-[#151006] via-[#0D0B06] to-[#070604] p-3.5 shadow-[0_12px_32px_rgba(0,0,0,.35)]">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-[.18em] text-[#F2CA52]">Mastering Control Desk</span>
+                    <span className={`rounded border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${directorRunning ? 'border-[#D4AF37] bg-[#D4AF37]/15 text-[#F2CA52]' : postAnalysisState.status === 'ready' ? 'border-[#8B6A1B] bg-[#D4AF37]/10 text-[#E8C85A]' : 'border-[#4A3917] text-[#B6A780]'}`}>
+                      {directorRunning ? (directorStage || 'PROCESSING') + ' · PASS ' + directorPass + '/10' : postAnalysisState.status === 'ready' ? 'MASTER ANALYSIS READY' : postAnalysisState.status === 'processing' ? 'ANALYZING MASTER' : 'READY TO ANALYZE'}
+                    </span>
+                  </div>
+                  <div className="mt-1 truncate text-xs font-semibold text-[#F6EED8]">{activeTrack.name}</div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono-tabular text-[#B6A780]">
+                    <span>Source {activeTrack.analysis.integratedLufs.toFixed(1)} LUFS</span>
+                    <span>Master {postAnalysisState.status === 'ready' && postAnalysis ? postAnalysis.integratedLufs.toFixed(1) + ' LUFS' : 'Not verified'}</span>
+                    <span>True Peak {postAnalysisState.status === 'ready' && postAnalysis ? postAnalysis.truePeakDb.toFixed(2) + ' dBTP' : '—'}</span>
+                    <span>Objective {objectiveId.toUpperCase()}</span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" disabled={directorRunning} onClick={handleAnalyzeTrack}
+                    className="rounded-md border border-[#8B6A1B] bg-[#171208] px-3 py-2 text-[11px] font-bold text-[#E8C85A] hover:border-[#F2CA52] disabled:opacity-45">
+                    ANALYZE TRACK
+                  </button>
+                  <button type="button" disabled={directorRunning || aiLoading}
+                    onClick={() => { setOperatingMode('autonomous'); void handleRunMasterDirector(true); }}
+                    className="rounded-md bg-[#D4AF37] px-4 py-2 text-[11px] font-black tracking-wide text-[#090704] shadow-[0_4px_18px_rgba(212,175,55,.18)] hover:bg-[#F2CA52] disabled:opacity-45">
+                    {directorRunning ? 'FIXING & VERIFYING…' : 'FIX ALL & VERIFY'}
+                  </button>
+                  <button type="button" onClick={() => setExportModalOpen(true)}
+                    className="rounded-md border border-[#8B6A1B] bg-[#171208] px-3 py-2 text-[11px] font-bold text-[#E8C85A] hover:bg-[#D4AF37]/10">
+                    EXPORT MASTER
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
           <WorkspaceNavigation activeTab={activeTab} onSelect={setActiveTab} />
 
           {/* Transport & Waveform Stage (Full waveform on Studio & Reference; compact transport bar on other tabs) */}
@@ -2175,6 +2306,39 @@ export default function App() {
             </section>
           )}
 
+          {activeTab === 'studio' && activeTrack && (
+            <section data-testid="central-mastering-rack" className="rounded-xl border border-[#D4AF37]/45 bg-[#0D0B06] p-2.5">
+              <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                <h2 className="text-[11px] font-black uppercase tracking-[.16em] text-[#F2CA52]">Mastering Chain · Main Workspace</h2>
+                <span className="text-[9px] font-mono-tabular uppercase tracking-wider text-[#A99A74]">Visible rack · Offline DSP / VST3</span>
+              </div>
+              <MasteringRack
+                chain={chain}
+                chainBypassed={chainBypassed}
+                telemetry={stageTelemetry}
+                guidedMode={settings.experienceMode === 'guided'}
+                externalPlugins={hostSnapshot.plugins}
+                hostConnected={hostSnapshot.status === 'connected'}
+                hasTrack={Boolean(activeTrack)}
+                aiRunning={directorRunning}
+                aiLifecycleState={aiLifecycleState}
+                onRunChainWithAi={handleRunMasterDirector}
+                onChangeChain={(next) => {
+                  updateChainWithHistory(next);
+                  recordCorrection('Manual Mastering Rack Edit', next, { coalesceManual: true });
+                }}
+                onToggleChainBypass={handleToggleChainBypass}
+                onSaveChain={handleSaveChainPreset}
+                onResetChain={handleResetChain}
+                onAddExternalPlugin={handleInsertExternalPlugin}
+                onLoadExternalInstance={handleLoadExternalInstance}
+                onSetExternalParam={handleSetExternalParam}
+                onToggleExternalEditor={handleToggleExternalEditor}
+                onToggleExternalBypass={handleToggleExternalBypass}
+              />
+            </section>
+          )}
+
           {activeTab === 'stems' && <StemIntelligencePanel />}
 
           {activeTab === 'lab' && (
@@ -2362,33 +2526,6 @@ export default function App() {
           )}
         </main>
 
-        {/* Right Sidebar: Modular Mastering Chain Rack */}
-        {!fullscreenWorkspace && activeTab !== 'plugins' && activeTab !== 'stems' && (
-          <MasteringRack
-            chain={chain}
-            chainBypassed={chainBypassed}
-            telemetry={stageTelemetry}
-            guidedMode={settings.experienceMode === 'guided'}
-            externalPlugins={hostSnapshot.plugins}
-            hostConnected={hostSnapshot.status === 'connected'}
-            hasTrack={Boolean(activeTrack)}
-            aiRunning={directorRunning}
-            aiLifecycleState={aiLifecycleState}
-            onRunChainWithAi={handleRunMasterDirector}
-            onChangeChain={(next) => {
-              updateChainWithHistory(next);
-              recordCorrection('Manual Mastering Rack Edit', next, { coalesceManual: true });
-            }}
-            onToggleChainBypass={handleToggleChainBypass}
-            onSaveChain={handleSaveChainPreset}
-            onResetChain={handleResetChain}
-            onAddExternalPlugin={handleInsertExternalPlugin}
-            onLoadExternalInstance={handleLoadExternalInstance}
-            onSetExternalParam={handleSetExternalParam}
-            onToggleExternalEditor={handleToggleExternalEditor}
-            onToggleExternalBypass={handleToggleExternalBypass}
-          />
-        )}
       </div>
 
       {/* Bottom Meter Bridge */}

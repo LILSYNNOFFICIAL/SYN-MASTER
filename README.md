@@ -15,6 +15,9 @@ SYN MASTER is an AI-assisted mastering workstation built around a browser-based 
 - Multi-objective evaluation and iterative DSP refinement.
 - **FIX ALL & VERIFY** runs the autonomous refinement workflow against the active track and reports remaining findings instead of assuming every issue can be corrected.
 - Post-fix verification compares the baseline and processed analysis, reports resolved or partially resolved findings, and identifies remaining deviations.
+- The main Mastering Studio keeps Analyze, FIX ALL & VERIFY, current loudness / true-peak readings, and the active mastering rack in the central workspace instead of a detached side rail.
+- Each autonomous Fix All run journals its baseline diagnosis, proposed chain, activity notes, and measured checkpoints into a temporary OPFS workspace, then removes that scratch folder after the final report is captured.
+- Fix All supports up to 10 autonomous passes with a bounded execution budget, retains the best validated pass, and never equates a refinement plateau with a perfect or converged master.
 
 ### Measurement-aware refinement
 
@@ -42,10 +45,17 @@ Browser support and available storage can affect OPFS behavior. Test long-form s
 - **Web application:** React, TypeScript, Vite.
 - **Server:** Express. Gemini credentials are read only from the server process environment.
 - **AI mastering:** Google Gen AI SDK, with structured mastering-strategy responses.
-- **DSP:** Native SYN-DSP processors and offline audio rendering in the application.
+- **DSP:** Native SYN-DSP processors, 512-point windowed-sinc sample-rate conversion, and offline audio rendering in the application.
+- **Export:** WAV PCM/float, MP3, OGG Vorbis, FLAC, M4A/AAC and WebM/Opus are rendered through the server-side FFmpeg encoder and its 512-point Blackman-Nuttall windowed-sinc resampler. Install FFmpeg on the server and ensure it is available on PATH to enable full-song audio export. MIDI output is a tempo / loop conductor track only; imported audio contains no MIDI note events.
 - **Stem separation:** ONNX Runtime Web and browser workers, with OPFS-backed stem storage.
 - **Native plugin host:** C++20, CMake, JUCE 8, isolated VST3 worker processes.
 - **Persistence:** Browser-local project/storage facilities. See source modules for exact persistence boundaries.
+
+### Export formats and runtime encoder
+
+All full-song audio formats (WAV 16/24-bit PCM or 32-bit float, MP3 up to 320 kbps, OGG Vorbis, FLAC up to 24-bit, M4A/AAC 320 kbps, and WebM/Opus) are rendered by the `/api/export/encode` endpoint. The server resamples from the 32-bit float offline DSP render with FFmpeg's 512-point Blackman-Nuttall windowed-sinc resampler. The server requires an FFmpeg build with `libmp3lame`, `libvorbis`, FLAC, AAC and `libopus` encoders available. MIDI conductor / marker export remains browser-local. The endpoint writes only to a per-request operating-system temporary directory and removes its intermediate files after each render. WAV supports 16-bit PCM, 24-bit PCM and 32-bit IEEE float; FLAC supports 16/24-bit with selectable compression; MP3 supports 320 kbps. The browser-side Fix All scratch journal uses OPFS (`SYN-MASTER-TEMP`) and removes the per-run directory on completion.
+
+SYN MASTER is a full-track mastering renderer, not a playlist or MIDI sequencer. Playlist note markers, instrument maximum-polyphony settings, and DAW-specific PDC-silence trimming are not exposed as misleading export toggles. The MIDI file explicitly contains only tempo and optional loop markers, never invented notes or rendered audio.
 
 ## Development
 

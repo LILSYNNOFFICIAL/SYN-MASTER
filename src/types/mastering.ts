@@ -346,13 +346,23 @@ export interface QCReport {
   checks: QCCheckItem[];
 }
 
+export type ExportAudioFormat = 'wav' | 'mp3' | 'ogg' | 'flac' | 'm4a' | 'mid' | 'webm-opus';
+
 export interface ExportConfig {
   filename: string;
-  format: 'wav' | 'webm-opus';
+  format: ExportAudioFormat;
   wavBitDepth: 16 | 24 | 32;
+  flacBitDepth?: 16 | 24;
+  flacCompression?: number;
+  mp3BitrateKbps?: 128 | 192 | 256 | 320;
+  oggBitrateKbps?: 96 | 128 | 160 | 192 | 256 | 320;
   sampleRate: 44100 | 48000 | 88200 | 96000;
   channels: 'stereo' | 'mono';
   dither: 'none' | 'tpdf';
+  resampler?: 'sinc-512';
+  includeMasteringChain?: boolean;
+  saveLoopMarkers?: boolean;
+  midiTempoBpm?: number;
   normalizeToTarget: boolean;
   targetLufs: number;
   ceilingDb: number;
