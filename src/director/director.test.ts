@@ -598,7 +598,7 @@ test('Reference comparison preserves raw band deltas but bases EQ guidance on le
     ...louderReference,
     zoneEnergyDb: {
       ...louderReference.zoneEnergyDb,
-      bass: louderReference.zoneEnergyDb.bass + 2.0,
+      bass: louderReference.zoneEnergyDb.bass + 2.5,
       air: louderReference.zoneEnergyDb.air - 3.0,
     },
   };
