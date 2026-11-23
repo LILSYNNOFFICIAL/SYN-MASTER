@@ -76,3 +76,17 @@ test('Dither module quantizes to the chosen word length, deterministically, and 
   const errDb = 10 * Math.log10(errSq / (n / 2));
   assert.ok(errDb < -80 && errDb > -110, `dither/requantization noise ${errDb.toFixed(1)} dBFS`);
 });
+
+test('filterIntroducedClicks separates amplified source transients from clicks the master added', async () => {
+  const { filterIntroducedClicks } = await import('./clickDetect');
+  const src = makeDrumMix(2);
+  const out = src.map((ch) => ch.map((v) => v * 2));
+  const tOnset = 0.25; // snare-like hit in the source
+  const tNew = 1.111;
+  const i = Math.round(tNew * SR);
+  out[0][i] += 0.5;
+  out[1][i] += 0.5;
+  const split = filterIntroducedClicks(src, out, SR, [tOnset, tNew], 2);
+  assert.deepEqual(split.preexisting, [tOnset]);
+  assert.deepEqual(split.introduced, [tNew]);
+});

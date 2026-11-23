@@ -172,3 +172,45 @@ export function isIsolatedClick(ch: Float32Array, index: number, sampleRate: num
   after /= aB - aA;
   return after < 1.5 * before + 1e-6;
 }
+
+/**
+ * Splits clicks found in a processed render into ones the processing INTRODUCED and ones
+ * that are pre-existing transients made sharper by gain/limiting. For each click time the
+ * strongest second difference within ±1.5 ms is compared between the render and the
+ * source: if the render's is no more than `tolerance` x (source's x overall gain), the
+ * event already existed in the source (a drum attack pushed into a limiter), so it is not
+ * a new click. Found on a real Suno track mastered to -9.5 LUFS, where amplified drum
+ * attacks made every pass fail the "no new clicks" guard.
+ */
+export function filterIntroducedClicks(
+  source: Float32Array[],
+  rendered: Float32Array[],
+  sampleRate: number,
+  clickTimesSec: number[],
+  gainLinear: number,
+  tolerance = 3,
+): { introduced: number[]; preexisting: number[] } {
+  const introduced: number[] = [];
+  const preexisting: number[] = [];
+  const half = Math.max(4, Math.round(sampleRate * 0.0015));
+  const peakD2 = (chs: Float32Array[], c: number) => {
+    let m = 0;
+    for (const ch of chs) {
+      const a = Math.max(2, c - half);
+      const b = Math.min(ch.length, c + half + Math.round(sampleRate * 0.002));
+      for (let i = a; i < b; i++) m = Math.max(m, Math.abs(ch[i] - 2 * ch[i - 1] + ch[i - 2]));
+    }
+    return m;
+  };
+  for (const t of clickTimesSec) {
+    const c = Math.round(t * sampleRate);
+    const len = source[0]?.length ?? 0;
+    // Edge clicks are always judged on their own (a cut-off ending is new if the render made it).
+    if (c < sampleRate * 0.004 || c > len - sampleRate * 0.004) { introduced.push(t); continue; }
+    const out = peakD2(rendered, c);
+    const src = peakD2(source, c);
+    if (out <= tolerance * src * Math.max(1e-6, gainLinear)) preexisting.push(t);
+    else introduced.push(t);
+  }
+  return { introduced, preexisting };
+}

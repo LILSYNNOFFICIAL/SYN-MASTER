@@ -1,4 +1,5 @@
 import { isNoiseLikeFloor } from '../dsp/analyzer';
+import { filterIntroducedClicks } from '../dsp/clickDetect';
 
 /**
  * Identity of a chain for "already rendered" checks: module ids, names and UI state are
@@ -2218,7 +2219,24 @@ export async function runAutonomousDirectorLoop(
         });
 
     emit('Measuring', pass, undefined, undefined, workingChain, 'Measuring');
-    const post = rendered.analysis;
+    let post = rendered.analysis;
+    // Clicks in the render that are just source transients made sharper by gain/limiting
+    // are not "introduced" by the master: drop them before the gate and regression guards.
+    if ((post.clickCount ?? 0) > 0 && post.clickTimesSec && post.clickTimesSec.length >= (post.clickCount ?? 0) && rendered.channels) {
+      const gainLin = Math.pow(10, (post.integratedLufs - preAnalysis.integratedLufs) / 20);
+      const split = filterIntroducedClicks(passSourceChannels, rendered.channels, opts.sampleRate, post.clickTimesSec, gainLin);
+      if (split.preexisting.length > 0) {
+        const minutes = post.durationSec / 60;
+        post = {
+          ...post,
+          clickCount: split.introduced.length,
+          clickTimesSec: split.introduced,
+          clicksPerMinute: minutes > 0 ? Number((split.introduced.length / minutes).toFixed(2)) : 0,
+          clickAtStart: split.introduced.some((t) => t < 0.004) ? post.clickAtStart : false,
+          clickAtEnd: split.introduced.some((t) => t > post.durationSec - 0.004) ? post.clickAtEnd : false,
+        };
+      }
+    }
     const qcReport = runQualityControl(preAnalysis, post, qcProfile, opts.exportConfig);
     const multiObjective = evaluateMultiObjectiveMetrics(
       preAnalysis,
