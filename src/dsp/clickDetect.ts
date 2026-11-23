@@ -29,6 +29,8 @@ export interface ClickDetection {
 
 /** Minimum |d2| for a click at the file edges; edges sit next to silence, so this is lower. */
 export const EDGE_CLICK_FLOOR = 0.01;
+/** Ratio over local roughness for the step into/out of the file itself (k = 0, 1). */
+export const EDGE_STEP_RATIO = 3;
 
 /**
  * Edge click test for the first (or, with reverse=true, last) `edgeLen` samples of a channel.
@@ -49,7 +51,12 @@ export function findEdgeClick(ch: Float32Array, sampleRate: number, reverse: boo
   let index = -1;
   for (let k = 0; k < edgeLen; k++) {
     const d = Math.abs(at(k) - 2 * at(k - 1) + at(k - 2));
-    if (d > EDGE_CLICK_FLOOR && d > ratio * local) index = k;
+    // k = 0, 1 are the jump from/to the silence outside the file. A file cut off in loud
+    // music (end sample 0.07 inside a mix whose roughness is ~0.01) is a click to the ear
+    // even though its step is not 14x the local roughness, so the boundary uses a lower
+    // ratio. Found on a real track trimmed mid-waveform: the end was missed at ratio 14.
+    const r = k < 2 ? Math.min(ratio, EDGE_STEP_RATIO) : ratio;
+    if (d > EDGE_CLICK_FLOOR && d > r * local) index = k;
   }
   return { index, step: Math.abs(at(0)) };
 }
