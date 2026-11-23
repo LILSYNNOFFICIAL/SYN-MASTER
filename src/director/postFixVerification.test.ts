@@ -454,7 +454,11 @@ test('10. Autonomous Director Loop integrates evidence-based PostFixVerification
 
   assert.ok(report.postFixVerification, 'MasterFinalReport must include postFixVerification');
   const pfv = report.postFixVerification!;
-  assert.equal(pfv.analysisFresh, true);
+  assert.equal(
+    pfv.analysisFresh,
+    true,
+    `Expected a verified processed pass. Status=${report.status}; rolledBack=${report.rolledBack}; stop=${report.stopReason}; passes=${report.iterationsExecuted}; checkpoints=${JSON.stringify(report.checkpoints.map((checkpoint) => ({ pass: checkpoint.passNumber, outcome: checkpoint.iterationSummary.outcome, issue: checkpoint.iterationSummary.detectedIssue, fit: checkpoint.multiObjective.engineeringFitIndex })))}`,
+  );
   assert.ok(Number.isFinite(pfv.affectedMetricsSummary.integratedLufsAfter!));
   assert.ok(Number.isFinite(pfv.affectedMetricsSummary.shortTermLufsMaxAfter!));
   assert.ok(Number.isFinite(pfv.affectedMetricsSummary.rmsDbAfter!));
