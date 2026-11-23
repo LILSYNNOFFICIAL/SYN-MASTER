@@ -366,3 +366,36 @@ test('optimized true-peak candidate pruning matches exhaustive scanning at repor
     'Inter-sample peak event count must match exhaustive polyphase scanning',
   );
 });
+
+
+test('stereo analyzer bounds full-track Float32 scratch allocations', () => {
+  const sr = 48000;
+  const length = sr;
+  const [left, right] = makeSineStereo(1000, dbToLinear(-18), 1, sr);
+  const OriginalFloat32Array = globalThis.Float32Array;
+  let fullTrackAllocations = 0;
+
+  globalThis.Float32Array = new Proxy(OriginalFloat32Array, {
+    construct(target, args, newTarget) {
+      if (args[0] === length) fullTrackAllocations++;
+      return Reflect.construct(target, args, newTarget);
+    },
+  });
+
+  let analysis: ReturnType<typeof analyzeAudioBuffer>;
+  try {
+    analysis = analyzeAudioBuffer([left, right], sr);
+  } finally {
+    globalThis.Float32Array = OriginalFloat32Array;
+  }
+
+  assert.ok(
+    fullTrackAllocations <= 2,
+    `Expected at most two full-track Float32 scratch buffers, allocated ${fullTrackAllocations}`,
+  );
+  assert.ok(
+    analysis.integratedLufs > -20.5 && analysis.integratedLufs < -16.5,
+    `Scratch reuse changed calibrated LUFS: ${analysis.integratedLufs}`,
+  );
+  assert.ok(Math.abs(analysis.phaseCorrelation - 1) < 0.01);
+});
