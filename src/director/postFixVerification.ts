@@ -501,7 +501,17 @@ function classifyVerifiedFinding(opts: {
   let nextRecommendedAction: string | undefined;
   let verificationSummary: string;
 
-  if (finding.id === 'diag-mud') {
+  if (finding.id === 'diag-clipping' && pre.clippedSamples > 0) {
+    const sourceClippedSamples = pre.clippedSamples;
+    const outputClippedSamples = post.clippedSamples;
+    status = 'UNRESOLVED';
+    remainingDeviation =
+      `Source integrity remains unverified: baseline contained ${sourceClippedSamples} sample(s) at or near full scale; rendered output reports ${outputClippedSamples}.`;
+    nextRecommendedAction =
+      'Return to an unclipped premaster or use a dedicated declipping restoration process before mastering. Output gain reduction can restore headroom, but it cannot reconstruct waveform peaks that were already flattened in the source.';
+    verificationSummary =
+      `VERIFICATION: The source entered mastering with ${sourceClippedSamples} sample(s) at or near full scale. The rendered output reports ${outputClippedSamples}, but level reduction alone cannot establish that missing waveform peaks were reconstructed. This workflow has no verified source-declipping reconstruction step. Status: UNRESOLVED`;
+  } else if (finding.id === 'diag-mud') {
     const preLowMid = pre.zoneEnergyDb.lowMid - pre.zoneEnergyDb.mid;
     const postLowMid = post.zoneEnergyDb.lowMid - post.zoneEnergyDb.mid;
     const preBassMid = pre.zoneEnergyDb.bass - pre.zoneEnergyDb.mid;
