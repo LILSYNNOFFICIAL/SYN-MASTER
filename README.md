@@ -178,6 +178,7 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **docs: record sub-bass repair commits** — [`bb192e40`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/bb192e40525b781e2744f805772113771f87c4ad); recorded both adaptive Sub/Bass repair commits and their verification state.
 - [x] **docs: record sub-bass repair CI pass** — this commit; marked P0-1 implementation and CI evidence complete while keeping owner-output and Android verification pending.
 - [ ] **perf: render transferred worker buffers in place** — this commit; avoid the renderer's second full-track stereo copy and share one wet/dry scratch pair across sequential modules. CI pending; Android profiling remains open.
+- [ ] **docs: clarify transferred-buffer ownership contract** — this commit; document the default copy-safe path versus explicit worker ownership and clarify the worker-client lifecycle comment. CI pending.
 
 
 # Reference: existing capabilities and setup

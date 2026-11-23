@@ -63,7 +63,8 @@ function makeError(reason: unknown, fallback: string): Error {
 /**
  * A lifecycle-managed DSP worker client. Failed or timed-out workers are terminated,
  * every pending request is rejected and removed, and the caller transparently falls
- * back to the in-thread renderer. Input audio is always cloned before transfer.
+ * back to the in-thread renderer. Input audio is cloned before transfer to preserve the
+ * main-thread source; the worker owns and mutates its transferred copy in place.
  */
 export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
   const workerFactory = options.workerFactory ?? defaultWorkerFactory;

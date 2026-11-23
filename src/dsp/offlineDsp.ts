@@ -1245,15 +1245,16 @@ function applyMultibandMaximizer(
   return Number(Math.max(maxBandGr, limGr).toFixed(2));
 }
 
-/**
- * Process stereo/mono Float32Array buffers through the entire SYN-CHAIN
- * without mutating the source buffers.
- */
+/** Rendering ownership contract for processChainOffline. */
 export interface OfflineDspOptions {
-  /** The caller has transferred exclusive ownership of these buffers and permits in-place rendering. */
+  /** The caller transferred exclusive ownership of these buffers and permits in-place rendering. */
   takeOwnership?: boolean;
 }
 
+/**
+ * Process stereo/mono Float32Array buffers through the entire SYN-CHAIN.
+ * By default the source buffers are preserved; takeOwnership mutates only caller-transferred buffers.
+ */
 export function processChainOffline(
   sourceChannels: Float32Array[],
   sampleRate: number,
