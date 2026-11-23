@@ -386,3 +386,62 @@ test('SYN-Restore hiss reduction lowers quiet high-frequency noise while preserv
     `Hiss reduction must open quickly enough to preserve transient peaks, input=${inputTransientPeak}, output=${outputTransientPeak}`,
   );
 });
+
+
+test('Dynamic EQ attack and release controls shape transient response and recovery independently', () => {
+  const n = SR;
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    const amplitude = t >= 0.35 && t < 0.55 ? 0.5 : 0.05;
+    const sample = amplitude * Math.sin(2 * Math.PI * 1000 * t);
+    left[i] = sample;
+    right[i] = sample;
+  }
+  const makeDynamicEq = (attackMs: number, releaseMs: number) =>
+    createProcessorModule('dynamic-eq', {
+      params: {
+        bands: [{
+          id: 'transient-control',
+          enabled: true,
+          freq: 1000,
+          q: 1.2,
+          thresholdDb: -24,
+          maxCutDb: -9,
+          attackMs,
+          releaseMs,
+        }],
+      } satisfies DynamicEQParams,
+    });
+  const fast = processChainOffline([left, right], SR, [makeDynamicEq(2, 20)]);
+  const slowAttack = processChainOffline([left, right], SR, [makeDynamicEq(80, 20)]);
+  const fastRelease = processChainOffline([left, right], SR, [makeDynamicEq(2, 20)]);
+  const slowRelease = processChainOffline([left, right], SR, [makeDynamicEq(2, 400)]);
+  const peak = (samples: Float32Array, start: number, end: number) => {
+    let value = 0;
+    for (let i = Math.floor(start * SR); i < Math.floor(end * SR); i++) {
+      value = Math.max(value, Math.abs(samples[i]));
+    }
+    return value;
+  };
+  const rmsWindow = (samples: Float32Array, start: number, end: number) => {
+    let sum = 0;
+    const first = Math.floor(start * SR);
+    const last = Math.floor(end * SR);
+    for (let i = first; i < last; i++) sum += samples[i] * samples[i];
+    return Math.sqrt(sum / Math.max(1, last - first));
+  };
+  const fastAttackPeak = peak(fast.channels[0], 0.35, 0.55);
+  const slowAttackPeak = peak(slowAttack.channels[0], 0.35, 0.55);
+  assert.ok(
+    slowAttackPeak > fastAttackPeak * 1.05,
+    `Slower attack should preserve more of the initial transient, fast=${fastAttackPeak}, slow=${slowAttackPeak}`,
+  );
+  const fastTail = rmsWindow(fastRelease.channels[0], 0.62, 0.78);
+  const slowTail = rmsWindow(slowRelease.channels[0], 0.62, 0.78);
+  assert.ok(
+    fastTail > slowTail * 1.05,
+    `Faster release should restore the quiet tail sooner, fast=${fastTail}, slow=${slowTail}`,
+  );
+});
