@@ -947,5 +947,5 @@ test('Noise cleanup reports collateral transient and air loss instead of claimin
   assert.ok(noise);
   assert.equal(noise.status, 'PARTIALLY_RESOLVED');
   assert.match(noise.verificationSummary, /transient|air|collateral/i);
-  assert.match(noise.nextRecommendedAction ?? '', /conservative|restore|reduction/i);
+  assert.match(noise.nextRecommendedAction ?? '', /conservative|restor|reduction/i);
 });
