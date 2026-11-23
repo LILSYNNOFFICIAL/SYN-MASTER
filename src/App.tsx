@@ -128,9 +128,11 @@ const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   flacCompression: 5,
   mp3BitrateKbps: 320,
   oggBitrateKbps: 192,
-  sampleRate: 44100,
+  // Contract defaults: preserve the 48 kHz source rate, 24-bit WAV/FLAC, MP3 320 kbps.
+  // Dither off so the 24-bit FLAC is sample-identical to the 24-bit WAV.
+  sampleRate: 48000,
   channels: 'stereo',
-  dither: 'tpdf',
+  dither: 'none',
   resampler: 'sinc-512',
   includeMasteringChain: true,
   saveLoopMarkers: true,
@@ -938,7 +940,7 @@ export default function App() {
       setExportConfig((prev) => ({
         ...prev,
         filename: name.replace(/\.[^/.]+$/, '') + '_SYN_MASTER',
-        sampleRate: ([44100, 48000, 88200, 96000].includes(sampleRate) ? sampleRate : 44100) as ExportConfig['sampleRate'],
+        sampleRate: ([44100, 48000, 88200, 96000].includes(sampleRate) ? sampleRate : 48000) as ExportConfig['sampleRate'],
       }));
       setStatusNotice(`Loaded "${name}" (${analysis.integratedLufs.toFixed(1)} LUFS pre-master)`);
     },

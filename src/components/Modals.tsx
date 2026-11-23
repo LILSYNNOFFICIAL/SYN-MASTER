@@ -113,7 +113,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               {(config.format === 'wav' || config.format === 'flac') && (
                 <label className={labelClass}>Dithering
                   <select value={config.dither} onChange={(e) => onChange({ ...config, dither: e.target.value as 'none' | 'tpdf' })} className={fieldClass}>
-                    <option value="tpdf">TPDF Triangular Dither</option><option value="none">None</option>
+                    <option value="none">None (default)</option><option value="tpdf">TPDF Triangular Dither</option>
                   </select>
                 </label>
               )}

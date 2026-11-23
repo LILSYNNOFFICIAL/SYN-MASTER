@@ -35,6 +35,10 @@ input[type="range"].syn-slider:focus-visible::-webkit-slider-thumb { outline:2px
 input[type="range"].syn-slider::-moz-range-track { height:4px; border-radius:2px; background:#33270E; border:1px solid #5A4519; }
 input[type="range"].syn-slider::-moz-range-thumb { width:13px; height:16px; border-radius:2px; background:linear-gradient(180deg,#FFE58B,#D4AF37); border:1px solid #080704; }
 input,select,textarea { accent-color:#D4AF37; }
+/* Native dropdown lists ignore the field's dark background on some browsers (Android Chrome),
+   leaving light text on a white list so options like 48 kHz look missing. */
+select { color-scheme:dark; }
+select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 :focus-visible { outline-color:#F2CA52; outline-offset:2px; }
 ::-webkit-scrollbar { width:7px; height:7px; }
 ::-webkit-scrollbar-track { background:#0A0804; }

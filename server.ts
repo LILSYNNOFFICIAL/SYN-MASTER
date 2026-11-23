@@ -81,14 +81,14 @@ app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', l
     return;
   }
 
-  const sampleRate = Number(req.query.sampleRate ?? 44100);
+  const sampleRate = Number(req.query.sampleRate ?? 48000);
   const channelMode = String(req.query.channels ?? 'stereo');
   const wavBitDepth = Number(req.query.wavBitDepth ?? 24);
   const flacBitDepth = Number(req.query.flacBitDepth ?? 24);
   const flacCompression = Number(req.query.flacCompression ?? 5);
   const mp3Bitrate = Number(req.query.mp3BitrateKbps ?? 320);
   const oggBitrate = Number(req.query.oggBitrateKbps ?? 192);
-  const ditherMode = String(req.query.dither ?? 'tpdf') === 'tpdf' ? 'triangular' : 'none';
+  const ditherMode = String(req.query.dither ?? 'none') === 'tpdf' ? 'triangular' : 'none';
   if (![44100, 48000, 88200, 96000].includes(sampleRate) || !['stereo', 'mono'].includes(channelMode) ||
       ![16, 24, 32].includes(wavBitDepth) || ![16, 24].includes(flacBitDepth) || !Number.isInteger(flacCompression) || flacCompression < 0 || flacCompression > 8 ||
       ![128, 192, 256, 320].includes(mp3Bitrate) || ![96, 128, 160, 192, 256, 320].includes(oggBitrate)) {
