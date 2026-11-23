@@ -207,7 +207,7 @@ test('Diagnostic intelligence identifies mud, harshness, over-compression, and p
   assert.ok(phaseDiag.findings.some((f) => f.id === 'diag-phase'));
 });
 
-test('CHAIN WITH AI fixes clipped source track to zero clipped samples and compliant True Peak', async () => {
+test('CHAIN WITH AI restores output headroom but does not claim clipped source waveform reconstruction', async () => {
   const clipped = makeClippedStereo();
   const lifecycles: AiChainLifecycleState[] = [];
   const report = await runAutonomousDirectorLoop({
@@ -227,7 +227,17 @@ test('CHAIN WITH AI fixes clipped source track to zero clipped samples and compl
   assert.ok(lifecycles.includes('Processing'));
   assert.ok(lifecycles.includes('Validating'));
   assert.ok(lifecycles.includes('Completed'));
-  assert.ok(report.resolvedProblems.length > 0);
+
+  const clippingState = report.postFixVerification?.activeFindings.find(
+    (finding) => finding.findingId === 'diag-clipping',
+  );
+  assert.ok(clippingState, 'Original source clipping must remain visible after output attenuation');
+  assert.equal(clippingState.status, 'UNRESOLVED');
+  assert.equal(
+    report.postFixVerification?.resolvedFindings.some((finding) => finding.findingId === 'diag-clipping'),
+    false,
+    'Zero clipped samples after attenuation does not prove the flattened source peaks were reconstructed',
+  );
 });
 
 test('CHAIN WITH AI raises quiet track to distinct streaming vs commercial-loudness targets', async () => {
