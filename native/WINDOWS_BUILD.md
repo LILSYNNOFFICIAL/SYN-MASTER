@@ -45,3 +45,14 @@ cd native
 5. Fault-injection verification on Windows:
    - `.\build\windows-x64-release\Release\syn-plugin-worker.exe --selftest-crash` -> `0xC0000005` caught cleanly by `PluginInstanceManager`.
    - `.\build\windows-x64-release\Release\syn-plugin-worker.exe --selftest-hang` -> terminated cleanly after worker deadline without blocking `syn-plugin-host.exe`.
+
+## 4. GitHub Actions Windows x64 Build
+
+The repository includes a native Windows CI workflow at `.github/workflows/windows-x64-build.yml`.
+
+- Open **GitHub → Actions → Windows x64 Native Plugin Host Build → Run workflow** to start it manually.
+- The workflow also runs automatically when files under `native/**` or the workflow definition change on a push.
+- It uses a Windows 2022 runner with the Visual Studio 2022 x64 generator, builds the host, scanner, worker, QA VST3 plugin and core tests, then runs CTest and the compiled VST3 validation harness.
+- A successful run uploads the `syn-plugin-host-win64-m2` artifact containing the native executables and QA VST3 bundle. Download and inspect that artifact before treating the native build as deliverable.
+
+The automated validation uses `-SkipSystemInstall -SkipAudioHardware`; it verifies compiled plugin discovery, hosting, DSP and fault isolation without installing into the system VST3 directory or requiring a physical audio device. Interactive GUI and actual workstation playback still require a Windows machine.
