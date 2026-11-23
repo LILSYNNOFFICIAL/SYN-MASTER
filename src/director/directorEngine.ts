@@ -2154,37 +2154,70 @@ export async function runAutonomousDirectorLoop(
     );
 
     const postDiagnosis = analyzeTrackIntelligence(post, objective, opts.referenceAnalysis);
-    const baselineTechnicalIds = new Set(
-      plan.diagnosis.findings
-        .filter((finding) => finding.kind === 'technical-problem')
-        .map((finding) => finding.id),
+    const baselineTechnicalFindings = plan.diagnosis.findings.filter(
+      (finding) => finding.kind === 'technical-problem',
     );
+    const baselineTechnicalIds = new Set(baselineTechnicalFindings.map((finding) => finding.id));
+    const baselineTechnicalById = new Map(baselineTechnicalFindings.map((finding) => [finding.id, finding]));
     const introducedTechnicalFindings = postDiagnosis.findings.filter(
       (finding) => finding.kind === 'technical-problem' && !baselineTechnicalIds.has(finding.id),
     );
+    const severityRank = (severity: string) =>
+      severity === 'high' ? 3 : severity === 'moderate' ? 2 : severity === 'low' ? 1 : 0;
+    const worsenedTechnicalFindings = postDiagnosis.findings.filter((finding) => {
+      if (finding.kind !== 'technical-problem') return false;
+      const baselineFinding = baselineTechnicalById.get(finding.id);
+      return Boolean(baselineFinding && severityRank(finding.severity) > severityRank(baselineFinding.severity));
+    });
     const introducedClipping =
       post.clippedSamples > preAnalysis.clippedSamples && post.clippedSamples > 0;
     const bandPhaseRegressed = (['low', 'mid', 'high'] as const).some((band) => {
       const before = preAnalysis.stereoBandCorrelation?.[band];
       const after = post.stereoBandCorrelation?.[band];
-      return typeof before === 'number' && typeof after === 'number' && before >= 0 && after < 0;
+      return typeof before === 'number' && typeof after === 'number' &&
+        after < 0 && (before >= 0 || after < before - 0.25);
     });
     const processingDynamicsRegressed =
       objective.preserveTransients &&
       post.dynamicRangeDb < objective.minDynamicRangeDb &&
       preAnalysis.dynamicRangeDb - post.dynamicRangeDb > 1.0;
+    const transientDetailRegressed =
+      objective.preserveTransients &&
+      ((preAnalysis.transientDensity >= 0.08 &&
+        post.transientDensity < preAnalysis.transientDensity * 0.65) ||
+        post.crestFactorDb < preAnalysis.crestFactorDb - 3.0);
+    const maxAllowedThd =
+      objective.saturationAllowance === 'rich' ? 2.5 :
+      objective.saturationAllowance === 'moderate' ? 1.8 : 1.0;
+    const distortionRegressed =
+      post.thdEstimatePercent > maxAllowedThd &&
+      post.thdEstimatePercent > preAnalysis.thdEstimatePercent + 0.75;
+    const preNoise = preAnalysis.noiseFloorDb ?? -96;
+    const postNoise = post.noiseFloorDb ?? -96;
+    const preNoiseAtTarget = preNoise + (objective.targetLufs - preAnalysis.integratedLufs);
+    const postNoiseAtTarget = postNoise + (objective.targetLufs - post.integratedLufs);
+    const noiseRegressed =
+      preAnalysis.rmsDb - preNoise >= 12 &&
+      post.rmsDb - postNoise >= 12 &&
+      postNoiseAtTarget > preNoiseAtTarget + 1.5 &&
+      (post.rmsDb - postNoise) < (preAnalysis.rmsDb - preNoise) - 1.0;
     const introducedTruePeakBreach =
       post.truePeakDb > objective.maxTruePeakDb + 0.05 &&
       (preAnalysis.truePeakDb <= objective.maxTruePeakDb + 0.05 ||
         post.truePeakDb > preAnalysis.truePeakDb + 0.25);
     const introducedLoudnessOvershoot =
       post.integratedLufs > objective.targetLufs + objective.lufsTolerance + 1.5 &&
-      preAnalysis.integratedLufs <= objective.targetLufs + objective.lufsTolerance + 1.0;
+      (preAnalysis.integratedLufs <= objective.targetLufs + objective.lufsTolerance + 1.0 ||
+        post.integratedLufs > preAnalysis.integratedLufs + 1.0);
     const hardRegressionReasons = [
       ...(introducedClipping ? ['new clipped samples'] : []),
       ...introducedTechnicalFindings.map((finding) => finding.title),
-      ...(bandPhaseRegressed ? ['new frequency-band phase cancellation'] : []),
+      ...worsenedTechnicalFindings.map((finding) => finding.title + ' worsened'),
+      ...(bandPhaseRegressed ? ['new or worsened frequency-band phase cancellation'] : []),
       ...(processingDynamicsRegressed ? ['processing-induced dynamic-range collapse'] : []),
+      ...(transientDetailRegressed ? ['transient detail regression'] : []),
+      ...(distortionRegressed ? ['objective harmonic-distortion regression'] : []),
+      ...(noiseRegressed ? ['level-matched noise-floor regression'] : []),
       ...(introducedTruePeakBreach ? ['new objective true-peak ceiling breach'] : []),
       ...(introducedLoudnessOvershoot ? ['new loudness overshoot'] : []),
     ];
