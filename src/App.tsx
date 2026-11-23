@@ -1858,7 +1858,8 @@ export default function App() {
           oggBitrateKbps: String(exportConfig.oggBitrateKbps ?? 192),
           aacBitrateKbps: String(exportConfig.aacBitrateKbps ?? 320),
           opusBitrateKbps: String(exportConfig.opusBitrateKbps ?? 192),
-          dither: exportConfig.dither,
+          // A Dither module in the rack already dithered the master: never dither twice.
+          dither: effectiveChain.some((m) => m.type === 'dither' && m.enabled && !m.bypassed) ? 'none' : exportConfig.dither,
           metadataTitle: exportConfig.metadataTitle ?? '',
           metadataArtist: exportConfig.metadataArtist ?? '',
           ceilingDb: String(exportConfig.ceilingDb),

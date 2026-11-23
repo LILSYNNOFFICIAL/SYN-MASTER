@@ -69,7 +69,9 @@ Priority order. Tick as done; note open problems inline.
 - [x] Maximus-style multiband maximizer (`multiband-maximizer`: LR4 3-band split, per-band pre-gain/threshold/ratio/attack/release/post, true-peak master ceiling)
 - [x] Loudness target presets (Spotify / Spotify Loud / Apple / YouTube / Tidal / Amazon / SoundCloud / Club / EBU R128) in `src/dsp/loudnessTargets.ts`, selectable on the Fix-It stage
 - [x] A/B compare (Original vs Master toggle on the Fix-It stage; loudness-matched when the Preferences option is on)
-- [x] Remaining tools exposed in manual mode and controllable by the AI: HPF/LPF and mono-maker templates, multiband crossovers (multiband comp / maximizer), stereo imager, saturation/exciter, de-esser. Dither lives in Export settings (TPDF, off by default)
+- [x] Remaining tools exposed in manual mode and controllable by the AI: HPF/LPF and mono-maker templates, multiband crossovers (multiband comp / maximizer), stereo imager, saturation/exciter, de-esser. Dither is now also a rack module (see below) besides Export settings
+
+- [x] Dither module in the rack (`dither`: 16/20/24-bit, TPDF / high-passed TPDF / noise-shaped, auto-blank silence, fixed-seed so renders stay deterministic; `applyDither` in `src/dsp/extraProcessors.ts`). In the "Add module" dropdown under Loudness ("Dither", "Dither 16-bit (CD)"); keep it last. Export skips its own dither when an active Dither module is in the chain. AI schema + inventory updated.
 
 ### Verification bug: root cause (fixed)
 Four problems combined so that "FIX ALL & VERIFY" could say a track was mastered when it was not:

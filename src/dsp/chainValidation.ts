@@ -12,6 +12,7 @@ import type {
   MultibandMaximizerParams,
   TransientShaperParams,
   ClipperParams,
+  DitherParams,
   MultibandCompParams,
   ParametricEQParams,
   ProcessorModule,
@@ -40,6 +41,7 @@ export const PROCESSOR_DEFAULT_NAMES: Record<ProcessorType, string> = {
   'transient-shaper': 'Transient Shaper',
   clipper: 'Peak Clipper',
   'multiband-maximizer': 'Multiband Maximizer (Maximus-style)',
+  dither: 'Dither',
   'external-vst3': 'External VST3 Plugin',
 };
 
@@ -144,6 +146,8 @@ export function createDefaultParams(type: ProcessorType): ProcessorModule['param
       } satisfies MaximizerParams;
     case 'transient-shaper':
       return { attackDb: 2, sustainDb: 0, speedMs: 15, lowCutHz: 80 } satisfies TransientShaperParams;
+    case 'dither':
+      return { bitDepth: 24, shape: 'tpdf', autoBlank: true } satisfies DitherParams;
     case 'clipper':
       return { ceilingDb: -0.8, driveDb: 1.5, softness: 60, oversampling: 4 } satisfies ClipperParams;
     case 'multiband-maximizer':
@@ -381,6 +385,16 @@ export function validateProcessorParams(
         lowCutHz: clamp(Number(src.lowCutHz), 20, 300, def.lowCutHz),
       };
     }
+    case 'dither': {
+      const def = defaults as DitherParams;
+      const bd = Number(src.bitDepth);
+      const shape = src.shape;
+      return {
+        bitDepth: bd === 16 || bd === 20 || bd === 24 ? bd : def.bitDepth,
+        shape: shape === 'tpdf' || shape === 'tpdf-hp' || shape === 'shaped' ? shape : def.shape,
+        autoBlank: typeof src.autoBlank === 'boolean' ? src.autoBlank : def.autoBlank,
+      };
+    }
     case 'clipper': {
       const def = defaults as ClipperParams;
       const os = Number(src.oversampling);
@@ -476,6 +490,7 @@ const VALID_TYPES = new Set<ProcessorType>([
   'transient-shaper',
   'clipper',
   'multiband-maximizer',
+  'dither',
   'external-vst3',
 ]);
 

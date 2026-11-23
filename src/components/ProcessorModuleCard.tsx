@@ -23,6 +23,7 @@ import type {
   SaturationParams,
   TransientShaperParams,
   ClipperParams,
+  DitherParams,
   MultibandMaximizerParams,
   MultibandMaximizerBand,
   StereoImagerParams,
@@ -268,6 +269,8 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                 'Oversampled peak clipper that shaves transients before the limiter.'}
               {module.type === 'multiband-maximizer' &&
                 'Maximus-style 3-band maximizer: per-band drive and compression into a true-peak ceiling.'}
+              {module.type === 'dither' &&
+                'Quantizes the master to 16/20/24 bit with TPDF or noise-shaped dither. Keep it last in the chain.'}
               {module.type === 'external-vst3' &&
                 'Processes audio through an isolated out-of-process Windows VST3 plugin worker.'}
             </p>
@@ -1151,6 +1154,28 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                 <RotaryKnob label="Sustain" value={p.sustainDb} min={-12} max={12} step={0.1} defaultValue={0} unit="dB" size="sm" onChange={(v) => setParam<TransientShaperParams>({ sustainDb: v })} />
                 <RotaryKnob label="Speed" value={p.speedMs} min={2} max={60} step={1} defaultValue={15} unit="ms" size="sm" onChange={(v) => setParam<TransientShaperParams>({ speedMs: v })} />
                 <RotaryKnob label="Detector HPF" value={p.lowCutHz} min={20} max={300} step={1} defaultValue={80} unit="Hz" size="sm" scale="logarithmic" onChange={(v) => setParam<TransientShaperParams>({ lowCutHz: v })} />
+              </div>
+            );
+          })()}
+
+          {module.type === 'dither' && (() => {
+            const p = module.params as DitherParams;
+            return (
+              <div className="flex flex-col gap-2.5">
+                <label className="flex items-center justify-between gap-2 text-[11px] text-[#9CA3AF]">
+                  <span>Bit depth</span>
+                  <select aria-label="Dither bit depth" value={p.bitDepth} onChange={(e) => setParam<DitherParams>({ bitDepth: Number(e.target.value) as 16 | 20 | 24 })} className="bg-[#161923] border border-[#2D3343] rounded px-2 py-1 text-xs text-[#F7F8FA]">
+                    <option value={16}>16-bit</option><option value={20}>20-bit</option><option value={24}>24-bit</option>
+                  </select>
+                </label>
+                <label className="flex items-center justify-between gap-2 text-[11px] text-[#9CA3AF]">
+                  <span>Shape</span>
+                  <select aria-label="Dither shape" value={p.shape} onChange={(e) => setParam<DitherParams>({ shape: e.target.value as DitherParams['shape'] })} className="bg-[#161923] border border-[#2D3343] rounded px-2 py-1 text-xs text-[#F7F8FA]">
+                    <option value="tpdf">TPDF (flat)</option><option value="tpdf-hp">TPDF high-passed</option><option value="shaped">Noise-shaped</option>
+                  </select>
+                </label>
+                <ToggleSwitch label="Auto-blank silence" compact checked={p.autoBlank} onChange={(checked) => setParam<DitherParams>({ autoBlank: checked })} />
+                <p className="text-[10px] text-[#8F7D50]">Export skips its own dither when this module is active, so the master is never dithered twice.</p>
               </div>
             );
           })()}

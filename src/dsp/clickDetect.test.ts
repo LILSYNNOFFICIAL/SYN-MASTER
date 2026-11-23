@@ -53,3 +53,26 @@ test('Click detector finds inserted single-sample clicks between hits; de-click 
   }
   assert.equal(changed, 0, `${changed} samples changed away from the clicks`);
 });
+
+test('Dither module quantizes to the chosen word length, deterministically, and blanks digital silence', async () => {
+  const { processChainOffline } = await import('./offlineDsp');
+  const { createProcessorModule } = await import('./chainValidation');
+  const n = SR;
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  for (let i = SR / 2; i < n; i++) { L[i] = 0.3 * Math.sin((2 * Math.PI * 1000 * i) / SR); R[i] = L[i]; }
+  const dither = createProcessorModule('dither');
+  dither.params = { bitDepth: 16, shape: 'shaped', autoBlank: true };
+  const a = processChainOffline([L, R], SR, [dither]).channels;
+  const b = processChainOffline([L, R], SR, [dither]).channels;
+  const q = 1 / 32768;
+  for (let i = 0; i < n; i += 97) {
+    assert.ok(Math.abs(a[0][i] / q - Math.round(a[0][i] / q)) < 1e-6, 'sample on the 16-bit grid');
+    assert.equal(a[0][i], b[0][i], 'deterministic');
+  }
+  for (let i = 0; i < SR / 2; i++) assert.equal(a[0][i], 0, 'silence stays silent');
+  let errSq = 0;
+  for (let i = SR / 2; i < n; i++) errSq += (a[0][i] - L[i]) ** 2;
+  const errDb = 10 * Math.log10(errSq / (n / 2));
+  assert.ok(errDb < -80 && errDb > -110, `dither/requantization noise ${errDb.toFixed(1)} dBFS`);
+});

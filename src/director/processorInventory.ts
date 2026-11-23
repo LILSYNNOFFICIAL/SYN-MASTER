@@ -214,6 +214,19 @@ export const VERIFIED_NATIVE_PROCESSOR_INVENTORY: Record<
       oversampling: { options: ['1', '2', '4'], defaultValue: 4 },
     },
   },
+  dither: {
+    type: 'dither',
+    displayName: PROCESSOR_DEFAULT_NAMES.dither,
+    role: 'limiting',
+    realtimeSupported: false,
+    offlineSupported: true,
+    maxRecommendedInstances: 1,
+    parameters: {
+      bitDepth: { options: ['16', '20', '24'], defaultValue: 24 },
+      shape: { options: ['tpdf', 'tpdf-hp', 'shaped'], defaultValue: 'tpdf' },
+      autoBlank: { options: ['true', 'false'], defaultValue: 'true' },
+    },
+  },
   'multiband-maximizer': {
     type: 'multiband-maximizer',
     displayName: PROCESSOR_DEFAULT_NAMES['multiband-maximizer'],

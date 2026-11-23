@@ -95,6 +95,16 @@ export const MODULE_CATALOG: CatalogItem[] = [
     build: () => mk('multiband-maximizer', 'Multiband Maximizer'),
   },
   {
+    id: 'dither', label: 'Dither', category: 'Loudness', type: 'dither',
+    description: 'TPDF / noise-shaped dither to 16, 20 or 24 bit. Put it last in the chain',
+    build: () => mk('dither', 'Dither'),
+  },
+  {
+    id: 'dither-16', label: 'Dither 16-bit (CD)', category: 'Loudness', type: 'dither',
+    description: 'Noise-shaped dither for 16-bit delivery. Put it last in the chain',
+    build: () => mk('dither', 'Dither 16-bit', { bitDepth: 16, shape: 'shaped', autoBlank: true }),
+  },
+  {
     id: 'imager', label: 'Stereo imager', category: 'Stereo', type: 'stereo-imager',
     description: '3-band width, mono bass, L/R balance',
     build: () => mk('stereo-imager', 'Stereo Imager'),

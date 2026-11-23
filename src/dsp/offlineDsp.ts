@@ -1,5 +1,5 @@
 import { applyFadesInPlace, hasFades, type FadeSettings } from './fades';
-import { applyClipper, applyTransientShaper } from './extraProcessors';
+import { applyClipper, applyDither, applyTransientShaper } from './extraProcessors';
 import { applyRepair } from './repair';
 import type {
   BassEnhancerParams,
@@ -9,6 +9,7 @@ import type {
   LimiterParams,
   MaximizerParams,
   TransientShaperParams,
+  DitherParams,
   ClipperParams,
   MultibandMaximizerParams,
   MultibandBandParams,
@@ -1279,6 +1280,10 @@ export function processChainOffline(
         break;
       case 'multiband-maximizer':
         grDb = applyMultibandMaximizer(left, right, mod.params as MultibandMaximizerParams, sampleRate, intensityScale);
+        break;
+      case 'dither':
+        // Telemetry: no gain reduction; the dither level is not a GR value.
+        applyDither(left, right, mod.params as DitherParams, intensityScale);
         break;
     }
 

@@ -2,8 +2,9 @@
  * Extra mastering processors (offline, deterministic, in place):
  *  - Transient shaper (SPL-style differential envelope: attack / sustain)
  *  - Peak clipper (oversampled hard/soft-knee clipper with drive and ceiling)
+ *  - Dither (TPDF / high-passed TPDF / noise-shaped, 16/20/24-bit)
  */
-import type { ClipperParams, TransientShaperParams } from '../types/mastering';
+import type { ClipperParams, DitherParams, TransientShaperParams } from '../types/mastering';
 import { createBiquadState, designHighPass, processBiquadSample } from './biquad';
 
 const dbToLin = (db: number) => Math.pow(10, db / 20);
@@ -95,4 +96,55 @@ export function applyClipper(
     right[i] = outR;
   }
   return Number(maxGr.toFixed(2));
+}
+
+/**
+ * Dither: quantizes the master to `bitDepth` with TPDF dither (two uniform variables, ±1 LSB),
+ * optionally high-passed (difference of successive uniforms, less audible LF hiss) or with
+ * first-order error-feedback noise shaping (pushes the requantization noise up the spectrum).
+ * A fixed-seed generator keeps renders deterministic, so the Fix-All loop can re-measure.
+ * Belongs LAST in the chain. Returns the RMS dither level in dBFS (for telemetry).
+ */
+export function applyDither(
+  left: Float32Array,
+  right: Float32Array,
+  p: DitherParams,
+  intensity: number,
+): number {
+  if (intensity <= 0) return -144;
+  const q = Math.pow(2, -(p.bitDepth - 1)); // 1 LSB at full scale = 1.0
+  let seed = 0x5eed1234;
+  const rnd = () => {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    return ((seed >>> 0) / 4294967296);
+  };
+  const silence = q * 0.5;
+  const process = (ch: Float32Array) => {
+    let prevU = rnd();
+    let err = 0;
+    for (let i = 0; i < ch.length; i++) {
+      const x = ch[i];
+      if (p.autoBlank && Math.abs(x) < silence) {
+        ch[i] = 0;
+        err = 0;
+        continue;
+      }
+      let d: number;
+      if (p.shape === 'tpdf-hp') {
+        const u = rnd();
+        d = (u - prevU) * q;
+        prevU = u;
+      } else {
+        d = (rnd() - rnd()) * q;
+      }
+      const target = p.shape === 'shaped' ? x - err : x;
+      const y = Math.round((target + d * intensity) / q) * q;
+      if (p.shape === 'shaped') err = y - target;
+      ch[i] = Math.max(-1, Math.min(1 - q, y));
+    }
+  };
+  process(left);
+  if (right !== left) process(right);
+  // TPDF dither RMS = q / sqrt(6)
+  return Number((20 * Math.log10(q / Math.sqrt(6))).toFixed(1));
 }

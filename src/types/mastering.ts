@@ -12,6 +12,7 @@ export type ProcessorType =
   | 'transient-shaper'
   | 'clipper'
   | 'multiband-maximizer'
+  | 'dither'
   | 'external-vst3';
 
 export type MasteringMode =
@@ -164,6 +165,12 @@ export interface ClipperParams {
   oversampling: 1 | 2 | 4;
 }
 
+export interface DitherParams {
+  bitDepth: 16 | 20 | 24; // word length the master is quantized to
+  shape: 'tpdf' | 'tpdf-hp' | 'shaped'; // flat TPDF, high-passed TPDF, or TPDF + error-feedback noise shaping
+  autoBlank: boolean; // no dither in digital silence (keeps fades/edges clean)
+}
+
 export interface MultibandMaximizerBand {
   preGainDb: number; // -6 to +12 (Maximus "pre")
   thresholdDb: number; // -36 to 0
@@ -236,6 +243,7 @@ export type ProcessorParams =
   | { type: 'transient-shaper'; data: TransientShaperParams }
   | { type: 'clipper'; data: ClipperParams }
   | { type: 'multiband-maximizer'; data: MultibandMaximizerParams }
+  | { type: 'dither'; data: DitherParams }
   | { type: 'external-vst3'; data: ExternalVST3Params };
 
 export interface ProcessorModule {
