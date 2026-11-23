@@ -2117,9 +2117,38 @@ export async function runAutonomousDirectorLoop(
       opts.referenceAnalysis,
     );
 
+    const postDiagnosis = analyzeTrackIntelligence(post, objective, opts.referenceAnalysis);
+    const baselineTechnicalIds = new Set(
+      plan.diagnosis.findings
+        .filter((finding) => finding.kind === 'technical-problem')
+        .map((finding) => finding.id),
+    );
+    const introducedTechnicalFindings = postDiagnosis.findings.filter(
+      (finding) => finding.kind === 'technical-problem' && !baselineTechnicalIds.has(finding.id),
+    );
     const introducedClipping =
-      post.clippedSamples > bestCheckpoint.analysis.clippedSamples && post.clippedSamples > 0;
-    const isFirstValid = bestCheckpoint.passNumber === 0 && !introducedClipping;
+      post.clippedSamples > preAnalysis.clippedSamples && post.clippedSamples > 0;
+    const bandPhaseRegressed = (['low', 'mid', 'high'] as const).some((band) => {
+      const before = preAnalysis.stereoBandCorrelation?.[band];
+      const after = post.stereoBandCorrelation?.[band];
+      return typeof before === 'number' && typeof after === 'number' && before >= 0 && after < 0;
+    });
+    const processingDynamicsRegressed =
+      objective.preserveTransients &&
+      post.dynamicRangeDb < objective.minDynamicRangeDb &&
+      preAnalysis.dynamicRangeDb - post.dynamicRangeDb > 1.0;
+    const introducedLoudnessOvershoot =
+      post.integratedLufs > objective.targetLufs + objective.lufsTolerance + 1.5 &&
+      preAnalysis.integratedLufs <= objective.targetLufs + objective.lufsTolerance + 1.0;
+    const hardRegressionReasons = [
+      ...(introducedClipping ? ['new clipped samples'] : []),
+      ...introducedTechnicalFindings.map((finding) => finding.title),
+      ...(bandPhaseRegressed ? ['new frequency-band phase cancellation'] : []),
+      ...(processingDynamicsRegressed ? ['processing-induced dynamic-range collapse'] : []),
+      ...(introducedLoudnessOvershoot ? ['new loudness overshoot'] : []),
+    ];
+    const hardRegression = hardRegressionReasons.length > 0;
+    const isFirstValid = bestCheckpoint.passNumber === 0 && !hardRegression;
     // Mud progress counts as improvement even when the Fit Index does not move, as long
     // as the overall fit holds; otherwise every low-mid refinement pass is rolled back.
     const mudVsMid = (a: AudioAnalysis) => {
@@ -2127,13 +2156,14 @@ export async function runAutonomousDirectorLoop(
       return region !== null ? region - a.zoneEnergyDb.mid : a.zoneEnergyDb.lowMid - a.zoneEnergyDb.mid;
     };
     const mudProgress =
+      !hardRegression &&
       !isFirstValid &&
       bestCheckpoint.passNumber > 0 &&
       mudVsMid(post) <= mudVsMid(bestCheckpoint.analysis) - 0.1 &&
       multiObjective.engineeringFitIndex >= bestCheckpoint.multiObjective.engineeringFitIndex - 0.5 &&
       qcReport.failCount <= bestCheckpoint.qcReport.failCount;
     const improved =
-      !introducedClipping &&
+      !hardRegression &&
       (isFirstValid ||
         mudProgress ||
         multiObjective.engineeringFitIndex > bestCheckpoint.multiObjective.engineeringFitIndex + 0.05 ||
@@ -2153,6 +2183,7 @@ export async function runAutonomousDirectorLoop(
       iterationSummary: {
         activeProcessor: workingChain.map((m) => m.name).slice(0, 3).join(' + ') || 'Dry Pass',
         detectedIssue:
+          hardRegressionReasons[0] ??
           multiObjective.limitingFactors[0] ??
           (qcReport.overallStatus === 'pass' ? 'Within target tolerances' : 'Fine calibration'),
         measuredValue: `${post.integratedLufs.toFixed(1)} LUFS · ${post.truePeakDb.toFixed(2)} dBTP · DR ${post.dynamicRangeDb.toFixed(1)} dB`,
@@ -2183,7 +2214,10 @@ export async function runAutonomousDirectorLoop(
 
     if (improved) {
       bestCheckpoint = cp;
-    } else if (pass > 1) {
+    } else if (hardRegression || pass > 1) {
+      const rejectionDetail = hardRegressionReasons.length > 0
+        ? 'Regression guard rejected: ' + hardRegressionReasons.join('; ')
+        : `Fit ${multiObjective.engineeringFitIndex.toFixed(1)} did not improve over ${bestCheckpoint.multiObjective.engineeringFitIndex.toFixed(1)}`;
       emit(
         'Validating',
         pass,
@@ -2191,7 +2225,7 @@ export async function runAutonomousDirectorLoop(
           pass,
           'rollback',
           'warning',
-          `Pass ${pass} did not improve over Pass ${bestCheckpoint.passNumber} (Fit ${multiObjective.engineeringFitIndex.toFixed(1)} vs ${bestCheckpoint.multiObjective.engineeringFitIndex.toFixed(1)}); retaining Pass ${bestCheckpoint.passNumber} as best checkpoint.`,
+          `Pass ${pass} was not retained. ${rejectionDetail}; keeping Pass ${bestCheckpoint.passNumber}.`,
         ),
         undefined,
         undefined,
@@ -2214,9 +2248,7 @@ export async function runAutonomousDirectorLoop(
     // Loudness and QC alone are not convergence: a measured low-mid masking finding that
     // the refinement step can still act on keeps the loop going (bounded by maxIterations
     // and the -4 dB refinement cap, after which no further commands are derived).
-    const mudStillOpen = analyzeTrackIntelligence(post, objective, opts.referenceAnalysis).findings.some(
-      (f) => f.id === 'diag-mud',
-    );
+    const mudStillOpen = postDiagnosis.findings.some((f) => f.id === 'diag-mud');
     if (lufsOk && tpOk && !mudStillOpen && qcReport.overallStatus === 'pass' && multiObjective.engineeringFitIndex >= 90) {
       if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
       finalStatus = 'converged';
@@ -2354,10 +2386,12 @@ export async function runAutonomousDirectorLoop(
 
   // Final rollback safeguard if final checkpoint wasn't the best
   const lastExecuted = checkpoints[checkpoints.length - 1];
-  if (lastExecuted && bestCheckpoint.passNumber !== lastExecuted.passNumber && bestCheckpoint.passNumber > 0) {
+  if (lastExecuted && bestCheckpoint.passNumber !== lastExecuted.passNumber) {
     rolledBack = true;
     if (finalStatus === 'completed') finalStatus = 'rolled-back';
-    stopReason = `Automatically rolled back to best verified Pass ${bestCheckpoint.passNumber} (Fit ${bestCheckpoint.multiObjective.engineeringFitIndex.toFixed(1)}/100).`;
+    stopReason = bestCheckpoint.passNumber === 0
+      ? 'All processing passes failed regression guards or quality comparisons; restored the untouched source baseline.'
+      : `Automatically rolled back to best verified Pass ${bestCheckpoint.passNumber} (Fit ${bestCheckpoint.multiObjective.engineeringFitIndex.toFixed(1)}/100).`;
     emit(
       'Validating',
       bestCheckpoint.passNumber,
