@@ -1439,7 +1439,13 @@ export function deriveRefinementCommands(
         highWidth: number;
         monoBassBelowHz: number;
         lrBalanceDb: number;
+        intensity?: number;
       };
+      const imagerIntensityScale = Math.max(0.15, Math.min(1, (ip.intensity ?? 100) / 100));
+      const correctedLrBalance = Math.max(
+        -6,
+        Math.min(6, ip.lrBalanceDb - (post.lrBalanceDb * 0.9) / imagerIntensityScale),
+      );
       commands.push({
         op: 'configure',
         targetId: imgMod.id,
@@ -1449,9 +1455,7 @@ export function deriveRefinementCommands(
           midWidth: midPhaseRisk ? reducedWidth(ip.midWidth, 70) : ip.midWidth,
           highWidth: highPhaseRisk ? reducedWidth(ip.highWidth, 70) : ip.highWidth,
           monoBassBelowHz: lowPhaseRisk ? Math.min(140, Math.max(95, ip.monoBassBelowHz + 15)) : ip.monoBassBelowHz,
-          lrBalanceDb: lrBalanceRisk
-            ? Number((ip.lrBalanceDb - post.lrBalanceDb * 0.7).toFixed(2))
-            : ip.lrBalanceDb,
+          lrBalanceDb: lrBalanceRisk ? Number(correctedLrBalance.toFixed(2)) : ip.lrBalanceDb,
         },
         rationale: 'Reduce width only in phase-risk band(s) ' + (affectedBands.join(', ') || 'none') + ' and correct measured L/R balance.',
       });
@@ -2248,6 +2252,10 @@ export async function runAutonomousDirectorLoop(
       bestCheckpoint.multiObjective.dimensions.map((dimension) => [dimension.key, dimension.score] as const),
     );
     const severeDimensionRegressions = multiObjective.dimensions.filter((dimension) => {
+      // Processing restraint is a preference/effort dimension, not a technical failure.
+      // Actual damage is guarded independently by transient, dynamics, THD, noise, phase,
+      // clipping, true-peak, and loudness regression checks above.
+      if (dimension.key === 'processingRestraint') return false;
       const previousScore = previousDimensionScores.get(dimension.key);
       return previousScore !== undefined && previousScore - dimension.score > 15;
     });
