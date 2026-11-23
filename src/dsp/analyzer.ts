@@ -1,4 +1,5 @@
 import { detectClicks } from './clickDetect';
+import { measureShimmer } from './shimmerDetect';
 import type { AudioAnalysis, ResonancePeak, SpectralBandEnergy } from '../types/mastering';
 import { SPECTRAL_ZONES_HZ } from './bandMap';
 import { BiquadCoeffs, designHighPass, designHighShelf, designLowPass, processBiquadBuffer } from './biquad';
@@ -839,6 +840,7 @@ export function analyzeAudioBuffer(
     thdEstimatePercent,
     noiseFloorDb,
     noiseFloorHfRatio,
+    shimmer: numChannels > 1 ? measureShimmer(left, right, sampleRate) : undefined,
     dcOffset: Number(dcOffset.toFixed(5)),
     loudnessHistoryLufs,
     clickCount: clicks.clickCount,

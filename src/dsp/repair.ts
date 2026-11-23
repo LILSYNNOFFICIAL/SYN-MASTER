@@ -10,7 +10,7 @@
  * Everything runs offline on Float32Array buffers in place and is deterministic, so
  * the Fix-All loop can re-render and re-measure the result.
  */
-import { createBiquadState, designHighPass, processBiquadSample } from './biquad';
+import { createBiquadState, designHighPass, designLowPass, processBiquadSample } from './biquad';
 import { findEdgeClick, isIsolatedClick } from './clickDetect';
 
 export interface RepairSettings {
@@ -146,19 +146,23 @@ export function repairSpikesChannel(ch: Float32Array): number {
 }
 
 /**
- * Dynamic high-band attenuation for AI shimmer. Splits the 9 kHz+ band; where its fast
- * envelope jumps above its slow envelope (swirly, phasey bursts) the band is pulled down.
- * The side channel gets the full amount, the mid channel half, so vocals keep their air.
+ * Dynamic high-band attenuation for AI shimmer. Splits mid and side at 9 kHz with a
+ * Linkwitz-Riley (LR4) crossover, whose low and high outputs sum back to a flat
+ * magnitude, and scales only the high band: where its fast envelope jumps above its slow
+ * envelope (swirly, phasey bursts) the band is pulled down. The side channel gets the
+ * full amount, the mid channel half, so vocals keep their air.
+ *
+ * Earlier versions subtracted a phase-shifted high-pass from the dry signal, which did
+ * not attenuate 10-16 kHz at all (measured: side HF energy unchanged or slightly up).
  */
 export function reduceShimmer(left: Float32Array, right: Float32Array, sampleRate: number, amount: number): number {
   const amt = Math.max(0, Math.min(1, amount));
   if (amt <= 0) return 0;
   const cutoff = Math.min(9000, sampleRate * 0.4);
-  const hp = designHighPass(cutoff, 0.707, sampleRate);
-  const sM1 = createBiquadState();
-  const sM2 = createBiquadState();
-  const sS1 = createBiquadState();
-  const sS2 = createBiquadState();
+  const hp = designHighPass(cutoff, Math.SQRT1_2, sampleRate);
+  const lp = designLowPass(cutoff, Math.SQRT1_2, sampleRate);
+  const st = () => [createBiquadState(), createBiquadState()] as const;
+  const [mH1, mH2] = st(), [mL1, mL2] = st(), [sH1, sH2] = st(), [sL1, sL2] = st();
   const aFast = 1 - Math.exp(-1 / (sampleRate * 0.002));
   const aSlow = 1 - Math.exp(-1 / (sampleRate * 0.08));
   let fastM = 0, slowM = 0, fastS = 0, slowS = 0;
@@ -166,8 +170,10 @@ export function reduceShimmer(left: Float32Array, right: Float32Array, sampleRat
   for (let i = 0; i < left.length; i++) {
     const m = 0.5 * (left[i] + right[i]);
     const s = 0.5 * (left[i] - right[i]);
-    const hm = processBiquadSample(processBiquadSample(m, hp, sM1), hp, sM2);
-    const hs = processBiquadSample(processBiquadSample(s, hp, sS1), hp, sS2);
+    const hm = processBiquadSample(processBiquadSample(m, hp, mH1), hp, mH2);
+    const lm = processBiquadSample(processBiquadSample(m, lp, mL1), lp, mL2);
+    const hs = processBiquadSample(processBiquadSample(s, hp, sH1), hp, sH2);
+    const ls = processBiquadSample(processBiquadSample(s, lp, sL1), lp, sL2);
     fastM += aFast * (Math.abs(hm) - fastM);
     slowM += aSlow * (Math.abs(hm) - slowM);
     fastS += aFast * (Math.abs(hs) - fastS);
@@ -176,10 +182,11 @@ export function reduceShimmer(left: Float32Array, right: Float32Array, sampleRat
     const exM = slowM > 1e-6 ? Math.max(0, Math.min(1, fastM / slowM - 1.3)) : 0;
     const exS = slowS > 1e-6 ? Math.max(0, Math.min(1, fastS / slowS - 1.1)) : 0;
     // Static floor reduction on side HF plus dynamic reduction on bursts.
-    const gS = 1 - amt * (0.25 + 0.6 * exS);
-    const gM = 1 - amt * 0.5 * (0.6 * exM);
-    const newM = m - hm * (1 - gM);
-    const newS = s - hs * (1 - gS);
+    const gS = 1 - amt * (0.5 + 0.45 * exS);
+    const gM = 1 - amt * 0.5 * (0.1 + 0.5 * exM);
+    // An LR4 low-pass + high-pass pair sums to an all-pass (flat magnitude).
+    const newM = lm + hm * gM;
+    const newS = ls + hs * gS;
     left[i] = newM + newS;
     right[i] = newM - newS;
     const gr = -20 * Math.log10(Math.max(1e-4, Math.min(gM, gS)));

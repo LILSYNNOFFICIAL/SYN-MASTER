@@ -310,6 +310,15 @@ export interface AudioAnalysis {
   clickTimesSec?: number[];
   /** HF share of the quietest frames (≈2 white noise, >0.3 hiss, <0.1 quiet music). */
   noiseFloorHfRatio?: number;
+  /** Measured AI-shimmer cues (src/dsp/shimmerDetect.ts); confidence >= 0.6 enables auto de-shimmer. */
+  shimmer?: {
+    score: number;
+    confidence: number;
+    sideHfRatio: number;
+    fluxRatio: number;
+    tonality: number;
+    hfShareDb: number;
+  };
   /** Click in the first / last ~3 ms of the file (clickDetect edge test). */
   clickAtStart?: boolean;
   clickAtEnd?: boolean;

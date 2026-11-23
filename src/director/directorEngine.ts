@@ -1,4 +1,7 @@
 import { isNoiseLikeFloor } from '../dsp/analyzer';
+
+/** Shimmer detection confidence at which the deterministic engine enables de-shimmer. */
+export const SHIMMER_AUTO_CONFIDENCE = 0.6;
 import type { FadeSettings } from '../dsp/fades';
 import { evaluateMasterTargets, type MasterTargetGate } from './masterTargets';
 import type { RestoreParams } from '../types/mastering';
@@ -357,8 +360,13 @@ export function buildExplainableMasterPlan(input: {
   // Stage 1: SYN-Restore ONLY if genuine DC offset, elevated quiet-frame noise floor, or strong sibilance/resonance exists
   const hasGenuineNoiseFloor = nf > -48 && analysis.rmsDb - nf >= 12 && isNoiseLikeFloor(analysis);
   const baselineClicks = analysis.clickCount ?? 0;
+  // Measured AI shimmer (src/dsp/shimmerDetect.ts): only a confident detection (all cues
+  // agree and there is enough HF to judge) switches de-shimmer on automatically.
+  const shimmerConfidence = analysis.shimmer?.confidence ?? 0;
+  const autoDeShimmer = shimmerConfidence >= SHIMMER_AUTO_CONFIDENCE ? Math.round(30 + 50 * Math.min(1, (shimmerConfidence - SHIMMER_AUTO_CONFIDENCE) / (1 - SHIMMER_AUTO_CONFIDENCE))) : 0;
   const needsRestore =
     baselineClicks > 0 ||
+    autoDeShimmer > 0 ||
     analysis.dcOffset >= 0.004 ||
     hasGenuineNoiseFloor ||
     (analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 && analysis.resonances.some((r) => r.freqHz > 4500));
@@ -378,7 +386,7 @@ export function buildExplainableMasterPlan(input: {
       declick: baselineClicks > 0 ? Math.min(85, 45 + baselineClicks * 2) : 0,
       decrackle: baselineClicks > 20 ? 35 : baselineClicks > 0 ? 15 : 0,
       spikeRepair: baselineClicks > 0,
-      deShimmer: 0,
+      deShimmer: autoDeShimmer,
     };
     recommendations.push({
       id: 'rec-restore',
@@ -390,10 +398,11 @@ export function buildExplainableMasterPlan(input: {
         `Noise Floor: ${nf.toFixed(1)} dBFS`,
         `DC Offset: ${(analysis.dcOffset * 100).toFixed(3)}%`,
         `Presence Energy: ${analysis.zoneEnergyDb.presence.toFixed(1)} dB`,
+        ...(analysis.shimmer ? [`AI shimmer confidence: ${analysis.shimmer.confidence.toFixed(2)} (auto de-shimmer at ≥ ${SHIMMER_AUTO_CONFIDENCE})`] : []),
       ],
       proposedCorrection: 'Engage conservative pre-master cleanup prior to tonal EQ & compression.',
       selectedProcessor: 'restore',
-      proposedParamsSummary: `${baselineClicks > 0 ? `De-click=${restoreParams.declick}% (${baselineClicks} clicks), ` : ''}DC=${restoreParams.dcOffset ? 'ON' : 'OFF'}, Hiss=${restoreParams.hissReduction}%, De-Ess=${restoreParams.deEssAmount}% @ 6.8kHz (Conservative)`,
+      proposedParamsSummary: `${baselineClicks > 0 ? `De-click=${restoreParams.declick}% (${baselineClicks} clicks), ` : ''}${autoDeShimmer > 0 ? `De-shimmer=${autoDeShimmer}%, ` : ''}DC=${restoreParams.dcOffset ? 'ON' : 'OFF'}, Hiss=${restoreParams.hissReduction}%, De-Ess=${restoreParams.deEssAmount}% @ 6.8kHz (Conservative)`,
       commands: [
         {
           op: 'add',

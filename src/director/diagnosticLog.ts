@@ -208,21 +208,39 @@ export function buildDiagnosticLog(input: {
     });
   }
 
-  // AI shimmer / metallic artifacts: heuristic, labelled as such.
-  const hiCorr = source.stereoBandCorrelation?.high;
-  const air = source.zoneEnergyDb.air - source.zoneEnergyDb.mid;
-  if (typeof hiCorr === 'number' && hiCorr < 0.55 && air > -18) {
+  // AI shimmer / metallic artifacts: measured (src/dsp/shimmerDetect.ts). Older analyses
+  // without the measurement fall back to the high-band correlation heuristic.
+  const sh = source.shimmer;
+  if (sh && sh.score >= 0.35) {
+    const msh = master?.shimmer;
+    const reducedDb = msh && sh.sideHfRatio > 0 && msh.sideHfRatio > 0 ? 10 * Math.log10(msh.sideHfRatio / sh.sideHfRatio) : null;
     entries.push({
       id: 'ai-shimmer',
-      issue: 'Possible AI shimmer / metallic high-end (heuristic)',
+      issue: sh.confidence >= 0.6 ? 'AI shimmer / metallic high-end (measured, confident)' : 'Possible AI shimmer / metallic high-end (measured, low confidence)',
       category: 'Artifacts',
-      severity: hiCorr < 0.3 ? 'moderate' : 'low',
-      measured: `High-band correlation ${hiCorr.toFixed(2)}, air ${air.toFixed(1)} dB vs mid`,
-      target: 'Listen: swirly / phasey cymbals and vocal air',
-      tools: ['restore', 'stereo-imager'],
-      settings: [...settingsFor(chain, ['restore']), 'Suggested: SYN-Restore deShimmer 30–50%'],
-      status: 'advisory',
+      severity: sh.confidence >= 0.6 ? 'moderate' : 'low',
+      measured: `confidence ${sh.confidence.toFixed(2)} · side/mid 9-16 kHz ${sh.sideHfRatio.toFixed(2)} · side independence ${sh.fluxRatio.toFixed(2)} · tonality ${sh.tonality.toFixed(2)}`,
+      target: 'confidence < 0.60, or side HF reduced ≥ 1 dB after de-shimmer',
+      tools: ['restore'],
+      settings: [...settingsFor(chain, ['restore']), sh.confidence >= 0.6 ? 'Auto: SYN-Restore deShimmer on (30–80% by confidence)' : 'Suggested if audible: SYN-Restore deShimmer 30–50%'],
+      status: master ? (reducedDb !== null && reducedDb <= -1 ? 'fixed' : 'advisory') : 'open',
     });
+  } else if (!sh) {
+    const hiCorr = source.stereoBandCorrelation?.high;
+    const air = source.zoneEnergyDb.air - source.zoneEnergyDb.mid;
+    if (typeof hiCorr === 'number' && hiCorr < 0.55 && air > -18) {
+      entries.push({
+        id: 'ai-shimmer',
+        issue: 'Possible AI shimmer / metallic high-end (heuristic)',
+        category: 'Artifacts',
+        severity: hiCorr < 0.3 ? 'moderate' : 'low',
+        measured: `High-band correlation ${hiCorr.toFixed(2)}, air ${air.toFixed(1)} dB vs mid`,
+        target: 'Listen: swirly / phasey cymbals and vocal air',
+        tools: ['restore', 'stereo-imager'],
+        settings: [...settingsFor(chain, ['restore']), 'Suggested: SYN-Restore deShimmer 30–50%'],
+        status: 'advisory',
+      });
+    }
   }
 
   // Low end

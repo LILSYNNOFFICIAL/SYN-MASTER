@@ -26,7 +26,8 @@ export interface MasterTargetCheck {
     | 'low-end-phase'
     | 'lra'
     | 'crest'
-    | 'spectral-balance';
+    | 'spectral-balance'
+    | 'shimmer';
   label: string;
   measured: string;
   target: string;
@@ -202,6 +203,22 @@ export function evaluateMasterTargets(
       target: '±4.0 dB per zone (advisory without a reference)',
       status: Math.abs(dev.maxDeviationDb) <= 4 ? 'pass' : 'advisory',
       fix: `Parametric EQ ${dev.worstZone} ${dev.maxDeviationDb > 0 ? 'cut' : 'boost'}`,
+    });
+  }
+
+  // AI shimmer: advisory only (a detection, not a delivery spec). When the source was a
+  // confident detection, the master should have at least 1 dB less side energy at 9-16 kHz.
+  if (pre?.shimmer && pre.shimmer.confidence >= 0.6) {
+    const reducedDb = post.shimmer && pre.shimmer.sideHfRatio > 0 && post.shimmer.sideHfRatio > 0
+      ? 10 * Math.log10(post.shimmer.sideHfRatio / pre.shimmer.sideHfRatio)
+      : 0;
+    checks.push({
+      id: 'shimmer',
+      label: 'AI shimmer (side 9-16 kHz)',
+      measured: `${reducedDb >= 0 ? '+' : ''}${reducedDb.toFixed(1)} dB vs source (detection confidence ${pre.shimmer.confidence.toFixed(2)})`,
+      target: '≤ -1.0 dB vs source (advisory)',
+      status: reducedDb <= -1 ? 'pass' : 'advisory',
+      fix: 'SYN-Restore deShimmer +15%',
     });
   }
 
