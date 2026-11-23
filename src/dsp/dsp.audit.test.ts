@@ -283,6 +283,50 @@ test('AUDIT 5: Bass Enhancer Mono Focus Must Not Narrow 1kHz–10kHz Stereo Spec
   );
 });
 
+test('SYN-Restore reduces steady high-frequency hiss while preserving a brief high-frequency transient', () => {
+  const sr = 48000;
+  const duration = 0.5;
+  const n = Math.round(sr * duration);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  const transientStart = Math.round(sr * 0.25);
+  const transientLength = Math.round(sr * 0.002);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const noise = 0.0015 * Math.sin(2 * Math.PI * 10000 * t);
+    const offset = i - transientStart;
+    const envelope = offset >= 0 && offset < transientLength
+      ? Math.min(1, offset / 24, (transientLength - offset) / 24)
+      : 0;
+    const sample = noise + 0.3 * envelope * Math.sin(2 * Math.PI * 10000 * t);
+    left[i] = sample;
+    right[i] = sample;
+  }
+
+  const restore = createProcessorModule('restore', {
+    params: {
+      dcOffset: false,
+      humRemovalHz: 0,
+      hissReduction: 100,
+      deEssAmount: 0,
+      deEssFreqHz: 6500,
+      resonanceSuppress: 0,
+      mode: 'conservative',
+    },
+  });
+  const output = processChainOffline([left, right], sr, [restore]).channels[0];
+  const noiseIn = measureRmsDb(left, Math.round(sr * 0.08), Math.round(sr * 0.18));
+  const noiseOut = measureRmsDb(output, Math.round(sr * 0.08), Math.round(sr * 0.18));
+  const transientIn = measureRmsDb(left, transientStart, transientStart + transientLength);
+  const transientOut = measureRmsDb(output, transientStart, transientStart + transientLength);
+
+  assert.ok(noiseOut < noiseIn - 2.0, `Expected steady hiss attenuation >2 dB, got ${(noiseOut - noiseIn).toFixed(2)} dB`);
+  assert.ok(
+    transientOut > transientIn - 1.2,
+    `Brief high-frequency transient was over-suppressed by ${(transientIn - transientOut).toFixed(2)} dB`,
+  );
+});
+
 test('AUDIT 6: SYN-Restore Resonance Trim & Hum Removal & DC Offset', () => {
   const sr = 48000;
   const n = sr;
