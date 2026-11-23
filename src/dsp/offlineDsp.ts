@@ -762,8 +762,34 @@ function applyRestore(
     }
 
     peaks.sort((a, b) => b.excess - a.excess);
+    const isHarmonicRelated = (aHz: number, bHz: number): boolean => {
+      const ratio = Math.max(aHz, bHz) / Math.min(aHz, bHz);
+      const harmonicNumber = Math.round(ratio);
+      return harmonicNumber >= 2 &&
+        harmonicNumber <= 8 &&
+        Math.abs(ratio - harmonicNumber) / harmonicNumber <= 0.035;
+    };
+    const harmonicFamily = new Set<number>();
+    for (let i = 0; i < peaks.length; i++) {
+      let relatedPartials = 0;
+      for (let j = 0; j < peaks.length; j++) {
+        if (i === j) continue;
+        const candidate = peaks[i];
+        const related = peaks[j];
+        if (
+          Math.abs(avgDb[candidate.bin] - avgDb[related.bin]) <= 24 &&
+          isHarmonicRelated(candidate.freq, related.freq)
+        ) {
+          relatedPartials++;
+        }
+      }
+      // Require a family of at least three measured partials. A lone octave relationship
+      // is not enough evidence to suppress a genuine narrow resonance.
+      if (relatedPartials >= 2) harmonicFamily.add(i);
+    }
+    const resonancePeaks = peaks.filter((_peak, index) => !harmonicFamily.has(index));
     const chosen: Array<{ freq: number; cutDb: number }> = [];
-    for (const pk of peaks) {
+    for (const pk of resonancePeaks) {
       if (chosen.some((c) => Math.abs(Math.log2(pk.freq / c.freq)) < 0.2)) continue;
       const maxDepth = params.mode === 'aggressive' ? 10.5 : 6.5;
       const cutDb = -Math.min(maxDepth * resAmt, (pk.excess - 2.5) * 0.75 * resAmt);
