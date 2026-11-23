@@ -87,6 +87,10 @@ test('Analyzer detects phase cancellation isolated to the high-frequency band', 
   assert.ok(analysis.stereoBandCorrelation.low > 0.8);
   assert.ok(analysis.stereoBandCorrelation.mid > 0.8);
   assert.ok(analysis.stereoBandCorrelation.high < -0.7);
+  assert.ok(
+    analysis.monoCompatibilityScore < 80,
+    'Mono compatibility score must reflect severe localized high-band cancellation even when global correlation is positive',
+  );
   const qc = runQualityControl(analysis, analysis, QC_TARGET_PROFILES[0]);
   const phaseCheck = qc.checks.find((check) => check.id === 'qc-phase');
   assert.equal(phaseCheck?.status, 'warning', 'Localized anti-phase high-frequency content must be surfaced for listening review');
