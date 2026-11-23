@@ -26,10 +26,16 @@ The Director uses measured spectral and loudness information to guide correction
 - Bass-vs-mid excess is addressed with a restrained low-frequency shelf in the bass region.
 - Low-mid buildup can call for a more focused low-mid bell adjustment.
 - Subsonic excess can call for high-pass filtering.
+- **Harmonic-aware resonance handling:** analyzer and restoration resonance candidates are checked for coherent harmonic families. The Director reserves dynamic EQ for isolated upper-mid spectral prominences instead of automatically cutting ordinary pitched-instrument partials.
+- **Frequency-localized stereo checks:** low, mid and high correlation bands use the default Stereo Imager crossover regions. Mono compatibility scoring, QC and refinement account for localized cancellation, and corrections narrow only the affected band.
+- **Noise verification:** noise-floor scoring is normalized to the selected delivery loudness so uniform attenuation cannot masquerade as denoising. Post-fix verification also requires signal-to-noise improvement and checks transient density, crest factor and high-frequency air.
+- **Transient-aware restoration:** the adaptive hiss detector opens quickly for transients and releases more slowly in quiet passages. Dynamic EQ attack and release controls govern both detection and gain movement.
+- **Dynamics-aware loudness:** the Director will not push an already-compressed source harder merely to reach a LUFS target. When the mastering pass itself reduces dynamic range, it backs off maximizer drive and bus compression rather than treating transient emphasis as reconstruction.
+- **Closed-loop regression guards:** each pass is checked for new or worsened technical findings, objective true-peak/loudness breaches, localized phase cancellation, noise regression, distortion growth, transient loss and large objective-dimension regressions. A rejected pass does not replace the best verified checkpoint.
 
 The bass-vs-mid refinement path uses a proportional adjustment rather than applying a fixed, aggressive cut. It updates an existing suitable parametric-EQ bass shelf where possible, or adds a parametric EQ when one is not present.
 
-**Verification is not a promise of perfect sound.** A passing metric does not replace critical listening, and a partially resolved finding means the remaining deviation is still reported. Always audition the rendered result and check it on appropriate monitoring systems.
+**Verification is not a promise of perfect sound.** A passing metric does not replace critical listening, and a partially resolved finding means the remaining deviation is still reported. These safeguards cannot reconstruct information already lost in a clipped or over-compressed premaster. Always audition the rendered result and check it on appropriate monitoring systems.
 
 ### AI stem separation
 
