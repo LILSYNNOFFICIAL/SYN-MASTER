@@ -137,8 +137,8 @@ export function runQualityControl(
   // 5. Phase Correlation & Mono Compatibility
   const localizedBandPhaseRisk = post.stereoBandCorrelation
     ? post.stereoBandCorrelation.low < 0.45 ||
-      post.stereoBandCorrelation.mid < 0 ||
-      post.stereoBandCorrelation.high < 0
+      post.stereoBandCorrelation.mid < 0.15 ||
+      post.stereoBandCorrelation.high < 0.15
     : false;
   const phaseStatus =
     post.phaseCorrelation < 0
