@@ -699,7 +699,9 @@ function applyRestore(
     const detectorAttack = Math.exp(-1 / Math.max(1, sampleRate * 0.001));
     const detectorRelease = Math.exp(-1 / Math.max(1, sampleRate * 0.08));
     const cutAttack = Math.exp(-1 / Math.max(1, sampleRate * 0.02));
-    const cutRelease = Math.exp(-1 / Math.max(1, sampleRate * 0.005));
+    // Open the gate rapidly when a transient crosses threshold. A multi-millisecond
+    // release here attenuates the transient itself even though the detector has opened.
+    const cutRelease = Math.exp(-1 / Math.max(1, sampleRate * 0.00015));
     for (let i = 0; i < n; i++) {
       const m = 0.5 * (Math.abs(left[i]) + Math.abs(right[i]));
       const detectorCoeff = m > rmsEnv ? detectorAttack : detectorRelease;
@@ -708,7 +710,7 @@ function applyRestore(
       const target = lvlDb < -44 ? -6.5 * hiss : 0;
       const gainCoeff = target < hsCut ? cutAttack : cutRelease;
       hsCut = gainCoeff * hsCut + (1 - gainCoeff) * target;
-      if ((i & 31) === 0) {
+      if ((i & 7) === 0) {
         hsCoeffs = designHighShelf(7000, hsCut, 0.7, sampleRate);
       }
       left[i] = processBiquadSample(left[i], hsCoeffs, hsL);
