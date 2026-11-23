@@ -194,7 +194,8 @@ function buildBaselineComparisonsForFinding(
   pre: AudioAnalysis,
   post: AudioAnalysis | null,
   thresholds: DiagnosisThresholds,
-  objectiveTarget?: ResolvedObjectiveTarget,
+  objectiveTarget: ResolvedObjectiveTarget | undefined,
+  objectiveId: MasteringObjectiveId,
 ): FindingMetricComparison[] {
   const preBassMid = pre.zoneEnergyDb.bass - pre.zoneEnergyDb.mid;
   const preLowMid = pre.zoneEnergyDb.lowMid - pre.zoneEnergyDb.mid;
@@ -321,19 +322,24 @@ function buildBaselineComparisonsForFinding(
     }
 
     case 'diag-noise': {
-      const preNf = pre.noiseFloorDb ?? -96;
-      const postNf = post ? (post.noiseFloorDb ?? -96) : null;
-      const preSnr = pre.rmsDb - preNf;
-      const postSnr = post && postNf !== null ? post.rmsDb - postNf : null;
+      const targetLufs = objectiveTarget?.targetLufs ?? OBJECTIVE_LIMITS[objectiveId].targetLufs;
+      const preNoiseRaw = pre.noiseFloorDb ?? -96;
+      const postNoiseRaw = post ? (post.noiseFloorDb ?? -96) : null;
+      const preNf = preNoiseRaw + (targetLufs - pre.integratedLufs);
+      const postNf = post && postNoiseRaw !== null
+        ? postNoiseRaw + (targetLufs - post.integratedLufs)
+        : null;
+      const preSnr = pre.rmsDb - preNoiseRaw;
+      const postSnr = post && postNoiseRaw !== null ? post.rmsDb - postNoiseRaw : null;
       return [
         makeComparison({
-          key: 'noiseFloorDb',
-          label: 'Noise Floor',
+          key: 'noiseFloorDbAtTargetLufs',
+          label: 'Level-Matched Noise Floor',
           unit: 'dBFS',
           decimals: 1,
           beforeValue: preNf,
           afterValue: postNf,
-          thresholdFormatted: `<= ${thresholds.noiseFloorMax.toFixed(1)} dBFS`,
+          thresholdFormatted: `<= ${thresholds.noiseFloorMax.toFixed(1)} dBFS at ${targetLufs.toFixed(1)} LUFS`,
           improved: postNf !== null ? postNf <= preNf - 1.5 : null,
           meetsThreshold: postNf !== null ? postNf <= thresholds.noiseFloorMax : null,
         }),
@@ -522,10 +528,11 @@ function classifyVerifiedFinding(opts: {
   postFinding: AnalysisFinding | null;
   thresholds: DiagnosisThresholds;
   objectiveTarget?: ResolvedObjectiveTarget;
+  objectiveId: MasteringObjectiveId;
   appliedCorrections: AppliedCorrectionRecord[];
 }): VerifiedFindingState {
-  const { finding, pre, post, postFinding, thresholds, objectiveTarget, appliedCorrections } = opts;
-  const comparisons = buildBaselineComparisonsForFinding(finding, pre, post, thresholds, objectiveTarget);
+  const { finding, pre, post, postFinding, thresholds, objectiveTarget, objectiveId, appliedCorrections } = opts;
+  const comparisons = buildBaselineComparisonsForFinding(finding, pre, post, thresholds, objectiveTarget, objectiveId);
   const appliedLabels = relevantCorrectionLabels(finding, appliedCorrections);
   const stillFlagged = Boolean(postFinding);
 
@@ -561,11 +568,14 @@ function classifyVerifiedFinding(opts: {
     verificationSummary =
       `VERIFICATION: The source entered mastering with ${pre.thdEstimatePercent.toFixed(2)}% estimated harmonic distortion. The rendered output reports ${post.thdEstimatePercent.toFixed(2)}%, but a lower estimate alone does not establish that source distortion artifacts were reconstructed or removed transparently. This workflow has no verified source de-distortion reconstruction step. Status: UNRESOLVED`;
   } else if (finding.id === 'diag-noise') {
+    const targetLufs = objectiveTarget?.targetLufs ?? OBJECTIVE_LIMITS[objectiveId].targetLufs;
     const preNoise = pre.noiseFloorDb ?? -96;
     const postNoise = post.noiseFloorDb ?? -96;
+    const preNoiseAtTarget = preNoise + (targetLufs - pre.integratedLufs);
+    const postNoiseAtTarget = postNoise + (targetLufs - post.integratedLufs);
     const preSnr = pre.rmsDb - preNoise;
     const postSnr = post.rmsDb - postNoise;
-    const noiseFloorDrop = preNoise - postNoise;
+    const noiseFloorDrop = preNoiseAtTarget - postNoiseAtTarget;
     const snrGain = postSnr - preSnr;
     const transientDamage =
       pre.transientDensity >= 0.08 && post.transientDensity < pre.transientDensity * 0.65;
@@ -581,41 +591,42 @@ function classifyVerifiedFinding(opts: {
           ...(crestDamage ? ['crest factor'] : []),
           ...(airDamage ? ['high-frequency air'] : []),
         ];
-        remainingDeviation = 'Noise reduction improved SNR by ' + fmtSigned(snrGain, 1, 'dB') +
+        remainingDeviation = 'Level-matched noise floor improved by ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
+          ' and SNR by ' + fmtSigned(snrGain, 1, 'dB') +
           ', but processing also reduced ' + losses.join(', ') + '.';
         nextRecommendedAction =
           'Reduce restoration intensity or narrow its frequency/time action. Preserve transient attacks and air tails, then compare the result using level-matched A/B auditioning.';
         verificationSummary =
-          'VERIFICATION: Noise floor fell ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
+          'VERIFICATION: Level-matched noise floor fell ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
           ' and signal-to-noise ratio improved ' + fmtSigned(snrGain, 1, 'dB') +
           ', but collateral signal loss was detected (' + losses.join(', ') + '). Status: PARTIALLY RESOLVED';
-      } else if (postNoise <= thresholds.noiseFloorMax && !stillFlagged) {
+      } else if (postNoiseAtTarget <= thresholds.noiseFloorMax && !stillFlagged) {
         status = 'RESOLVED';
         verificationSummary =
-          'VERIFICATION: Noise floor fell ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
+          'VERIFICATION: Level-matched noise floor fell ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
           ' and signal-to-noise ratio improved ' + fmtSigned(snrGain, 1, 'dB') +
           '. Transient density, crest factor, and high-frequency air remained within preservation checks. Status: RESOLVED';
       } else {
         status = 'IMPROVED';
         remainingDeviation =
-          'Noise floor is ' + fmtSigned(postNoise, 1, 'dBFS') +
-          ' (target <= ' + thresholds.noiseFloorMax.toFixed(1) + ' dBFS).';
+          'Level-matched noise floor is ' + fmtSigned(postNoiseAtTarget, 1, 'dBFS') +
+          ' (target <= ' + thresholds.noiseFloorMax.toFixed(1) + ' dBFS at ' + targetLufs.toFixed(1) + ' LUFS).';
         nextRecommendedAction =
           'Continue with conservative, noise-specific reduction only if level-matched audition confirms the remaining noise is audible.';
         verificationSummary =
           'VERIFICATION: Signal-to-noise ratio improved ' + fmtSigned(snrGain, 1, 'dB') +
-          ' without measured transient/air collateral, but the noise-floor target remains unmet. Status: IMPROVED';
+          ' without measured transient/air collateral, but the level-matched noise-floor target remains unmet. Status: IMPROVED';
       }
     } else {
       status = 'UNRESOLVED';
       remainingDeviation =
-        'Noise floor changed ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
+        'Level-matched noise floor changed ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
         ', while signal-to-noise ratio changed ' + fmtSigned(snrGain, 1, 'dB') +
         '.';
       nextRecommendedAction =
         'Use noise-specific reduction rather than lowering the whole signal. Verify improvement from quiet passages relative to program level.';
       verificationSummary =
-        'VERIFICATION: A lower absolute noise-floor reading is not sufficient. Signal-to-noise ratio did not improve by at least 1.0 dB, so uniform attenuation or level movement cannot be counted as noise removal. Status: UNRESOLVED';
+        'VERIFICATION: A lower absolute noise-floor reading is not sufficient. Level-matched noise floor and signal-to-noise ratio must improve; uniform attenuation or level movement cannot be counted as noise removal. Status: UNRESOLVED';
     }
   } else if (finding.id === 'diag-mud') {
     const preLowMid = pre.zoneEnergyDb.lowMid - pre.zoneEnergyDb.mid;
@@ -789,6 +800,8 @@ export function verifyPostFixAnalysis(input: VerifyPostFixInput): PostFixVerific
     input.baselineDiagnosis ??
     analyzeTrackIntelligence(input.baselineAnalysis, input.objective, input.referenceAnalysis);
   const thresholds = getDiagnosisThresholds(input.objective, input.referenceAnalysis);
+  const objectiveId =
+    typeof input.objective === 'string' ? input.objective : input.objective.id;
   const objectiveTarget =
     typeof input.objective === 'string' ? undefined : input.objective;
   const appliedCorrections = input.appliedCorrections ?? [];
@@ -951,6 +964,7 @@ export function verifyPostFixAnalysis(input: VerifyPostFixInput): PostFixVerific
       postFinding,
       thresholds,
       objectiveTarget,
+      objectiveId,
       appliedCorrections,
     });
     if (verified.status === 'RESOLVED') {
