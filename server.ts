@@ -47,8 +47,21 @@ function aiRateLimiter(
 }
 // Apply the AI limiter before JSON parsing so malformed or oversized requests are rate-limited too.
 app.use('/api/ai', aiRateLimiter);
-// Offline codec jobs are CPU-intensive; apply the same per-client protection.
-app.use('/api/export', aiRateLimiter);
+// Offline codec jobs are CPU-intensive but must not compete with AI requests for the
+// same budget, so export has its own per-client limiter.
+const allowExportRequest = createRateLimiter({ limit: 30, windowMs: 60_000, maxKeys: 10_000 });
+app.use('/api/export', (req, res, next) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const result = allowExportRequest(ip);
+  res.setHeader('X-RateLimit-Limit', '30');
+  res.setHeader('X-RateLimit-Remaining', String(result.remaining));
+  if (!result.allowed) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))));
+    res.status(429).json({ error: 'Export rate limit exceeded. Try again shortly.' });
+    return;
+  }
+  next();
+});
 app.use(express.json({ limit: '4mb' }));
 
 function sendSanitizedAiError(res: express.Response, err: unknown): void {
@@ -69,7 +82,25 @@ function sendSanitizedAiError(res: express.Response, err: unknown): void {
   res.status(500).json({ error: 'AI mastering service could not complete the request.' });
 }
 
-app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', limit: '256mb' }), async (req, res) => {
+async function measureEncodedLoudness(filePath: string): Promise<{ integratedLufs: number | null; truePeakDbtp: number | null }> {
+  const stderr = await new Promise<string>((resolve, reject) => {
+    const child = spawn('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-af', 'ebur128=peak=true', '-f', 'null', '-'], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let log = '';
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 120_000);
+    child.stderr.on('data', (chunk: Buffer) => { log = (log + chunk.toString()).slice(-20000); });
+    child.once('error', (error) => { clearTimeout(timeout); reject(error); });
+    child.once('close', (code) => { clearTimeout(timeout); code === 0 ? resolve(log) : reject(new Error('ebur128 exited ' + code)); });
+  });
+  const summary = stderr.slice(stderr.lastIndexOf('Summary:'));
+  const lufsMatch = summary.match(/I:\s+(-?[\d.]+|-inf)\s+LUFS/);
+  const peakMatch = summary.match(/True peak:\s+Peak:\s+(-?[\d.]+|-inf)\s+dBFS/);
+  const parse = (m: RegExpMatchArray | null) => (m && m[1] !== '-inf' ? Number(m[1]) : null);
+  return { integratedLufs: parse(lufsMatch), truePeakDbtp: parse(peakMatch) };
+}
+
+app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', limit: '512mb' }), async (req, res) => {
   const allowedFormats = new Set(['wav', 'mp3', 'ogg', 'flac', 'm4a', 'webm-opus']);
   const format = String(req.query.format ?? '');
   if (!allowedFormats.has(format)) {
@@ -88,18 +119,23 @@ app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', l
   const flacCompression = Number(req.query.flacCompression ?? 5);
   const mp3Bitrate = Number(req.query.mp3BitrateKbps ?? 320);
   const oggBitrate = Number(req.query.oggBitrateKbps ?? 192);
+  const aacBitrate = Number(req.query.aacBitrateKbps ?? 320);
+  const opusBitrate = Number(req.query.opusBitrateKbps ?? 192);
+  const ceilingDb = Number(req.query.ceilingDb ?? -1);
   const ditherMode = String(req.query.dither ?? 'none') === 'tpdf' ? 'triangular' : 'none';
   if (![44100, 48000, 88200, 96000].includes(sampleRate) || !['stereo', 'mono'].includes(channelMode) ||
       ![16, 24, 32].includes(wavBitDepth) || ![16, 24].includes(flacBitDepth) || !Number.isInteger(flacCompression) || flacCompression < 0 || flacCompression > 8 ||
-      ![128, 192, 256, 320].includes(mp3Bitrate) || ![96, 128, 160, 192, 256, 320].includes(oggBitrate)) {
+      ![128, 192, 256, 320].includes(mp3Bitrate) || ![96, 128, 160, 192, 256, 320].includes(oggBitrate) ||
+      ![128, 192, 256, 320].includes(aacBitrate) || ![96, 128, 160, 192, 256].includes(opusBitrate) ||
+      !Number.isFinite(ceilingDb)) {
     res.status(400).json({ error: 'One or more export settings are outside the supported range.' });
     return;
   }
 
   const cleanMetadata = (value: unknown, fallback: string) =>
     String(value ?? fallback).replace(/[\x00-\x1f]/g, ' ').slice(0, 160);
-  const title = cleanMetadata(req.query.metadataTitle, 'SYN MASTER');
-  const artist = cleanMetadata(req.query.metadataArtist, 'SYN MASTER');
+  const title = cleanMetadata(req.query.metadataTitle, '').trim();
+  const artist = cleanMetadata(req.query.metadataArtist, '').trim();
   const extension = format === 'webm-opus' ? 'webm' : format;
   const mimeTypes: Record<string, string> = {
     wav: 'audio/wav', mp3: 'audio/mpeg', ogg: 'audio/ogg', flac: 'audio/flac', m4a: 'audio/mp4', 'webm-opus': 'audio/webm',
@@ -132,14 +168,15 @@ app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', l
       '-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath, '-vn',
       '-af', resampleOptions.join(':'),
       '-ar', String(sampleRate), '-ac', channelMode === 'mono' ? '1' : '2',
-      '-metadata', 'title=' + title, '-metadata', 'artist=' + artist,
     ];
+    if (title) args.push('-metadata', 'title=' + title);
+    if (artist) args.push('-metadata', 'artist=' + artist);
     if (format === 'wav') args.push('-codec:a', wavBitDepth === 16 ? 'pcm_s16le' : wavBitDepth === 24 ? 'pcm_s24le' : 'pcm_f32le');
     if (format === 'mp3') args.push('-codec:a', 'libmp3lame', '-b:a', mp3Bitrate + 'k', '-id3v2_version', '3');
     if (format === 'ogg') args.push('-codec:a', 'libvorbis', '-b:a', oggBitrate + 'k');
     if (format === 'flac') args.push('-codec:a', 'flac', '-sample_fmt', flacBitDepth === 24 ? 's32' : 's16', '-bits_per_raw_sample', String(flacBitDepth), '-compression_level', String(flacCompression));
-    if (format === 'm4a') args.push('-codec:a', 'aac', '-b:a', '320k', '-movflags', '+faststart', '-f', 'ipod');
-    if (format === 'webm-opus') args.push('-codec:a', 'libopus', '-b:a', '192k', '-f', 'webm');
+    if (format === 'm4a') args.push('-codec:a', 'aac', '-b:a', aacBitrate + 'k', '-movflags', '+faststart', '-f', 'ipod');
+    if (format === 'webm-opus') args.push('-codec:a', 'libopus', '-b:a', opusBitrate + 'k', '-f', 'webm');
     args.push(outputPath);
 
     await new Promise<void>((resolve, reject) => {
@@ -160,6 +197,17 @@ app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', l
     });
 
     const output = await readFile(outputPath);
+    // Delivery check on the encoded file itself: resampling and lossy codecs can push
+    // a master that met its ceiling in the float render over it.
+    const measured = await measureEncodedLoudness(outputPath).catch(() => null);
+    if (measured) {
+      if (measured.integratedLufs !== null) res.setHeader('X-Syn-Integrated-Lufs', measured.integratedLufs.toFixed(2));
+      if (measured.truePeakDbtp !== null) {
+        res.setHeader('X-Syn-True-Peak-Dbtp', measured.truePeakDbtp.toFixed(2));
+        res.setHeader('X-Syn-Over-Ceiling', measured.truePeakDbtp > ceilingDb + 0.05 ? '1' : '0');
+      }
+      res.setHeader('Access-Control-Expose-Headers', 'X-Syn-Integrated-Lufs, X-Syn-True-Peak-Dbtp, X-Syn-Over-Ceiling');
+    }
     res.setHeader('Content-Type', mimeTypes[format]);
     res.setHeader('Content-Disposition', 'attachment; filename="SYN_Master.' + extension + '"');
     res.send(output);

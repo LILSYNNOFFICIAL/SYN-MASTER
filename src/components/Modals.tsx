@@ -8,6 +8,7 @@ interface ExportModalProps {
   rendering: boolean;
   downloadUrl: string | null;
   downloadFilename: string | null;
+  deliveryCheck?: { text: string; warning: boolean } | null;
   hasTrack: boolean;
   onChange: (next: ExportConfig) => void;
   onRender: () => void;
@@ -15,7 +16,7 @@ interface ExportModalProps {
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({
-  open, config, rendering, downloadUrl, downloadFilename, hasTrack, onChange, onRender, onClose,
+  open, config, rendering, downloadUrl, downloadFilename, deliveryCheck, hasTrack, onChange, onRender, onClose,
 }) => {
   if (!open) return null;
   const fieldClass = "bg-[#090704] border border-[#5A4519] focus:border-[#D4AF37] rounded px-2.5 py-1.5 text-xs text-[#F7F1E2]";
@@ -92,10 +93,29 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </label>
             </>}
             {config.format === 'm4a' && (
-              <div className="flex flex-col gap-1 text-[11px] text-[#C7B98F] justify-center">
-                Encoding Quality <span className="text-[#F2CA52] font-semibold">AAC 320 kbps</span>
-              </div>
+              <label className={labelClass}>AAC Bitrate
+                <select value={config.aacBitrateKbps ?? 320} onChange={(e) => onChange({ ...config, aacBitrateKbps: Number(e.target.value) as ExportConfig['aacBitrateKbps'] })} className={fieldClass}>
+                  <option value={128}>128 kbps</option><option value={192}>192 kbps</option><option value={256}>256 kbps</option><option value={320}>320 kbps</option>
+                </select>
+              </label>
             )}
+            {config.format === 'webm-opus' && (
+              <label className={labelClass}>Opus Bitrate
+                <select value={config.opusBitrateKbps ?? 192} onChange={(e) => onChange({ ...config, opusBitrateKbps: Number(e.target.value) as ExportConfig['opusBitrateKbps'] })} className={fieldClass}>
+                  <option value={96}>96 kbps</option><option value={128}>128 kbps</option><option value={160}>160 kbps</option><option value={192}>192 kbps</option><option value={256}>256 kbps</option>
+                </select>
+              </label>
+            )}
+            {config.format !== 'mid' && <>
+              <label className={labelClass}>Title (metadata)
+                <input type="text" value={config.metadataTitle ?? ''} placeholder="Leave blank to omit"
+                  onChange={(e) => onChange({ ...config, metadataTitle: e.target.value })} className={fieldClass} />
+              </label>
+              <label className={labelClass}>Artist (metadata)
+                <input type="text" value={config.metadataArtist ?? ''} placeholder="Leave blank to omit"
+                  onChange={(e) => onChange({ ...config, metadataArtist: e.target.value })} className={fieldClass} />
+              </label>
+            </>}
             {config.format !== 'mid' && <>
               <label className={labelClass}>Sample Rate
                 <select value={config.sampleRate} onChange={(e) => onChange({ ...config, sampleRate: Number(e.target.value) as ExportConfig['sampleRate'] })} className={fieldClass}>
@@ -171,6 +191,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 className="px-3 py-1.5 rounded bg-[#D4AF37] text-[#080704] text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0">
                 <Download className="w-3.5 h-3.5" /> Download {extensions[config.format]}
               </a>
+            </div>
+          )}
+          {downloadUrl && deliveryCheck && (
+            <div className={'p-2.5 rounded-lg text-[11px] border ' + (deliveryCheck.warning ? 'border-red-500/60 bg-red-500/10 text-red-200' : 'border-[#5A4519] bg-[#100D06] text-[#E8D9AF]')}>
+              {deliveryCheck.text}
             </div>
           )}
 

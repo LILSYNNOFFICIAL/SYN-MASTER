@@ -1,4 +1,5 @@
 import type { AudioAnalysis, ResonancePeak, SpectralBandEnergy } from '../types/mastering';
+import { SPECTRAL_ZONES_HZ } from './bandMap';
 import { BiquadCoeffs, designHighPass, designHighShelf, designLowPass, processBiquadBuffer } from './biquad';
 import { computeMagnitudeSpectrumDb, createHannWindow } from './fft';
 
@@ -553,13 +554,13 @@ export function analyzeAudioBuffer(
   };
 
   const zoneEnergyDb: SpectralBandEnergy = {
-    sub: logBandMeanDb(20, 60),
-    bass: logBandMeanDb(60, 250),
-    lowMid: logBandMeanDb(250, 500),
-    mid: logBandMeanDb(500, 2000),
-    highMid: logBandMeanDb(2000, 6000),
-    presence: logBandMeanDb(6000, 12000),
-    air: logBandMeanDb(12000, Math.min(20000, sampleRate * 0.48)),
+    sub: logBandMeanDb(SPECTRAL_ZONES_HZ.sub[0], SPECTRAL_ZONES_HZ.sub[1]),
+    bass: logBandMeanDb(SPECTRAL_ZONES_HZ.bass[0], SPECTRAL_ZONES_HZ.bass[1]),
+    lowMid: logBandMeanDb(SPECTRAL_ZONES_HZ.lowMid[0], SPECTRAL_ZONES_HZ.lowMid[1]),
+    mid: logBandMeanDb(SPECTRAL_ZONES_HZ.mid[0], SPECTRAL_ZONES_HZ.mid[1]),
+    highMid: logBandMeanDb(SPECTRAL_ZONES_HZ.highMid[0], SPECTRAL_ZONES_HZ.highMid[1]),
+    presence: logBandMeanDb(SPECTRAL_ZONES_HZ.presence[0], SPECTRAL_ZONES_HZ.presence[1]),
+    air: logBandMeanDb(SPECTRAL_ZONES_HZ.air[0], Math.min(SPECTRAL_ZONES_HZ.air[1], sampleRate * 0.48)),
   };
 
   // Spectral Centroid & Slope

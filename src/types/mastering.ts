@@ -356,6 +356,8 @@ export interface ExportConfig {
   flacCompression?: number;
   mp3BitrateKbps?: 128 | 192 | 256 | 320;
   oggBitrateKbps?: 96 | 128 | 160 | 192 | 256 | 320;
+  aacBitrateKbps?: 128 | 192 | 256 | 320;
+  opusBitrateKbps?: 96 | 128 | 160 | 192 | 256;
   sampleRate: 44100 | 48000 | 88200 | 96000;
   channels: 'stereo' | 'mono';
   dither: 'none' | 'tpdf';

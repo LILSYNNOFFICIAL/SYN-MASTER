@@ -30,7 +30,8 @@ import { renderStemBusMix } from '../dsp/stemBusRenderer';
 import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
 import { renderAndAnalyzeOffThread } from '../dsp/workerClient';
 import { QC_TARGET_PROFILES, runQualityControl } from '../dsp/qc';
-import { analyzeTrackIntelligence, getDiagnosisThresholds } from './analyzeIntelligence';
+import { analyzeTrackIntelligence, computeRegionEnergyDb, getDiagnosisThresholds } from './analyzeIntelligence';
+import { MUD_CORRECTION_HZ, MUD_REGION_HZ } from '../dsp/bandMap';
 import { applyStructuredChainCommands } from './chainCommands';
 import { inspectPluginInventory } from './pluginIntelligence';
 import { validateChainAgainstInventory } from './processorInventory';
@@ -448,7 +449,19 @@ export function buildExplainableMasterPlan(input: {
     bands.push({ id: 'b2', enabled: true, shape: 'lowshelf', freq: 88, gain: eqBassGain, q: 0.71 });
   }
 
-  const mudCut = lowMidBuildup > 3.8 ? Number(Math.max(-3.2, -(lowMidBuildup - 2.6) * 0.6).toFixed(1)) : 0;
+  const mudThresholds = getDiagnosisThresholds(objective, referenceAnalysis);
+  const mudRegionDb = computeRegionEnergyDb(analysis, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
+  const mudRegionVsMid = mudRegionDb !== null ? mudRegionDb - analysis.zoneEnergyDb.mid : null;
+  const lowMidExcess = Math.max(
+    0,
+    lowMidBuildup - mudThresholds.lowMidBuildupLimit,
+    mudRegionVsMid !== null ? mudRegionVsMid - mudThresholds.region150To400VsMidLimit : 0,
+  );
+  // Masking that comes and goes with the vocal/snare is handled by a dynamic band;
+  // the static bell then only carries a light, constant share of the correction.
+  const useDynamicMudControl = lowMidExcess > 0 && objective.id !== 'transparent';
+  let mudCut = lowMidBuildup > 3.8 ? Number(Math.max(-3.2, -(lowMidBuildup - 2.6) * 0.6).toFixed(1)) : 0;
+  if (useDynamicMudControl) mudCut = Number(Math.max(-1.5, Math.min(mudCut, -0.5)).toFixed(1));
   if (mudCut <= -0.4) {
     bands.push({ id: 'b3', enabled: true, shape: 'bell', freq: 300, gain: mudCut, q: 1.4 });
     eqReasons.push(`Low-mid buildup (+${lowMidBuildup.toFixed(1)} dB) -> ${mudCut} dB @ 300 Hz`);
@@ -515,6 +528,49 @@ export function buildExplainableMasterPlan(input: {
       expectedResult: 'Improved midrange articulation and subsonic headroom stability ahead of limiting.',
       potentialTradeoffs: 'Excessive cuts (>3 dB) can hollow out body; kept surgical.',
       priority: lowMidBuildup > 4.5 || bassMidDiff > 11 ? 'critical' : 'recommended',
+      statementType: 'hypothesis',
+    });
+  }
+
+  // Stage 3a: Dynamic low-mid masking control (150-400 Hz builds up under vocal and snare)
+  if (useDynamicMudControl) {
+    const mudMaxCut = Number(Math.max(-3.0, -Math.min(3.0, 1.0 + lowMidExcess * 0.4)).toFixed(1));
+    const mudBands = [
+      {
+        id: 'd-mud',
+        enabled: true,
+        freq: 250,
+        q: 1.0,
+        thresholdDb: Math.round(Math.max(-40, Math.min(-16, analysis.rmsDb - 4))),
+        maxCutDb: mudMaxCut,
+        attackMs: 15,
+        releaseMs: 140,
+      },
+    ];
+    recommendations.push({
+      id: 'rec-dyn-mud',
+      characteristic: 'Dynamic low-mid masking (150-400 Hz vs vocal/snare midrange)',
+      supportingMeasurements: [
+        `Low-Mid vs Mid: ${lowMidBuildup >= 0 ? '+' : ''}${lowMidBuildup.toFixed(1)} dB (limit +${mudThresholds.lowMidBuildupLimit.toFixed(1)} dB)`,
+        ...(mudRegionVsMid !== null
+          ? [`${MUD_REGION_HZ[0]}-${MUD_REGION_HZ[1]} Hz vs Mid: ${mudRegionVsMid >= 0 ? '+' : ''}${mudRegionVsMid.toFixed(1)} dB (limit +${mudThresholds.region150To400VsMidLimit.toFixed(1)} dB)`]
+          : []),
+      ],
+      proposedCorrection: `Attenuate 250 Hz dynamically (up to ${mudMaxCut} dB) only when the low-mids build up.`,
+      selectedProcessor: 'dynamic-eq',
+      proposedParamsSummary: `Band @ 250 Hz (Q=1.0, maxCut=${mudMaxCut} dB, 15/140 ms)`,
+      commands: [
+        {
+          op: 'add',
+          processorType: 'dynamic-eq',
+          name: 'Dynamic Low-Mid Control',
+          params: { bands: mudBands },
+          rationale: 'Clear low-mid masking under vocals and snare without thinning quiet passages.',
+        },
+      ],
+      expectedResult: 'Lower 150-400 Hz masking during dense sections while keeping body in sparse sections.',
+      potentialTradeoffs: 'Too much cut can thin vocal body and snare weight; capped at -3 dB.',
+      priority: lowMidExcess > 2 ? 'critical' : 'recommended',
       statementType: 'hypothesis',
     });
   }
@@ -1122,6 +1178,37 @@ export function buildBattleCandidatesIntelligent(analysis: AudioAnalysis): Array
 /**
  * Derives targeted ChainCommand[] from measured post-analysis, QC failures, and MultiObjective gaps.
  */
+/**
+ * Centre frequency for a low-mid correction: the loudest 1/3-octave-smoothed point of the
+ * measured spectrum inside the correction window, so the cut lands where the build-up is.
+ */
+export function findMudCenterHz(analysis: AudioAnalysis): number {
+  const freqs = analysis.spectrumBinsFreq;
+  const dbs = analysis.spectrumBinsDb;
+  if (!freqs?.length || !dbs?.length || freqs.length !== dbs.length) return MUD_CORRECTION_HZ.center;
+  let bestHz: number = MUD_CORRECTION_HZ.center;
+  let bestDb = -Infinity;
+  for (let hz = MUD_CORRECTION_HZ.min; hz <= MUD_CORRECTION_HZ.max; hz += 10) {
+    const lo = hz / Math.pow(2, 1 / 6);
+    const hi = hz * Math.pow(2, 1 / 6);
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < freqs.length; i++) {
+      if (freqs[i] >= lo && freqs[i] <= hi && Number.isFinite(dbs[i])) {
+        sum += Math.pow(10, dbs[i] / 10);
+        count++;
+      }
+    }
+    if (count === 0) continue;
+    const db = 10 * Math.log10(sum / count);
+    if (db > bestDb) {
+      bestDb = db;
+      bestHz = hz;
+    }
+  }
+  return bestHz;
+}
+
 export function deriveRefinementCommands(
   pre: AudioAnalysis,
   post: AudioAnalysis,
@@ -1331,6 +1418,17 @@ export function deriveRefinementCommands(
     reasons.push('Engage SYN-Restore noise/DC remediation');
   }
 
+  // Shared working copy of the EQ bands so the bass and low-mid steps both land in one command.
+  let refineBands: EQBand[] | null = null;
+  let refineEqCommandPushed = false;
+  const getRefineBands = (): EQBand[] => {
+    if (!refineBands) {
+      const params = eqMod?.params as { bands?: EQBand[] } | undefined;
+      refineBands = (params?.bands ?? []).map((band) => ({ ...band }));
+    }
+    return refineBands;
+  };
+
   // 7. Measurement-specific bass-vs-mid correction. Do not use a low-mid bell cut
   // to solve excess energy in the separate 60-250 Hz bass measurement.
   const bassMidDiff = post.zoneEnergyDb.bass - post.zoneEnergyDb.mid;
@@ -1341,7 +1439,7 @@ export function deriveRefinementCommands(
     const currentParams = eqMod?.params as { phaseMode?: 'minimum' | 'linear'; msMode?: 'stereo' | 'mid-side'; tiltDb?: number; bands?: EQBand[] } | undefined;
     const currentBands = currentParams?.bands ?? [];
     const bassShelfIndex = currentBands.findIndex((band) => band.shape === 'lowshelf' && band.freq >= 70 && band.freq <= 140);
-    const nextBands = currentBands.map((band) => ({ ...band }));
+    const nextBands = getRefineBands();
     if (bassShelfIndex >= 0) {
       const shelf = nextBands[bassShelfIndex];
       shelf.gain = Number(Math.max(-3, shelf.gain - cutStepDb).toFixed(2));
@@ -1367,7 +1465,69 @@ export function deriveRefinementCommands(
         rationale,
       });
     }
+    refineEqCommandPushed = true;
     reasons.push(`Trim bass-vs-mid excess by ${cutStepDb.toFixed(2)} dB at 100 Hz`);
+  }
+
+  // 7b. Low-mid / mud-region correction. Deepens a 200-360 Hz bell in small steps while
+  // the low-mid or 150-400 Hz masking measurement stays above its limit. Never digs past
+  // -4 dB in total, and stops if the midrange is already hollow.
+  {
+    const thresholds = getDiagnosisThresholds(objective);
+    const lowMidBuildupPost = post.zoneEnergyDb.lowMid - post.zoneEnergyDb.mid;
+    const regionPost = computeRegionEnergyDb(post, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
+    const regionVsMidPost = regionPost !== null ? regionPost - post.zoneEnergyDb.mid : null;
+    const excessDb = Math.max(
+      0,
+      lowMidBuildupPost - thresholds.lowMidBuildupLimit,
+      regionVsMidPost !== null ? regionVsMidPost - thresholds.region150To400VsMidLimit : 0,
+    );
+    const hollow = lowMidBuildupPost < -4.0;
+    if (excessDb > 0.2 && !hollow) {
+      const stepDb = Number(Math.max(0.5, Math.min(1.0, excessDb * 0.5)).toFixed(2));
+      const bands = getRefineBands();
+      const bellIndex = bands.findIndex(
+        (band) => band.shape === 'bell' && band.freq >= MUD_CORRECTION_HZ.min && band.freq <= MUD_CORRECTION_HZ.max,
+      );
+      let appliedGain: number;
+      if (bellIndex >= 0) {
+        const bell = bands[bellIndex];
+        appliedGain = Number(Math.max(-4, Math.min(bell.gain, 0) - stepDb).toFixed(2));
+        bell.gain = appliedGain;
+        bell.enabled = true;
+        // Retune toward the measured build-up when the bell sits more than 1/3 octave away.
+        const centerHz = findMudCenterHz(post);
+        if (Math.abs(Math.log2(centerHz / bell.freq)) > 1 / 3) {
+          bell.freq = Math.round(bell.freq * Math.pow(centerHz / bell.freq, 0.5));
+        }
+      } else {
+        appliedGain = -stepDb;
+        bands.push({ id: 'refine-low-mid', enabled: true, shape: 'bell', freq: findMudCenterHz(post), gain: appliedGain, q: 1.2 });
+      }
+      const atLimit = bellIndex >= 0 && appliedGain <= -4;
+      const rationale =
+        `Reduce ${MUD_REGION_HZ[0]}-${MUD_REGION_HZ[1]} Hz masking by ${stepDb.toFixed(2)} dB ` +
+        `(Low-Mid vs Mid ${lowMidBuildupPost.toFixed(1)} dB, limit ${thresholds.lowMidBuildupLimit.toFixed(1)} dB` +
+        (regionVsMidPost !== null ? `; ${MUD_REGION_HZ[0]}-${MUD_REGION_HZ[1]} Hz vs Mid ${regionVsMidPost.toFixed(1)} dB, limit ${thresholds.region150To400VsMidLimit.toFixed(1)} dB` : '') +
+        ').';
+      if (!atLimit || bellIndex < 0) {
+        if (!refineEqCommandPushed) {
+          if (eqMod) {
+            commands.push({ op: 'configure', targetId: eqMod.id, processorType: 'parametric-eq', paramsPatch: { bands }, rationale });
+          } else {
+            commands.push({
+              op: 'add',
+              processorType: 'parametric-eq',
+              name: 'Low-Mid Refinement EQ',
+              params: { phaseMode: 'minimum', msMode: 'stereo', tiltDb: 0, bands },
+              rationale,
+            });
+          }
+          refineEqCommandPushed = true;
+        }
+        reasons.push(`Deepen low-mid bell to ${appliedGain.toFixed(2)} dB in the ${MUD_CORRECTION_HZ.min}-${MUD_CORRECTION_HZ.max} Hz mud region`);
+      }
+    }
   }
 
   // 8. Spectral harshness/mud QC follow-up
@@ -1892,9 +2052,22 @@ export async function runAutonomousDirectorLoop(
     const introducedClipping =
       post.clippedSamples > bestCheckpoint.analysis.clippedSamples && post.clippedSamples > 0;
     const isFirstValid = bestCheckpoint.passNumber === 0 && !introducedClipping;
+    // Mud progress counts as improvement even when the Fit Index does not move, as long
+    // as the overall fit holds; otherwise every low-mid refinement pass is rolled back.
+    const mudVsMid = (a: AudioAnalysis) => {
+      const region = computeRegionEnergyDb(a, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
+      return region !== null ? region - a.zoneEnergyDb.mid : a.zoneEnergyDb.lowMid - a.zoneEnergyDb.mid;
+    };
+    const mudProgress =
+      !isFirstValid &&
+      bestCheckpoint.passNumber > 0 &&
+      mudVsMid(post) <= mudVsMid(bestCheckpoint.analysis) - 0.1 &&
+      multiObjective.engineeringFitIndex >= bestCheckpoint.multiObjective.engineeringFitIndex - 0.5 &&
+      qcReport.failCount <= bestCheckpoint.qcReport.failCount;
     const improved =
       !introducedClipping &&
       (isFirstValid ||
+        mudProgress ||
         multiObjective.engineeringFitIndex > bestCheckpoint.multiObjective.engineeringFitIndex + 0.05 ||
         (qcReport.failCount < bestCheckpoint.qcReport.failCount &&
           multiObjective.engineeringFitIndex >= bestCheckpoint.multiObjective.engineeringFitIndex - 1.5));
@@ -1970,7 +2143,13 @@ export async function runAutonomousDirectorLoop(
     // Check convergence / early stop
     const lufsOk = Math.abs(post.integratedLufs - objective.targetLufs) <= 0.65;
     const tpOk = post.truePeakDb <= objective.maxTruePeakDb + 0.05;
-    if (lufsOk && tpOk && qcReport.overallStatus === 'pass' && multiObjective.engineeringFitIndex >= 90) {
+    // Loudness and QC alone are not convergence: a measured low-mid masking finding that
+    // the refinement step can still act on keeps the loop going (bounded by maxIterations
+    // and the -4 dB refinement cap, after which no further commands are derived).
+    const mudStillOpen = analyzeTrackIntelligence(post, objective, opts.referenceAnalysis).findings.some(
+      (f) => f.id === 'diag-mud',
+    );
+    if (lufsOk && tpOk && !mudStillOpen && qcReport.overallStatus === 'pass' && multiObjective.engineeringFitIndex >= 90) {
       if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
       finalStatus = 'converged';
       stopReason = `Converged on Pass ${pass}: LUFS (${post.integratedLufs.toFixed(1)}), True Peak (${post.truePeakDb.toFixed(2)} dBTP), and all QC checks passed.`;
@@ -1978,7 +2157,7 @@ export async function runAutonomousDirectorLoop(
       break;
     }
 
-    if (pass > 1 && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold && qcReport.failCount === 0) {
+    if (pass > 1 && !mudStillOpen && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold && qcReport.failCount === 0) {
       if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
       finalStatus = 'completed';
       stopReason = `Stopped safely after Pass ${pass}: refinement reached a plateau (ΔFit ${(multiObjective.engineeringFitIndex - lastFit).toFixed(2)} < ${convergenceThreshold}). Remaining deviations are retained in verification; this is not labeled target convergence.`;

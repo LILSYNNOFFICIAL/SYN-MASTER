@@ -1,3 +1,4 @@
+import { MUD_REGION_HZ } from '../dsp/bandMap';
 import type {
   AnalysisFinding,
   AppliedCorrectionRecord,
@@ -198,13 +199,13 @@ function buildBaselineComparisonsForFinding(
   const preBassMid = pre.zoneEnergyDb.bass - pre.zoneEnergyDb.mid;
   const preLowMid = pre.zoneEnergyDb.lowMid - pre.zoneEnergyDb.mid;
   const preSubBass = pre.zoneEnergyDb.sub - pre.zoneEnergyDb.bass;
-  const preRegion = computeRegionEnergyDb(pre, 150, 400);
+  const preRegion = computeRegionEnergyDb(pre, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
   const preRegionVsMid = preRegion !== null ? preRegion - pre.zoneEnergyDb.mid : null;
 
   const postBassMid = post ? post.zoneEnergyDb.bass - post.zoneEnergyDb.mid : null;
   const postLowMid = post ? post.zoneEnergyDb.lowMid - post.zoneEnergyDb.mid : null;
   const postSubBass = post ? post.zoneEnergyDb.sub - post.zoneEnergyDb.bass : null;
-  const postRegion = post ? computeRegionEnergyDb(post, 150, 400) : null;
+  const postRegion = post ? computeRegionEnergyDb(post, MUD_REGION_HZ[0], MUD_REGION_HZ[1]) : null;
   const postRegionVsMid = post && postRegion !== null ? postRegion - post.zoneEnergyDb.mid : null;
 
   switch (finding.id) {
@@ -507,8 +508,8 @@ function classifyVerifiedFinding(opts: {
     const postBassMid = post.zoneEnergyDb.bass - post.zoneEnergyDb.mid;
     const preSubBass = pre.zoneEnergyDb.sub - pre.zoneEnergyDb.bass;
     const postSubBass = post.zoneEnergyDb.sub - post.zoneEnergyDb.bass;
-    const preReg = computeRegionEnergyDb(pre, 150, 400);
-    const postReg = computeRegionEnergyDb(post, 150, 400);
+    const preReg = computeRegionEnergyDb(pre, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
+    const postReg = computeRegionEnergyDb(post, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
     const preRegVsMid = preReg !== null ? preReg - pre.zoneEnergyDb.mid : null;
     const postRegVsMid = postReg !== null ? postReg - post.zoneEnergyDb.mid : null;
 
@@ -531,6 +532,23 @@ function classifyVerifiedFinding(opts: {
     const subDropped = postSubBass <= preSubBass - 0.8;
     const anyMeaningfulDrop = lowMidDropped || regDropped || bassDropped || subDropped;
 
+    // Absolute band movement. Every mud metric above is relative to Mid, so a pass that
+    // dips the mids makes low-mid look worse even when low-mid energy itself fell.
+    // Level-matched: remove the overall loudness change so a limiter gain push or trim
+    // does not read as every band moving together.
+    const levelShift = Number.isFinite(post.integratedLufs) && Number.isFinite(pre.integratedLufs)
+      ? post.integratedLufs - pre.integratedLufs
+      : 0;
+    const midAbsChange = post.zoneEnergyDb.mid - pre.zoneEnergyDb.mid - levelShift;
+    const lowMidAbsChange = post.zoneEnergyDb.lowMid - pre.zoneEnergyDb.lowMid - levelShift;
+    const regAbsChange = preReg !== null && postReg !== null ? postReg - preReg - levelShift : null;
+    const absoluteNote =
+      ` Level-matched band change: ${MUD_REGION_HZ[0]}–${MUD_REGION_HZ[1]} Hz ${regAbsChange !== null ? fmtSigned(regAbsChange, 1, 'dB') : 'n/a'}, ` +
+      `Low-Mid ${fmtSigned(lowMidAbsChange, 1, 'dB')}, Mid ${fmtSigned(midAbsChange, 1, 'dB')}.` +
+      (midAbsChange < -1.0
+        ? ` Mid fell ${Math.abs(midAbsChange).toFixed(1)} dB, so the relative low-mid readings overstate the remaining mud; restore the midrange before cutting further.`
+        : '');
+
     const aspectChecks = [lowMidMet, regMet, ...(subNeeded ? [subMet] : []), ...(bassNeeded ? [bassMet] : [])];
     const metCount = aspectChecks.filter(Boolean).length;
 
@@ -541,7 +559,7 @@ function classifyVerifiedFinding(opts: {
         (postRegVsMid !== null
           ? `, 150–400 Hz vs Mid moved ${fmtSigned(preRegVsMid, 1, 'dB')} -> ${fmtSigned(postRegVsMid, 1, 'dB')}`
           : '') +
-        `, Bass vs Mid ${fmtSigned(preBassMid, 1, 'dB')} -> ${fmtSigned(postBassMid, 1, 'dB')}. Midrange separation confirmed. Status: RESOLVED`;
+        `, Bass vs Mid ${fmtSigned(preBassMid, 1, 'dB')} -> ${fmtSigned(postBassMid, 1, 'dB')}. Midrange separation confirmed. Status: RESOLVED` + absoluteNote;
     } else if (metCount > 0 && metCount < aspectChecks.length) {
       status = 'PARTIALLY_RESOLVED';
       const remaining: string[] = [];
@@ -555,7 +573,7 @@ function classifyVerifiedFinding(opts: {
       if (!bassMet) remainingActions.push('Apply a restrained 80-120 Hz low-shelf reduction to address Bass vs Mid excess.');
       if (!lowMidMet || !regMet) remainingActions.push('Use a narrow 220-340 Hz bell cut only if the low-mid measurements remain elevated.');
       nextRecommendedAction = remainingActions.join(' ');
-      verificationSummary = `VERIFICATION: Some mud metrics cleared, but ${remainingDeviation}. Status: PARTIALLY RESOLVED`;
+      verificationSummary = `VERIFICATION: Some mud metrics cleared, but ${remainingDeviation}. Status: PARTIALLY RESOLVED` + absoluteNote;
     } else if (anyMeaningfulDrop) {
       status = 'IMPROVED';
       remainingDeviation = `Low-Mid vs Mid remains ${fmtSigned(postLowMid, 1, 'dB')} (limit <= +${thresholds.lowMidBuildupLimit.toFixed(1)} dB)`;
@@ -563,12 +581,12 @@ function classifyVerifiedFinding(opts: {
       verificationSummary =
         `VERIFICATION: Buildup decreased (Low-Mid ${fmtSigned(preLowMid, 1)} -> ${fmtSigned(postLowMid, 1)} dB` +
         (postRegVsMid !== null ? `, 150–400 Hz ${fmtSigned(preRegVsMid, 1)} -> ${fmtSigned(postRegVsMid, 1)} dB` : '') +
-        `), but remains above threshold. Status: IMPROVED`;
+        `), but remains above threshold. Status: IMPROVED` + absoluteNote;
     } else {
       status = 'UNRESOLVED';
       remainingDeviation = `Low-Mid vs Mid at ${fmtSigned(postLowMid, 1, 'dB')}, Bass vs Mid at ${fmtSigned(postBassMid, 1, 'dB')}`;
       nextRecommendedAction = finding.recommendedAction;
-      verificationSummary = `VERIFICATION: No meaningful reduction measured in 150–400 Hz / low-mid energy (${fmtSigned(preLowMid, 1)} -> ${fmtSigned(postLowMid, 1)} dB). Status: UNRESOLVED`;
+      verificationSummary = `VERIFICATION: No meaningful reduction measured in 150–400 Hz / low-mid energy (${fmtSigned(preLowMid, 1)} -> ${fmtSigned(postLowMid, 1)} dB). Status: UNRESOLVED` + absoluteNote;
     }
   } else {
     // Generic evidence-driven classifier for clipping, DC, noise, phase, L/R skew, harshness, over-compression, THD
@@ -654,7 +672,7 @@ export function verifyPostFixAnalysis(input: VerifyPostFixInput): PostFixVerific
   const baselineDiag =
     input.baselineDiagnosis ??
     analyzeTrackIntelligence(input.baselineAnalysis, input.objective, input.referenceAnalysis);
-  const thresholds = getDiagnosisThresholds(input.objective);
+  const thresholds = getDiagnosisThresholds(input.objective, input.referenceAnalysis);
   const objectiveTarget =
     typeof input.objective === 'string' ? undefined : input.objective;
   const appliedCorrections = input.appliedCorrections ?? [];
@@ -662,7 +680,7 @@ export function verifyPostFixAnalysis(input: VerifyPostFixInput): PostFixVerific
   const postId = input.postAnalysisId ?? (input.postAnalysis ? 'post' : 'missing');
   const currentFp = input.currentChainFingerprint ?? 'unknown';
 
-  const baselineRegion = computeRegionEnergyDb(input.baselineAnalysis, 150, 400);
+  const baselineRegion = computeRegionEnergyDb(input.baselineAnalysis, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
 
   const baselineTechnical = baselineDiag.findings.filter(
     (f) => f.kind === 'technical-problem',
@@ -946,7 +964,7 @@ export function verifyPostFixAnalysis(input: VerifyPostFixInput): PostFixVerific
     });
   }
 
-  const postRegion = computeRegionEnergyDb(postAnalysis, 150, 400);
+  const postRegion = computeRegionEnergyDb(postAnalysis, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
 
   return {
     id: `pfv-${Date.now()}`,

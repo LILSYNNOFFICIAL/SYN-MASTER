@@ -1,3 +1,4 @@
+import { MUD_REGION_HZ } from '../dsp/bandMap';
 import type {
   AnalysisFinding,
   AudioAnalysis,
@@ -87,6 +88,7 @@ export interface DiagnosisThresholds {
 
 export function getDiagnosisThresholds(
   objective: MasteringObjectiveId | ResolvedObjectiveTarget,
+  reference?: AudioAnalysis | null,
 ): DiagnosisThresholds {
   const objectiveId = typeof objective === 'string' ? objective : objective.id;
   const bassHeavyStyle =
@@ -101,10 +103,28 @@ export function getDiagnosisThresholds(
     objectiveId === 'electronic' ||
     objectiveId === 'hip-hop';
 
+  let bassMidDiffLimit = bassHeavyStyle ? 14.5 : 11.5;
+  let lowMidBuildupLimit = bassHeavyStyle ? 5.2 : 4.8;
+  let region150To400VsMidLimit = bassHeavyStyle ? 7.2 : 6.8;
+
+  // Reference-relative calibration: a dark or bass-forward genre reference legitimately
+  // carries more low-mid energy than the generic limits allow. Never tighten below the
+  // objective defaults, and allow at most 1 dB above the reference's own balance.
+  if (reference && reference.zoneEnergyDb && Number.isFinite(reference.zoneEnergyDb.mid)) {
+    const refBassMid = reference.zoneEnergyDb.bass - reference.zoneEnergyDb.mid;
+    const refLowMid = reference.zoneEnergyDb.lowMid - reference.zoneEnergyDb.mid;
+    const refRegion = computeRegionEnergyDb(reference, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
+    if (Number.isFinite(refBassMid)) bassMidDiffLimit = Math.max(bassMidDiffLimit, refBassMid + 1.0);
+    if (Number.isFinite(refLowMid)) lowMidBuildupLimit = Math.max(lowMidBuildupLimit, refLowMid + 1.0);
+    if (refRegion !== null) {
+      region150To400VsMidLimit = Math.max(region150To400VsMidLimit, refRegion - reference.zoneEnergyDb.mid + 1.0);
+    }
+  }
+
   return {
-    bassMidDiffLimit: bassHeavyStyle ? 14.5 : 11.5,
-    lowMidBuildupLimit: bassHeavyStyle ? 5.2 : 4.8,
-    region150To400VsMidLimit: bassHeavyStyle ? 7.2 : 6.8,
+    bassMidDiffLimit,
+    lowMidBuildupLimit,
+    region150To400VsMidLimit,
     subExcessLimit: bassHeavyStyle ? 5.5 : 4.5,
     harshExcessLimit: brightStyle ? 3.8 : 3.2,
     dynamicRangeMin: loudStyle ? 4.8 : 5.5,
@@ -130,13 +150,13 @@ export function analyzeTrackIntelligence(
   const workingWell: string[] = [];
   const findings: AnalysisFinding[] = [];
   const objectiveId = typeof objective === 'string' ? objective : objective.id;
-  const thresholds = getDiagnosisThresholds(objective);
+  const thresholds = getDiagnosisThresholds(objective, reference);
 
   const bassMidDiff = analysis.zoneEnergyDb.bass - analysis.zoneEnergyDb.mid;
   const lowMidBuildup = analysis.zoneEnergyDb.lowMid - analysis.zoneEnergyDb.mid;
   const harshExcess = analysis.zoneEnergyDb.highMid - analysis.zoneEnergyDb.mid;
   const subExcess = analysis.zoneEnergyDb.sub - analysis.zoneEnergyDb.bass;
-  const region150To400Db = computeRegionEnergyDb(analysis, 150, 400);
+  const region150To400Db = computeRegionEnergyDb(analysis, MUD_REGION_HZ[0], MUD_REGION_HZ[1]);
   const region150To400VsMid =
     region150To400Db !== null ? region150To400Db - analysis.zoneEnergyDb.mid : null;
   const nf = analysis.noiseFloorDb ?? -72;

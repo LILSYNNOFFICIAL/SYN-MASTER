@@ -31,6 +31,17 @@ The bass-vs-mid refinement path uses a proportional adjustment rather than apply
 
 **Verification is not a promise of perfect sound.** A passing metric does not replace critical listening, and a partially resolved finding means the remaining deviation is still reported. Always audition the rendered result and check it on appropriate monitoring systems.
 
+### Low-mid masking, limiter and delivery checks
+
+- **One band map** (`src/dsp/bandMap.ts`) defines the analyzer zones and the 150–400 Hz mud region used by diagnosis, the Director and verification.
+- **Dynamic low-mid control:** when 150–400 Hz masking is measured, the initial plan adds a dynamic EQ band at 250 Hz (Q 1.0, up to -3 dB) and keeps the static bell light.
+- **Low-mid refinement:** each Fix All pass can deepen one low-mid bell (0.5–1.0 dB per pass, capped at -4 dB in total), retuned toward the measured build-up between 170 and 360 Hz. It never acts on an already hollow midrange. Mud progress counts toward the best checkpoint, and the loop is not marked converged while the mud finding is still open.
+- **Reference-calibrated thresholds:** with a reference loaded, the low-mid limits rise to the reference's own balance plus 1 dB, never below the objective defaults.
+- **Level-matched verification:** mud verification also reports each band's change with the overall loudness change removed, and warns when Mid fell by more than 1 dB.
+- **Limiter:** the lookahead limiter ramps gain across the lookahead window instead of stepping, so transients are not hard-clamped.
+- **Delivery check:** after encoding, the server measures integrated LUFS and true peak on the encoded file and the export panel warns when it is over the ceiling.
+- **Export defaults:** 48 kHz, WAV 24-bit PCM, FLAC 24-bit, MP3 320 kbps, dither off (so FLAC is sample-identical to WAV), Full Dynamic Archive delivery objective, and no metadata unless you enter it.
+
 ### Stem Studio
 
 - Dedicated stem-separation workspace.

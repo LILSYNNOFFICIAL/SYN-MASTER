@@ -841,6 +841,9 @@ function applyBassEnhancer(
   }
 }
 
+/** Samples the most recent limiter pass had to hard-clamp (diagnostic; should be ~0). */
+export let lastLimiterClampCount = 0;
+
 function applyLookaheadLimiter(
   left: Float32Array,
   right: Float32Array,
@@ -881,37 +884,60 @@ function applyLookaheadLimiter(
     }
   }
 
-  const peakRing = new Float32Array(lookSamples);
-  let writeIdx = 0;
+  // 1. Required gain per sample so that sample's (true) peak lands on the ceiling.
+  const required = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const pk = tpEnv[i];
+    required[i] = pk > ceilingLin ? ceilingLin / pk : 1.0;
+  }
+
+  // 2. Lookahead hold: minimum required gain over [i, i + L - 1] (monotonic deque, O(n)).
+  const L = lookSamples;
+  const held = new Float64Array(n);
+  const dq = new Int32Array(n + L);
+  let head = 0;
+  let tail = 0;
+  for (let j = 0; j < n + L - 1; j++) {
+    if (j < n) {
+      while (tail > head && required[dq[tail - 1]] >= required[j]) tail--;
+      dq[tail++] = j;
+    }
+    const i = j - L + 1;
+    if (i >= 0 && i < n) {
+      while (dq[head] < i) head++;
+      held[i] = required[dq[head]];
+    }
+  }
+
+  // 3. Attack ramp: average the held gain over the previous L samples. Because every
+  // held value in [p - L + 1, p] is <= required[p], the ramp reaches the needed
+  // reduction exactly when the peak arrives, with no instantaneous gain step.
+  // 4. Release: recover smoothly toward the ramped target; never rise above it.
+  let runSum = 0;
   let gain = 1.0;
   let maxGr = 0;
-
-  for (let i = 0; i < n + lookSamples; i++) {
-    peakRing[writeIdx] = i < n ? tpEnv[i] : 0;
-
-    let windowPeak = 0;
-    for (let k = 0; k < lookSamples; k++) {
-      if (peakRing[k] > windowPeak) windowPeak = peakRing[k];
-    }
-
-    const desiredGain = windowPeak > ceilingLin ? ceilingLin / windowPeak : 1.0;
-    if (desiredGain < gain) {
-      gain = desiredGain;
-    } else {
-      gain = gain * relCoeff + desiredGain * (1 - relCoeff);
-    }
+  let clampCount = 0;
+  for (let i = 0; i < n; i++) {
+    runSum += held[i];
+    if (i >= L) runSum -= held[i - L];
+    const count = Math.min(i + 1, L);
+    // Before the first L samples, pad the window with held[0] (the minimum required gain
+    // over the opening lookahead), so the opening peak is never under-limited.
+    const attackGain = (runSum + (L - count) * held[0]) / L;
+    const target = attackGain;
+    gain = target < gain ? target : Math.min(target, gain * relCoeff + target * (1 - relCoeff));
 
     const grDb = -linearToDb(Math.max(gain, 1e-6));
     if (grDb > maxGr) maxGr = grDb;
 
-    const outIdx = i - lookSamples;
-    if (outIdx >= 0 && outIdx < n) {
-      left[outIdx] = Math.max(-ceilingLin, Math.min(ceilingLin, drivenL[outIdx] * gain));
-      right[outIdx] = Math.max(-ceilingLin, Math.min(ceilingLin, drivenR[outIdx] * gain));
-    }
-
-    writeIdx = (writeIdx + 1) % lookSamples;
+    const outL = drivenL[i] * gain;
+    const outR = drivenR[i] * gain;
+    // Final safety clamp only; with the ramp above it should almost never engage.
+    if (Math.abs(outL) > ceilingLin * 1.000001 || Math.abs(outR) > ceilingLin * 1.000001) clampCount++;
+    left[i] = Math.max(-ceilingLin, Math.min(ceilingLin, outL));
+    right[i] = Math.max(-ceilingLin, Math.min(ceilingLin, outR));
   }
+  lastLimiterClampCount = clampCount;
 
   return Number(maxGr.toFixed(2));
 }

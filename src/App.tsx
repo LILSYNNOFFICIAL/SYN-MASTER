@@ -128,6 +128,8 @@ const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   flacCompression: 5,
   mp3BitrateKbps: 320,
   oggBitrateKbps: 192,
+  aacBitrateKbps: 320,
+  opusBitrateKbps: 192,
   // Contract defaults: preserve the 48 kHz source rate, 24-bit WAV/FLAC, MP3 320 kbps.
   // Dither off so the 24-bit FLAC is sample-identical to the 24-bit WAV.
   sampleRate: 48000,
@@ -140,9 +142,10 @@ const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   normalizeToTarget: false,
   targetLufs: -14,
   ceilingDb: -1.0,
-  deliveryProfile: 'streaming',
-  metadataTitle: 'Untitled Master',
-  metadataArtist: 'SYN MASTER',
+  // Contract: no fixed loudness target, so the default delivery objective preserves dynamics.
+  deliveryProfile: 'archive',
+  metadataTitle: '',
+  metadataArtist: '',
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -272,6 +275,7 @@ export default function App() {
   const [renderingExport, setRenderingExport] = useState(false);
   const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
   const [exportDownloadName, setExportDownloadName] = useState<string | null>(null);
+  const [exportDeliveryCheck, setExportDeliveryCheck] = useState<{ text: string; warning: boolean } | null>(null);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
 
   // Subscribe to SynHostBridge and load IndexedDB projects, chains & settings on mount
@@ -1581,6 +1585,7 @@ export default function App() {
       const safeStem = (exportConfig.filename.trim() || 'SYN_Master').replace(/[<>:"/\\|?*]/g, '_');
       let blob: Blob;
       let extension: string;
+      let deliveryCheck: { text: string; warning: boolean } | null = null;
 
       if (exportConfig.format === 'mid') {
         blob = encodeMidiTempoFile(safeStem, activeTrack.durationSec, exportConfig.midiTempoBpm ?? 120, exportConfig.saveLoopMarkers ?? true);
@@ -1608,9 +1613,12 @@ export default function App() {
           flacCompression: String(exportConfig.flacCompression ?? 5),
           mp3BitrateKbps: String(exportConfig.mp3BitrateKbps ?? 320),
           oggBitrateKbps: String(exportConfig.oggBitrateKbps ?? 192),
+          aacBitrateKbps: String(exportConfig.aacBitrateKbps ?? 320),
+          opusBitrateKbps: String(exportConfig.opusBitrateKbps ?? 192),
           dither: exportConfig.dither,
-          metadataTitle: exportConfig.metadataTitle,
-          metadataArtist: exportConfig.metadataArtist,
+          metadataTitle: exportConfig.metadataTitle ?? '',
+          metadataArtist: exportConfig.metadataArtist ?? '',
+          ceilingDb: String(exportConfig.ceilingDb),
         });
         const response = await fetch('/api/export/encode?' + params.toString(), {
           method: 'POST',
@@ -1622,6 +1630,22 @@ export default function App() {
           throw new Error(payload.error || 'Audio export failed (HTTP ' + response.status + ').');
         }
         blob = await response.blob();
+        // Delivery check: the server measures the encoded file itself, after resampling and codec.
+        const measuredLufs = Number(response.headers.get('X-Syn-Integrated-Lufs'));
+        const measuredTp = Number(response.headers.get('X-Syn-True-Peak-Dbtp'));
+        if (response.headers.has('X-Syn-True-Peak-Dbtp') && Number.isFinite(measuredTp)) {
+          const overCeiling = measuredTp > exportConfig.ceilingDb + 0.05;
+          deliveryCheck = {
+            warning: overCeiling,
+            text:
+              `Encoded file: ${Number.isFinite(measuredLufs) ? measuredLufs.toFixed(1) + ' LUFS integrated, ' : ''}${measuredTp.toFixed(1)} dBTP true peak` +
+              (overCeiling
+                ? ` (over the ${exportConfig.ceilingDb.toFixed(1)} dBTP ceiling after encoding; lower the ceiling or limiter output and re-render).`
+                : ` (within the ${exportConfig.ceilingDb.toFixed(1)} dBTP ceiling).`),
+          };
+        } else {
+          deliveryCheck = { warning: true, text: 'Encoded file could not be measured; check true peak before delivery.' };
+        }
         extension = exportConfig.format === 'webm-opus' ? 'webm' : exportConfig.format;
       }
 
@@ -1630,6 +1654,7 @@ export default function App() {
       const safeName = safeStem + '.' + extension;
       setExportDownloadUrl(url);
       setExportDownloadName(safeName);
+      setExportDeliveryCheck(deliveryCheck);
       setStatusNotice('Rendered ' + exportConfig.format.toUpperCase() + ' master "' + safeName + '".');
     } catch (err) {
       setStatusNotice(err instanceof Error ? err.message : 'Master export failed');
@@ -2546,6 +2571,7 @@ export default function App() {
         rendering={renderingExport}
         downloadUrl={exportDownloadUrl}
         downloadFilename={exportDownloadName}
+        deliveryCheck={exportDeliveryCheck}
         hasTrack={Boolean(activeTrack)}
         onChange={setExportConfig}
         onRender={handleRenderExport}
