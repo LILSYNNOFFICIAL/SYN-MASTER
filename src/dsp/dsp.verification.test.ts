@@ -472,3 +472,23 @@ test('SYN-Restore resonance suppression leaves a coherent musical harmonic famil
     'A coherent harmonic instrument spectrum must not receive independent narrow resonance cuts',
   );
 });
+
+
+test('Analyzer does not treat a silent channel in one frequency band as perfect phase correlation', () => {
+  const n = SR;
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    left[i] = 0.2 * Math.sin((2 * Math.PI * 7000 * i) / SR);
+  }
+  const analysis = analyzeAudioBuffer([left, right], SR);
+  assert.equal(
+    analysis.stereoBandCorrelation.high,
+    0,
+    'A one-sided high-frequency band has no measurable inter-channel phase correlation',
+  );
+  assert.ok(
+    analysis.monoCompatibilityScore < 80,
+    'One-sided high-frequency content must not inflate mono compatibility',
+  );
+});
