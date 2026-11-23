@@ -42,6 +42,10 @@ export const VERIFIED_NATIVE_PROCESSOR_INVENTORY: Record<
       deEssFreqHz: { min: 3500, max: 11000, defaultValue: 6500, unit: 'Hz' },
       resonanceSuppress: { min: 0, max: 100, defaultValue: 15, unit: '%' },
       mode: { options: ['conservative', 'aggressive'], defaultValue: 'conservative' },
+      declick: { min: 0, max: 100, defaultValue: 0, unit: '%' },
+      decrackle: { min: 0, max: 100, defaultValue: 0, unit: '%' },
+      spikeRepair: { defaultValue: false },
+      deShimmer: { min: 0, max: 100, defaultValue: 0, unit: '%' },
     },
   },
   'parametric-eq': {

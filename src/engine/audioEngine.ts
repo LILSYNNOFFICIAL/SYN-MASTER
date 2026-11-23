@@ -152,7 +152,12 @@ export class SynAudioEngine {
   public setOverrideBuffer(key: string, channels: Float32Array[], sampleRate: number): void {
     this.overrideBuffers.set(key, this.createAudioBufferFromChannels(channels, sampleRate));
     if (key === 'mastered-external' && this.auditionTarget === 'mastered') {
-      this.rebuildLiveGraph();
+      if (this.isPlaying && !this.chainBypassed) {
+        // Hot-swap to the freshly verified render at the current position.
+        this.play(this.getCurrentTimeSec());
+      } else {
+        this.rebuildLiveGraph();
+      }
     }
   }
 

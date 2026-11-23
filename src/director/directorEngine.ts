@@ -1,3 +1,5 @@
+import { evaluateMasterTargets, type MasterTargetGate } from './masterTargets';
+import type { RestoreParams } from '../types/mastering';
 import type {
   AiChainLifecycleState,
   AIMasteringStrategy,
@@ -352,7 +354,9 @@ export function buildExplainableMasterPlan(input: {
 
   // Stage 1: SYN-Restore ONLY if genuine DC offset, elevated quiet-frame noise floor, or strong sibilance/resonance exists
   const hasGenuineNoiseFloor = nf > -48 && analysis.rmsDb - nf >= 12;
+  const baselineClicks = analysis.clickCount ?? 0;
   const needsRestore =
+    baselineClicks > 0 ||
     analysis.dcOffset >= 0.004 ||
     hasGenuineNoiseFloor ||
     (analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 && analysis.resonances.some((r) => r.freqHz > 4500));
@@ -368,6 +372,11 @@ export function buildExplainableMasterPlan(input: {
       deEssFreqHz: 6800,
       resonanceSuppress: analysis.resonances.length > 0 ? 16 : 6,
       mode: 'conservative' as const,
+      // Fix clicks on the FIRST pass when they are measured, instead of waiting for a later pass.
+      declick: baselineClicks > 0 ? Math.min(85, 45 + baselineClicks * 2) : 0,
+      decrackle: baselineClicks > 20 ? 35 : baselineClicks > 0 ? 15 : 0,
+      spikeRepair: baselineClicks > 0,
+      deShimmer: 0,
     };
     recommendations.push({
       id: 'rec-restore',
@@ -382,7 +391,7 @@ export function buildExplainableMasterPlan(input: {
       ],
       proposedCorrection: 'Engage conservative pre-master cleanup prior to tonal EQ & compression.',
       selectedProcessor: 'restore',
-      proposedParamsSummary: `DC=${restoreParams.dcOffset ? 'ON' : 'OFF'}, Hiss=${restoreParams.hissReduction}%, De-Ess=${restoreParams.deEssAmount}% @ 6.8kHz (Conservative)`,
+      proposedParamsSummary: `${baselineClicks > 0 ? `De-click=${restoreParams.declick}% (${baselineClicks} clicks), ` : ''}DC=${restoreParams.dcOffset ? 'ON' : 'OFF'}, Hiss=${restoreParams.hissReduction}%, De-Ess=${restoreParams.deEssAmount}% @ 6.8kHz (Conservative)`,
       commands: [
         {
           op: 'add',
@@ -2012,15 +2021,12 @@ export async function runAutonomousDirectorLoop(
   });
   const preAnalysis = baselineRendered.analysis;
   const objective = resolveObjectiveTarget(opts.objectiveId, opts.customSpec, opts.referenceAnalysis);
-  const qcProfile: QCTargetProfile = opts.qcProfile ?? {
-    ...QC_TARGET_PROFILES[0],
-    id: `dir-${objective.id}`,
-    name: `${objective.label} Delivery`,
-    targetLufs: objective.targetLufs,
-    lufsTolerance: objective.lufsTolerance,
-    maxTruePeakDb: objective.maxTruePeakDb,
-    minDynamicRangeDb: objective.minDynamicRangeDb,
-  };
+  // VERIFY FIX: the QC profile and the mastering objective used to be chosen separately
+  // (e.g. objective "Electronic" -9.5 LUFS while QC stayed on "Streaming" -14 LUFS). The
+  // refinement chased one loudness target while QC judged against another, so a run could
+  // never truly pass, or "passed" against the wrong target. The objective is now the single
+  // source of truth for loudness / true peak; the QC profile only supplies its other limits.
+  const qcProfile: QCTargetProfile = alignQcProfileToObjective(opts.qcProfile ?? QC_TARGET_PROFILES[0], objective);
 
   emit('Planning', 0, undefined, undefined, undefined, 'Planning');
   const plan = buildExplainableMasterPlan({
@@ -2081,6 +2087,10 @@ export async function runAutonomousDirectorLoop(
       outcome: 'baseline',
     },
   };
+  baseCheckpoint.targetGate = evaluateMasterTargets(preAnalysis, objective, {
+    preAnalysis,
+    referenceAnalysis: opts.referenceAnalysis,
+  });
   checkpoints.push(baseCheckpoint);
   emit('Planning', 0, undefined, baseCheckpoint, undefined, 'Planning');
 
@@ -2291,9 +2301,21 @@ export async function runAutonomousDirectorLoop(
       mudVsMid(post) <= mudVsMid(bestCheckpoint.analysis) - 0.1 &&
       multiObjective.engineeringFitIndex >= bestCheckpoint.multiObjective.engineeringFitIndex - 0.5 &&
       qcReport.failCount <= bestCheckpoint.qcReport.failCount;
+    // Objective gate measured on THIS pass's rendered audio.
+    const targetGate = evaluateMasterTargets(post, objective, {
+      preAnalysis,
+      referenceAnalysis: opts.referenceAnalysis,
+    });
+    const bestGatePassed = bestCheckpoint.passNumber > 0 && Boolean(bestCheckpoint.targetGate?.passed);
+    // A pass that meets every objective target (without a hard regression) beats a retained
+    // pass that does not; a pass that fails the gate can never replace one that passes it.
+    const gateUpgrade = !hardRegression && targetGate.passed && !bestGatePassed;
+    const gateDowngrade = bestGatePassed && !targetGate.passed;
     const improved =
       !hardRegression &&
-      (isFirstValid ||
+      !gateDowngrade &&
+      (gateUpgrade ||
+        isFirstValid ||
         mudProgress ||
         multiObjective.engineeringFitIndex > bestCheckpoint.multiObjective.engineeringFitIndex + 0.05 ||
         (qcReport.failCount < bestCheckpoint.qcReport.failCount &&
@@ -2309,6 +2331,7 @@ export async function runAutonomousDirectorLoop(
       analysis: post,
       qcReport,
       multiObjective,
+      targetGate,
       iterationSummary: {
         activeProcessor: workingChain.map((m) => m.name).slice(0, 3).join(' + ') || 'Dry Pass',
         detectedIssue:
@@ -2334,7 +2357,7 @@ export async function runAutonomousDirectorLoop(
         'evaluate',
         'verified-result',
         `Pass ${pass} measured: ${post.integratedLufs.toFixed(1)} LUFS, ${post.truePeakDb.toFixed(2)} dBTP, DR ${post.dynamicRangeDb.toFixed(1)} dB, Fit ${multiObjective.engineeringFitIndex.toFixed(1)}/100, QC ${qcReport.overallStatus.toUpperCase()}.`,
-        `THD ${post.thdEstimatePercent.toFixed(2)}% · Clipped ${post.clippedSamples} · Phase ${post.phaseCorrelation.toFixed(2)}`,
+        `THD ${post.thdEstimatePercent.toFixed(2)}% · Clipped ${post.clippedSamples} · Clicks ${post.clickCount ?? 0} · Phase ${post.phaseCorrelation.toFixed(2)} · Gate ${targetGate.passed ? 'PASS' : 'FAIL'}${targetGate.passed ? '' : ` (${targetGate.failed.map((c) => c.label).join(', ')})`}`,
       ),
       cp,
       undefined,
@@ -2371,25 +2394,33 @@ export async function runAutonomousDirectorLoop(
       break;
     }
 
-    // Check convergence / early stop
-    const lufsOk = Math.abs(post.integratedLufs - objective.targetLufs) <= 0.65;
-    const tpOk = post.truePeakDb <= objective.maxTruePeakDb + 0.05;
-    // Loudness and QC alone are not convergence: a measured low-mid masking finding that
-    // the refinement step can still act on keeps the loop going (bounded by maxIterations
-    // and the -4 dB refinement cap, after which no further commands are derived).
+    // Check convergence / early stop.
+    // VERIFY FIX: convergence used to be judged on the pass just rendered even when that
+    // pass had been REJECTED by the regression guards. The run then reported "Converged"
+    // while the chain actually delivered was an older pass that never met the targets.
+    // Convergence is now judged only on the retained best pass, using the objective gate
+    // measured on its rendered audio.
+    const bestIsThisPass = bestCheckpoint === cp;
     const mudStillOpen = postDiagnosis.findings.some((f) => f.id === 'diag-mud');
-    if (lufsOk && tpOk && !mudStillOpen && qcReport.overallStatus === 'pass' && multiObjective.engineeringFitIndex >= 90) {
+    if (
+      bestIsThisPass &&
+      targetGate.passed &&
+      !mudStillOpen &&
+      qcReport.overallStatus !== 'fail'
+    ) {
       if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
       finalStatus = 'converged';
-      stopReason = `Converged on Pass ${pass}: LUFS (${post.integratedLufs.toFixed(1)}), True Peak (${post.truePeakDb.toFixed(2)} dBTP), and all QC checks passed.`;
+      stopReason = `Converged on Pass ${pass}: re-measured render meets every objective target (LUFS ${post.integratedLufs.toFixed(1)}, True Peak ${post.truePeakDb.toFixed(2)} dBTP, clips ${post.clippedSamples}, clicks ${post.clickCount ?? 0}).`;
       emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
       break;
     }
 
-    if (pass > 1 && !mudStillOpen && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold && qcReport.failCount === 0) {
-      if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
+    // A plateau is only a reason to stop once the retained pass already meets the gate;
+    // otherwise keep iterating until the pass cap, the budget, or no safe command remains.
+    const bestGateNow = Boolean(bestCheckpoint.targetGate?.passed) && bestCheckpoint.passNumber > 0;
+    if (pass > 1 && bestGateNow && !mudStillOpen && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold && bestCheckpoint.qcReport.failCount === 0) {
       finalStatus = 'completed';
-      stopReason = `Stopped safely after Pass ${pass}: refinement reached a plateau (ΔFit ${(multiObjective.engineeringFitIndex - lastFit).toFixed(2)} < ${convergenceThreshold}). Remaining deviations are retained in verification; this is not labeled target convergence.`;
+      stopReason = `Stopped safely after Pass ${pass}: retained Pass ${bestCheckpoint.passNumber} meets the objective gate and further refinement reached a plateau (ΔFit ${(multiObjective.engineeringFitIndex - lastFit).toFixed(2)} < ${convergenceThreshold}).`;
       emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
       break;
     }
@@ -2464,7 +2495,8 @@ export async function runAutonomousDirectorLoop(
         const refinementSourceQc = bestCheckpoint.passNumber > 0 ? bestCheckpoint.qcReport : qcReport;
         const refinementSourceEval = bestCheckpoint.passNumber > 0 ? bestCheckpoint.multiObjective : multiObjective;
 
-        const { commands, hypothesis } = deriveRefinementCommands(
+        // eslint-disable-next-line prefer-const
+        let { commands, hypothesis } = deriveRefinementCommands(
           preAnalysis,
           refinementSourcePost,
           refinementSourceChain,
@@ -2474,6 +2506,12 @@ export async function runAutonomousDirectorLoop(
           { prevLufsError },
         );
         prevLufsError = objective.targetLufs - refinementSourcePost.integratedLufs;
+        const refinementGate = bestCheckpoint.passNumber > 0 ? bestCheckpoint.targetGate : targetGate;
+        if (refinementGate) {
+          const gateFix = deriveGateRepairCommands(refinementGate, refinementSourceChain, refinementSourcePost);
+          commands.push(...gateFix.commands);
+          if (gateFix.reasons.length > 0) hypothesis = [hypothesis, ...gateFix.reasons].filter(Boolean).join(' · ');
+        }
 
         if (commands.length === 0) {
           finalStatus = 'completed';
@@ -2532,6 +2570,18 @@ export async function runAutonomousDirectorLoop(
   }
   bestCheckpoint.isBest = true;
 
+  // Final verification gate on the DELIVERED render. "Converged" is only reported when the
+  // retained pass's re-measured audio meets every objective target.
+  const finalGate =
+    bestCheckpoint.targetGate ??
+    evaluateMasterTargets(bestCheckpoint.analysis, objective, { preAnalysis, referenceAnalysis: opts.referenceAnalysis });
+  if (finalStatus === 'converged' && !finalGate.passed) finalStatus = 'completed';
+  if (finalStatus !== 'stopped-by-user') {
+    stopReason = finalGate.passed
+      ? `${stopReason} Final verification: all objective targets met on the delivered render.`
+      : `${stopReason} Final verification: NOT all targets met. ${finalGate.summary}`;
+  }
+
   emit(
     finalStatus === 'stopped-by-user' ? 'Stopped' : 'Completed',
     bestCheckpoint.passNumber,
@@ -2541,7 +2591,7 @@ export async function runAutonomousDirectorLoop(
     finalStatus === 'stopped-by-user' ? 'Stopped' : 'Completed',
   );
 
-  return buildFinalReportFromState({
+  const finalReport = buildFinalReportFromState({
     operatingMode: opts.operatingMode,
     objective,
     status: finalStatus,
@@ -2560,4 +2610,85 @@ export async function runAutonomousDirectorLoop(
     checkpoints,
     activityLog,
   });
+  finalReport.targetGate = finalGate;
+  return finalReport;
+}
+
+/** Keep QC loudness / true-peak limits identical to the mastering objective. */
+export function alignQcProfileToObjective(
+  profile: QCTargetProfile,
+  objective: ResolvedObjectiveTarget,
+): QCTargetProfile {
+  return {
+    ...profile,
+    id: `${profile.id}@${objective.id}`,
+    name: `${objective.label} Delivery (${objective.targetLufs.toFixed(1)} LUFS / ${objective.maxTruePeakDb.toFixed(1)} dBTP)`,
+    targetLufs: objective.targetLufs,
+    lufsTolerance: Math.min(profile.lufsTolerance, objective.lufsTolerance),
+    maxTruePeakDb: objective.maxTruePeakDb,
+    minDynamicRangeDb: objective.minDynamicRangeDb,
+  };
+}
+
+/**
+ * Commands for gate failures the classic refinement path does not cover:
+ * clicks/pops (Restore de-click / spike repair) and DC offset.
+ */
+export function deriveGateRepairCommands(
+  gate: MasterTargetGate,
+  chain: ProcessorModule[],
+  post: AudioAnalysis,
+): { commands: ChainCommand[]; reasons: string[] } {
+  const commands: ChainCommand[] = [];
+  const reasons: string[] = [];
+  const failed = new Set(gate.failed.map((c) => c.id));
+  const restoreMod = chain.find((m) => m.type === 'restore');
+  const wantsClicks = failed.has('clicks');
+  const wantsDc = failed.has('dc-offset');
+  if (!wantsClicks && !wantsDc) return { commands, reasons };
+  if (restoreMod) {
+    const rp = restoreMod.params as RestoreParams;
+    const patch: Partial<RestoreParams> = {};
+    if (wantsClicks) {
+      patch.declick = Math.min(100, Math.max(40, (rp.declick ?? 0) + 25));
+      patch.decrackle = Math.min(80, Math.max(20, (rp.decrackle ?? 0) + 15));
+      patch.spikeRepair = true;
+      reasons.push(`De-click ${patch.declick}% / de-crackle ${patch.decrackle}% for ${post.clickCount ?? 0} measured click(s)`);
+    }
+    if (wantsDc) {
+      patch.dcOffset = true;
+      reasons.push('DC offset removal on');
+    }
+    commands.push({
+      op: 'configure',
+      targetId: restoreMod.id,
+      processorType: 'restore',
+      paramsPatch: patch,
+      rationale: reasons.join('; '),
+    });
+  } else {
+    const params: RestoreParams = {
+      dcOffset: wantsDc,
+      humRemovalHz: 0,
+      hissReduction: 0,
+      deEssAmount: 0,
+      deEssFreqHz: 6800,
+      resonanceSuppress: 0,
+      mode: 'conservative',
+      declick: wantsClicks ? 55 : 0,
+      decrackle: wantsClicks ? 25 : 0,
+      spikeRepair: wantsClicks,
+      deShimmer: 0,
+    };
+    commands.push({
+      op: 'add',
+      processorType: 'restore',
+      position: 0,
+      name: 'SYN-Repair (De-click / DC)',
+      params,
+      rationale: 'Prepend repair stage: measured clicks/pops or DC offset fail the objective gate.',
+    });
+    reasons.push(wantsClicks ? `Add de-click for ${post.clickCount ?? 0} measured click(s)` : 'Add DC offset removal');
+  }
+  return { commands, reasons };
 }

@@ -1,3 +1,4 @@
+import { detectClicks } from './clickDetect';
 import type { AudioAnalysis, ResonancePeak, SpectralBandEnergy } from '../types/mastering';
 import { SPECTRAL_ZONES_HZ } from './bandMap';
 import { BiquadCoeffs, designHighPass, designHighShelf, designLowPass, processBiquadBuffer } from './biquad';
@@ -295,6 +296,7 @@ export function analyzeAudioBuffer(
   const samplePeakDb = linearToDb(samplePeak);
   const truePeakDb = linearToDb(truePeak);
   const dcOffset = Math.max(Math.abs(sumL / Math.max(1, length)), Math.abs(sumR / Math.max(1, length)));
+  const clicks = detectClicks(numChannels > 1 ? [left, right] : [left], sampleRate);
 
   // 2. Stereo Correlation & Width
   const denom = Math.sqrt(sumSqL * sumSqR);
@@ -813,6 +815,9 @@ export function analyzeAudioBuffer(
     noiseFloorDb,
     dcOffset: Number(dcOffset.toFixed(5)),
     loudnessHistoryLufs,
+    clickCount: clicks.clickCount,
+    clicksPerMinute: clicks.clicksPerMinute,
+    clickTimesSec: clicks.clickTimesSec,
   };
 }
 

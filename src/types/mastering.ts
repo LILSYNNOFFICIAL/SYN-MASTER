@@ -123,6 +123,11 @@ export interface RestoreParams {
   deEssFreqHz: number; // 4000 to 10000
   resonanceSuppress: number; // 0 to 100
   mode: 'conservative' | 'aggressive';
+  /** AI-audio repair (src/dsp/repair.ts). Optional so older saved chains still load. */
+  declick?: number; // 0 to 100
+  decrackle?: number; // 0 to 100
+  spikeRepair?: boolean;
+  deShimmer?: number; // 0 to 100
 }
 
 export interface BassEnhancerParams {
@@ -259,6 +264,10 @@ export interface AudioAnalysis {
   noiseFloorDb: number;
   dcOffset: number;
   loudnessHistoryLufs: number[];
+  /** Objective click/pop events found by src/dsp/clickDetect.ts (optional for older saved analyses). */
+  clickCount?: number;
+  clicksPerMinute?: number;
+  clickTimesSec?: number[];
 }
 
 export interface AudioTrackAsset {
@@ -859,6 +868,8 @@ export interface DirectorCheckpoint {
   analysis: AudioAnalysis;
   qcReport: QCReport;
   multiObjective: MultiObjectiveEvaluation;
+  /** Objective target gate measured on this pass's rendered audio (src/director/masterTargets.ts). */
+  targetGate?: import('../director/masterTargets').MasterTargetGate;
   isBest?: boolean;
   iterationSummary?: {
     activeProcessor: string;
@@ -915,6 +926,8 @@ export interface MasterFinalReport {
   objective: ResolvedObjectiveTarget;
   status: 'completed' | 'converged' | 'stopped-by-user' | 'budget-reached' | 'rolled-back';
   stopReason: string;
+  /** Objective gate re-measured on the delivered (best) render. passed=false means the master did NOT meet targets. */
+  targetGate?: import('../director/masterTargets').MasterTargetGate;
   iterationsExecuted: number;
   bestPassNumber: number;
   rolledBack: boolean;

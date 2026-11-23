@@ -1,3 +1,4 @@
+import { applyRepair } from './repair';
 import type {
   BassEnhancerParams,
   CompressorParams,
@@ -667,6 +668,13 @@ function applyRestore(
 ): number {
   const n = left.length;
   let maxGr = 0;
+
+  // 0. AI-audio repair first: clicks and spikes must be gone before any dynamics
+  // stage reacts to them (src/dsp/repair.ts).
+  if ((params.declick ?? 0) > 0 || (params.decrackle ?? 0) > 0 || params.spikeRepair || (params.deShimmer ?? 0) > 0) {
+    const rep = applyRepair(left, right, sampleRate, params, intensityScale);
+    maxGr = Math.max(maxGr, rep.shimmerGrDb);
+  }
 
   // 1. DC Offset removal
   if (params.dcOffset) {

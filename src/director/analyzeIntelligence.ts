@@ -265,6 +265,30 @@ export function analyzeTrackIntelligence(
     });
   }
 
+  // 2b. Clicks / pops / AI-generation spikes (Technical problem, objective detector)
+  const clickCount = analysis.clickCount ?? 0;
+  if (clickCount > 0) {
+    findings.push({
+      id: 'diag-clicks',
+      kind: 'technical-problem',
+      category: 'Integrity',
+      title: 'Clicks / Pops / Transient Spikes',
+      severity: clickCount > 20 ? 'high' : clickCount > 4 ? 'moderate' : 'low',
+      evidence: [
+        `Click events: ${clickCount}${analysis.clicksPerMinute !== undefined ? ` (${analysis.clicksPerMinute}/min)` : ''}`,
+        ...(analysis.clickTimesSec && analysis.clickTimesSec.length > 0
+          ? [`First at: ${analysis.clickTimesSec.slice(0, 6).map((t) => `${t.toFixed(2)}s`).join(', ')}`]
+          : []),
+      ],
+      metrics: {
+        clickCount,
+      },
+      explanation:
+        'Isolated waveform discontinuities (typical of AI-generated audio, bad edits or crackle) become more audible after limiting and loudness gain.',
+      recommendedAction: 'Enable SYN-Restore de-click / de-crackle and transient spike repair before dynamics.',
+    });
+  }
+
   // 3. Elevated Broadband Noise Floor (Technical problem when quiet frames separate >=12 dB from program RMS)
   if (nf > thresholds.noiseFloorMax && analysis.rmsDb > -40 && analysis.rmsDb - nf >= 12) {
     findings.push({

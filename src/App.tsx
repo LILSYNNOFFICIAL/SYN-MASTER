@@ -54,6 +54,7 @@ import {
   buildBattleCandidatesIntelligent,
   buildExplainableMasterPlan,
   compareReferenceIntelligent,
+  alignQcProfileToObjective,
   resolveObjectiveTarget,
   runAutonomousDirectorLoop,
   type ExplainableMasterPlan,
@@ -381,7 +382,10 @@ export default function App() {
             error: null,
             timestamp: Date.now(),
           });
-          if (result.usedExternalHost) {
+          // VERIFY FIX: "Mastered" playback now plays the exact offline render that was
+          // measured and verified (and that export uses), instead of the approximate realtime
+          // Web Audio graph, which could sound different from what passed verification.
+          if (effectiveChain.length > 0) {
             engineRef.current!.setOverrideBuffer('mastered-external', result.channels, track.sampleRate);
           } else {
             engineRef.current!.clearOverrideBuffer('mastered-external');
@@ -1140,9 +1144,15 @@ export default function App() {
     setStatusNotice(`Saved project "${projectName}" to IndexedDB.`);
   };
 
+  // QC loudness / true-peak limits always follow the selected mastering objective, so the
+  // QC panel, the Fix-All loop and post-fix verification judge against the SAME target.
   const activeQcProfile = useMemo(
-    () => QC_TARGET_PROFILES.find((p) => p.id === qcTargetId) ?? QC_TARGET_PROFILES[0],
-    [qcTargetId],
+    () =>
+      alignQcProfileToObjective(
+        QC_TARGET_PROFILES.find((p) => p.id === qcTargetId) ?? QC_TARGET_PROFILES[0],
+        resolveObjectiveTarget(objectiveId, customObjective, referenceTrack?.analysis ?? null),
+      ),
+    [qcTargetId, objectiveId, customObjective, referenceTrack],
   );
 
   const qcReport = useMemo(() => {
@@ -1536,6 +1546,8 @@ export default function App() {
       setAiLifecycleState(report.status === 'stopped-by-user' ? 'Stopped' : 'Completed');
 
       if (runOperatingMode !== 'manual' && report.finalChain.length > 0) {
+        // The delivered chain must be audible and re-measured exactly as the loop verified it.
+        setChainBypassed(false);
         updateChainWithHistory(structuredClone(report.finalChain));
         recordCorrection(
           `CHAIN WITH AI (${report.objective.label} · Pass #${report.bestPassNumber})`,

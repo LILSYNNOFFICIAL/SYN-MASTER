@@ -53,14 +53,14 @@ Keep the **black and gold** look, but with a completely new style/CSS and a rear
 
 Priority order. Tick as done; note open problems inline.
 
-- [ ] Rewrite README with Vision / Spec + Roadmap (handoff note)
-- [ ] Audit + fix the Fix-All verify / re-analyze loop (root cause documented below)
+- [x] Rewrite README with Vision / Spec + Roadmap (handoff note)
+- [x] Audit + fix the Fix-All verify / re-analyze loop (root cause documented below)
 - [ ] New first screen: "Import your track" drag-and-drop
 - [ ] Waveform with time grid + big centered "FIX IT ALL WITH AI" button that runs the full auto-master and reveals technical details
 - [ ] Diagnostic log panel (every issue + exact per-tool settings), downloadable as JSON and text
-- [ ] Iterative fix/verify engine on objective metrics (LUFS, dBTP, LRA, crest, clips, clicks, spectral balance vs reference curve, phase correlation, DC) with max-iteration cap
-- [ ] De-click / de-crackle / transient spike repair
-- [ ] AI-shimmer / metallic artifact reduction
+- [x] Iterative fix/verify engine on objective metrics (LUFS, dBTP, LRA, crest, clips, clicks, spectral balance vs reference curve, phase correlation, DC) with max-iteration cap (`src/director/masterTargets.ts`, gate wired into `runAutonomousDirectorLoop`, cap 10 passes / 120 s)
+- [x] De-click / de-crackle / transient spike repair (`src/dsp/repair.ts`, detector `src/dsp/clickDetect.ts`, exposed as SYN-Restore params `declick`, `decrackle`, `spikeRepair`)
+- [x] AI-shimmer / metallic artifact reduction (SYN-Restore `deShimmer`, dynamic 9 kHz+ band reduction weighted to the side channel)
 - [ ] New black + gold layout and CSS
 - [ ] Floating draggable/resizable FX rack window with reorder, bypass and add/remove dropdown
 - [ ] FL-style parametric EQ (spectrum, draggable nodes, band types)
@@ -71,8 +71,13 @@ Priority order. Tick as done; note open problems inline.
 - [ ] A/B compare
 - [ ] Remaining tools (HPF/LPF, crossovers, imager, saturation/exciter, dither) exposed in manual mode and controllable by the AI
 
-### Verification bug: root cause
-_To be filled in when the fix lands._
+### Verification bug: root cause (fixed)
+Four problems combined so that "FIX ALL & VERIFY" could say a track was mastered when it was not:
+
+1. **"Converged" was judged on a rejected pass.** The convergence check looked at the pass that had *just* been rendered, even when the regression guards had rejected that pass. The run then reported "Converged" while the chain actually delivered was an older pass that never met the targets. Convergence is now judged only on the retained best pass.
+2. **Two different loudness targets.** The mastering objective (e.g. Electronic, -9.5 LUFS) and the QC profile (default Streaming, -14 LUFS) were chosen separately. The loop pushed toward one target while QC judged against the other, so a run could never truly pass, or passed against the wrong number. The objective is now the single source of truth for LUFS / true peak (`alignQcProfileToObjective`), in the loop and in the QC panel.
+3. **No objective pass/fail gate.** "Done" leaned on a heuristic fit score (≥ 90) and QC. Now every pass's rendered audio is re-measured by `evaluateMasterTargets` (LUFS, dBTP, clipped samples, clicks, DC, phase, low-end phase, dynamics collapse, crest collapse, spectral balance vs reference). A gate-passing pass always beats a failing one, convergence requires the gate, plateaus no longer stop the loop while the gate fails, and the final report states plainly whether targets were met (`report.targetGate`). Clicks/pops were not measured at all before; they are now detected and fixed on the first pass.
+4. **What you heard was not what was verified.** "Mastered" playback ran an approximate realtime Web Audio graph, while verification and export used the offline renderer. Playback now uses the exact verified offline render (hot-swapped after each re-render).
 
 ### Open items
 _None yet._

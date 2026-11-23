@@ -105,6 +105,10 @@ export function createDefaultParams(type: ProcessorType): ProcessorModule['param
         deEssFreqHz: 6500,
         resonanceSuppress: 15,
         mode: 'conservative',
+        declick: 0,
+        decrackle: 0,
+        spikeRepair: false,
+        deShimmer: 0,
       } satisfies RestoreParams;
     case 'bass-enhancer':
       return {
@@ -306,6 +310,10 @@ export function validateProcessorParams(
         deEssFreqHz: clamp(Number(src.deEssFreqHz), 3500, 11000, def.deEssFreqHz),
         resonanceSuppress: clamp(Number(src.resonanceSuppress), 0, 100, def.resonanceSuppress),
         mode: src.mode === 'aggressive' ? 'aggressive' : 'conservative',
+        declick: clamp(Number(src.declick), 0, 100, def.declick ?? 0),
+        decrackle: clamp(Number(src.decrackle), 0, 100, def.decrackle ?? 0),
+        spikeRepair: src.spikeRepair === true,
+        deShimmer: clamp(Number(src.deShimmer), 0, 100, def.deShimmer ?? 0),
       };
     }
     case 'bass-enhancer': {
