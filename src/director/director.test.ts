@@ -938,3 +938,29 @@ test('Analysis reliability rejects malformed optional frequency-band phase telem
     'Out-of-range band correlation must be rejected',
   );
 });
+
+
+test('Explainable plan still targets a genuinely isolated upper-mid resonance', () => {
+  const n = Math.floor(SR * 2);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  let seed = 71;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const broadband = ((seed / 4294967296) * 2 - 1) * 0.018;
+    const resonance = 0.24 * Math.sin(2 * Math.PI * 3100 * t);
+    left[i] = broadband + resonance;
+    right[i] = broadband * 0.98 + resonance;
+  }
+  const analysis = analyzeAudioBuffer([left, right], SR);
+  assert.ok(
+    analysis.resonances.some((resonance) => resonance.freqHz >= 2000 && resonance.excessDb >= 6),
+    'Fixture must produce an isolated high-mid spectral prominence',
+  );
+  const plan = buildExplainableMasterPlan({ analysis, objectiveId: 'streaming' });
+  assert.ok(
+    plan.chain.some((module) => module.type === 'dynamic-eq'),
+    'A measured isolated resonance should still trigger a targeted dynamic EQ recommendation',
+  );
+});
