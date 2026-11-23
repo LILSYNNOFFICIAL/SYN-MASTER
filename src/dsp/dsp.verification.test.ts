@@ -445,3 +445,35 @@ test('Dynamic EQ attack and release controls shape transient response and recove
     `Faster release should restore the quiet tail sooner, fast=${fastTail}, slow=${slowTail}`,
   );
 });
+
+
+test('SYN-Restore resonance suppression leaves a coherent musical harmonic family intact', () => {
+  const n = SR * 2;
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    let sample = 0;
+    for (let harmonic = 1; harmonic <= 10; harmonic++) {
+      sample += (0.18 / harmonic) * Math.sin(2 * Math.PI * 220 * harmonic * t);
+    }
+    left[i] = sample;
+    right[i] = sample;
+  }
+  const restore = createProcessorModule('restore', {
+    params: {
+      dcOffset: false,
+      humRemovalHz: 0,
+      hissReduction: 0,
+      deEssAmount: 0,
+      deEssFreqHz: 6500,
+      resonanceSuppress: 100,
+      mode: 'conservative',
+    } satisfies RestoreParams,
+  });
+  const rendered = processChainOffline([left, right], SR, [restore]);
+  assert.ok(
+    maxDiff(rendered.channels[0], left) < 1e-4,
+    'A coherent harmonic instrument spectrum must not receive independent narrow resonance cuts',
+  );
+});
