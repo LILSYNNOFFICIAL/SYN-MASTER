@@ -1831,20 +1831,33 @@ function buildFinalReportFromState(params: {
     currentChainFingerprint: chainFp,
     postChainFingerprint: hasExecutedProcessing ? chainFp : undefined,
     postProcessingStatus: hasExecutedProcessing ? 'ready' : 'idle',
-    appliedCorrections: hasExecutedProcessing
-      ? [
-          {
+    appliedCorrections: [
+      ...(stemProcessingApplied
+        ? (() => {
+            const stemModules = Object.values(params.stemChainsById ?? {})
+              .flat()
+              .filter((module) => module.enabled && !module.bypassed && module.wetDry > 0.1);
+            return stemModules.length > 0
+              ? [{
+                  id: 'corr-stem-buses',
+                  timestamp: Date.now(),
+                  label: 'Applied stem-bus processing',
+                  processorTypes: stemModules.map((module) => module.type),
+                  chainFingerprint: computeChainFingerprint(stemModules),
+                }]
+              : [];
+          })()
+        : []),
+      ...(hasExecutedProcessing
+        ? [{
             id: `corr-dir-${bestCheckpoint.passNumber}`,
             timestamp: bestCheckpoint.timestamp,
             label: `Autonomous Director Pass #${bestCheckpoint.passNumber}`,
-            processorTypes: [
-              ...Object.values(params.stemChainsById ?? {}).flat().filter((module) => module.enabled && !module.bypassed && module.wetDry > 0.1).map((module) => module.type),
-              ...bestCheckpoint.chain.map((m) => m.type),
-            ],
+            processorTypes: bestCheckpoint.chain.map((module) => module.type),
             chainFingerprint: chainFp,
-          },
-        ]
-      : [],
+          }]
+        : []),
+    ],
   });
 
   for (const resolved of postFixVerification.resolvedFindings) {
