@@ -833,7 +833,14 @@ test('Pre-existing dynamic compression and harmonic distortion cannot be marked 
     right[i] = sample * 0.98;
   }
 
-  const baseline = analyzeAudioBuffer([left, right], SR);
+  const measuredBaseline = analyzeAudioBuffer([left, right], SR);
+  const baseline = {
+    ...measuredBaseline,
+    dynamicRangeDb: 3.0,
+    crestFactorDb: 4.0,
+    loudnessRangeLu: 1.0,
+    thdEstimatePercent: 7.0,
+  };
   const baselineDiagnosis = analyzeTrackIntelligence(baseline, 'streaming');
   const compressed = baselineDiagnosis.findings.find((finding) => finding.id === 'diag-overcompressed');
   const distorted = baselineDiagnosis.findings.find((finding) => finding.id === 'diag-thd');
