@@ -97,6 +97,10 @@ export function isAnalysisMeasurementReliable(
   if (analysis.stereoWidth < 0 || analysis.stereoWidth > 2) return false;
   if (analysis.phaseCorrelation < -1 || analysis.phaseCorrelation > 1) return false;
   if (analysis.lowEndCorrelation < -1 || analysis.lowEndCorrelation > 1) return false;
+  if (analysis.stereoBandCorrelation) {
+    const { low, mid, high } = analysis.stereoBandCorrelation;
+    if (![low, mid, high].every((value) => Number.isFinite(value) && value >= -1 && value <= 1)) return false;
+  }
   if (analysis.monoCompatibilityScore < 0 || analysis.monoCompatibilityScore > 100) return false;
   if (analysis.dcOffset < 0) return false;
 
