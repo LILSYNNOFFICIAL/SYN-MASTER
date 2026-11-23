@@ -347,3 +347,62 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 .syn2-peq-del { width:30px; height:30px; display:grid; place-items:center; border-radius:7px; border:1px solid var(--s2-line); background:#0E0B06; color: var(--s2-dim); }
 .syn2-peq-del:hover { color: var(--s2-bad); border-color: var(--s2-bad); }
 .syn2-peq-help { font-size: 10px; color: var(--s2-dim); }
+
+/* ---------- SYN2 shell: black & gold harmonization of the whole workstation ---------- */
+.syn-workstation {
+  background:
+    radial-gradient(1400px 520px at 50% -180px, rgba(212,175,55,0.10), transparent 70%),
+    linear-gradient(rgba(212,175,55,0.025) 1px, transparent 1px) 0 0 / 56px 56px,
+    linear-gradient(90deg, rgba(212,175,55,0.025) 1px, transparent 1px) 0 0 / 56px 56px,
+    #040404 !important;
+}
+.syn-workstation > header {
+  background: linear-gradient(180deg, #17120A 0%, #0A0805 100%) !important;
+  border-bottom: 1px solid rgba(212,175,55,0.35) !important;
+  box-shadow: 0 1px 0 rgba(255,224,138,0.06) inset, 0 10px 30px rgba(0,0,0,0.45);
+}
+.syn-workstation > [role="toolbar"] { background: rgba(10,8,5,0.92) !important; border-bottom-color: rgba(212,175,55,0.18) !important; backdrop-filter: blur(6px); }
+/* Cool grey surfaces -> warm black panels */
+.syn-workstation [class*="bg-[#111217]"],
+.syn-workstation [class*="bg-[#0C0D12]"],
+.syn-workstation [class*="bg-[#12141B]"],
+.syn-workstation [class*="bg-[#0C0E13]"],
+.syn-workstation [class*="bg-[#0F1219]"],
+.syn-workstation [class*="bg-[#0B0C10]"],
+.syn-workstation [class*="bg-[#101116]"],
+.syn-workstation [class*="bg-[#0F1117]"] { background-color: rgba(16,13,8,0.92) !important; }
+.syn-workstation [class*="bg-[#181A22]"],
+.syn-workstation [class*="bg-[#171A22]"],
+.syn-workstation [class*="bg-[#161820]"],
+.syn-workstation [class*="bg-[#161923]"],
+.syn-workstation [class*="bg-[#10131B]"],
+.syn-workstation [class*="bg-[#151720]"],
+.syn-workstation [class*="bg-[#20232E]"] { background-color: #17120A !important; }
+.syn-workstation [class*="bg-[#090A0E]"],
+.syn-workstation [class*="bg-[#070709]"] { background-color: #070604 !important; }
+.syn-workstation [class*="border-[#242732]"],
+.syn-workstation [class*="border-[#2B2E3A]"],
+.syn-workstation [class*="border-[#222530]"],
+.syn-workstation [class*="border-[#222634]"],
+.syn-workstation [class*="border-[#343A49]"],
+.syn-workstation [class*="border-[#2D3343]"],
+.syn-workstation [class*="border-[#2E3240]"],
+.syn-workstation [class*="border-[#292D38]"],
+.syn-workstation [class*="border-[#252A35]"],
+.syn-workstation [class*="border-[#232632]"],
+.syn-workstation [class*="border-[#262934]"],
+.syn-workstation [class*="border-[#2A2D39]"] { border-color: rgba(212,175,55,0.16) !important; }
+.syn-workstation [class*="text-[#9CA3AF]"],
+.syn-workstation [class*="text-[#8B93A3]"],
+.syn-workstation [class*="text-[#6B7280]"] { color: #A8986E !important; }
+.syn-workstation [class*="text-[#C5CDD8]"],
+.syn-workstation [class*="text-[#E5E7EB]"] { color: #E6D8B0 !important; }
+.syn-workstation [class*="text-[#F7F8FA]"] { color: #F5EEDC !important; }
+/* Rounded, softly lit section cards */
+.syn-workstation main > section { border-radius: 16px !important; }
+.syn-workstation main > section:not(.syn2-stage) { box-shadow: 0 1px 0 rgba(255,224,138,0.05) inset, 0 16px 40px rgba(0,0,0,0.35); }
+.syn-workstation aside { background-color: rgba(10,8,5,0.9) !important; }
+/* Primary gold buttons get the gradient */
+.syn-workstation button[class*="bg-[#D4AF37]"] { background: var(--s2-grad) !important; color: #0A0804 !important; border-color: transparent !important; }
+/* Text sitting on a solid gold surface stays dark for contrast. */
+.syn-workstation button[class*="bg-[#D4AF37]"]:not([class*="bg-[#D4AF37]/"]) [class*="text-[#"] { color: #2A1F08 !important; }

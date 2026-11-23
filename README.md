@@ -61,7 +61,7 @@ Priority order. Tick as done; note open problems inline.
 - [x] Iterative fix/verify engine on objective metrics (LUFS, dBTP, LRA, crest, clips, clicks, spectral balance vs reference curve, phase correlation, DC) with max-iteration cap (`src/director/masterTargets.ts`, gate wired into `runAutonomousDirectorLoop`, cap 10 passes / 120 s)
 - [x] De-click / de-crackle / transient spike repair (`src/dsp/repair.ts`, detector `src/dsp/clickDetect.ts`, exposed as SYN-Restore params `declick`, `decrackle`, `spikeRepair`)
 - [x] AI-shimmer / metallic artifact reduction (SYN-Restore `deShimmer`, dynamic 9 kHz+ band reduction weighted to the side channel)
-- [ ] New black + gold layout and CSS
+- [x] New black + gold layout and CSS (SYN2 design system in `src/index.css`: import screen, Fix-It stage, floating rack, warm-black panels and gold hairlines across the whole workstation; studio tab rearranged to Import → Fix-It stage → spectrum → rack)
 - [x] Floating draggable/resizable FX rack window with reorder (drag or arrows), bypass, duplicate, remove and a categorized "Add module" dropdown (`FxRackWindow.tsx`, `FloatingWindow.tsx`, `moduleCatalog.ts`)
 - [x] FL-style parametric EQ (spectrum, coloured draggable nodes, wheel = Q, 6 band types, up to 8 bands) in `ParametricEQ2.tsx`, shown when an EQ slot is expanded in the FX rack
 - [x] Dynamics modules with knobs (compressor, multiband, limiter/maximizer, dynamic EQ already existed; NEW `clipper` and `transient-shaper` processors in `src/dsp/extraProcessors.ts`; de-esser via SYN-Restore and the rack's De-esser template)
@@ -69,7 +69,7 @@ Priority order. Tick as done; note open problems inline.
 - [x] Maximus-style multiband maximizer (`multiband-maximizer`: LR4 3-band split, per-band pre-gain/threshold/ratio/attack/release/post, true-peak master ceiling)
 - [x] Loudness target presets (Spotify / Spotify Loud / Apple / YouTube / Tidal / Amazon / SoundCloud / Club / EBU R128) in `src/dsp/loudnessTargets.ts`, selectable on the Fix-It stage
 - [x] A/B compare (Original vs Master toggle on the Fix-It stage; loudness-matched when the Preferences option is on)
-- [ ] Remaining tools (HPF/LPF, crossovers, imager, saturation/exciter, dither) exposed in manual mode and controllable by the AI
+- [x] Remaining tools exposed in manual mode and controllable by the AI: HPF/LPF and mono-maker templates, multiband crossovers (multiband comp / maximizer), stereo imager, saturation/exciter, de-esser. Dither lives in Export settings (TPDF, off by default)
 
 ### Verification bug: root cause (fixed)
 Four problems combined so that "FIX ALL & VERIFY" could say a track was mastered when it was not:
