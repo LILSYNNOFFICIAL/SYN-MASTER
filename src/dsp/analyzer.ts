@@ -198,16 +198,13 @@ export function measureIntegratedLufs(channels: Float32Array[], sampleRate: numb
   const length = left.length;
 
   const { shelf, rlb } = designKWeightingFilters(sampleRate);
-  const tmpL = new Float32Array(length);
-  const kL = new Float32Array(length);
-  processBiquadBuffer(left, tmpL, shelf);
-  processBiquadBuffer(tmpL, kL, rlb);
-
-  const kR = numChannels > 1 ? new Float32Array(length) : kL;
+  const workL = new Float32Array(length);
+  const workR = numChannels > 1 ? new Float32Array(length) : workL;
+  processBiquadBuffer(left, workL, shelf);
+  processBiquadBuffer(workL, workL, rlb);
   if (numChannels > 1) {
-    const tmpR = new Float32Array(length);
-    processBiquadBuffer(right, tmpR, shelf);
-    processBiquadBuffer(tmpR, kR, rlb);
+    processBiquadBuffer(right, workR, shelf);
+    processBiquadBuffer(workR, workR, rlb);
   }
 
   const blockSamples = Math.max(1, Math.round(sampleRate * 0.4));
@@ -217,16 +214,21 @@ export function measureIntegratedLufs(channels: Float32Array[], sampleRate: numb
   if (length < blockSamples) {
     let ms = 0;
     for (let i = 0; i < length; i++) {
-      ms += kL[i] * kL[i] + (numChannels > 1 ? kR[i] * kR[i] : 0);
+      ms += workL[i] * workL[i] + (numChannels > 1 ? workR[i] * workR[i] : 0);
     }
     blockMeanSquares.push(ms / Math.max(1, length));
   } else {
-    const prefix = new Float64Array(length + 1);
+    const energyRing = new Float64Array(blockSamples);
+    let rollingEnergy = 0;
     for (let i = 0; i < length; i++) {
-      prefix[i + 1] = prefix[i] + kL[i] * kL[i] + (numChannels > 1 ? kR[i] * kR[i] : 0);
-    }
-    for (let start = 0; start + blockSamples <= length; start += hopSamples) {
-      blockMeanSquares.push((prefix[start + blockSamples] - prefix[start]) / blockSamples);
+      const energy = workL[i] * workL[i] + (numChannels > 1 ? workR[i] * workR[i] : 0);
+      const slot = i % blockSamples;
+      if (i >= blockSamples) rollingEnergy -= energyRing[slot];
+      energyRing[slot] = energy;
+      rollingEnergy += energy;
+      if (i + 1 >= blockSamples && (i + 1 - blockSamples) % hopSamples === 0) {
+        blockMeanSquares.push(Math.max(0, rollingEnergy) / blockSamples);
+      }
     }
   }
 
@@ -308,20 +310,20 @@ export function analyzeAudioBuffer(
   const stereoWidth = Math.min(2.0, (2 * sideRms) / Math.max(midRms + sideRms, 1e-9));
   const lrBalanceDb = linearToDb(rmsR) - linearToDb(rmsL);
 
+  // Two reusable full-track work buffers keep stereo analysis memory bounded.
+  const scratchL = new Float32Array(length);
+  const scratchR = numChannels > 1 ? new Float32Array(length) : scratchL;
+
   // Low-end (<120Hz) phase correlation via 2nd-order Butterworth LPF (-12 dB/oct)
   const lpCoeffs = designLowPass(120, Math.SQRT1_2, sampleRate);
-  const lpBufL = new Float32Array(length);
-  const lpBufR = numChannels > 1 ? new Float32Array(length) : lpBufL;
-  processBiquadBuffer(left, lpBufL, lpCoeffs);
-  if (numChannels > 1) {
-    processBiquadBuffer(right, lpBufR, lpCoeffs);
-  }
+  processBiquadBuffer(left, scratchL, lpCoeffs);
+  if (numChannels > 1) processBiquadBuffer(right, scratchR, lpCoeffs);
   let lpSqL = 0;
   let lpSqR = 0;
   let lpProd = 0;
   for (let i = 0; i < length; i++) {
-    const lVal = lpBufL[i];
-    const rVal = lpBufR[i];
+    const lVal = scratchL[i];
+    const rVal = scratchR[i];
     lpSqL += lVal * lVal;
     lpSqR += rVal * rVal;
     lpProd += lVal * rVal;
@@ -333,30 +335,12 @@ export function analyzeAudioBuffer(
       : lpSqL < 1e-12 || lpSqR < 1e-12
         ? 0
         : Math.max(-1, Math.min(1, lpProd / lpDenom));
-  // Frequency-localized correlation catches cancellation hidden by whole-program averages.
-  // Boundaries match the default Stereo Imager crossovers so a flagged band maps to
-  // the processor control that can actually correct it.
-  const lowBandL = new Float32Array(length);
-  const lowBandR = new Float32Array(length);
-  const midHpL = new Float32Array(length);
-  const midHpR = new Float32Array(length);
-  const midL = new Float32Array(length);
-  const midR = new Float32Array(length);
-  const highL = new Float32Array(length);
-  const highR = new Float32Array(length);
+
+  // Measure each frequency-localized band before reusing the same work buffers.
   const lp150 = designLowPass(150, Math.SQRT1_2, sampleRate);
   const hp150 = designHighPass(150, Math.SQRT1_2, sampleRate);
   const lp3500 = designLowPass(3500, Math.SQRT1_2, sampleRate);
   const hp3500 = designHighPass(3500, Math.SQRT1_2, sampleRate);
-  processBiquadBuffer(left, lowBandL, lp150);
-  processBiquadBuffer(right, lowBandR, lp150);
-  processBiquadBuffer(left, midHpL, hp150);
-  processBiquadBuffer(right, midHpR, hp150);
-  processBiquadBuffer(midHpL, midL, lp3500);
-  processBiquadBuffer(midHpR, midR, lp3500);
-  processBiquadBuffer(left, highL, hp3500);
-  processBiquadBuffer(right, highR, hp3500);
-
   const measureCorrelation = (a: Float32Array, b: Float32Array): number => {
     let aa = 0;
     let bb = 0;
@@ -371,13 +355,27 @@ export function analyzeAudioBuffer(
     const d = Math.sqrt(aa * bb);
     return d > 1e-12 ? Math.max(-1, Math.min(1, ab / d)) : 0;
   };
+
+  processBiquadBuffer(left, scratchL, lp150);
+  if (numChannels > 1) processBiquadBuffer(right, scratchR, lp150);
+  const lowBandCorrelation = measureCorrelation(scratchL, scratchR);
+
+  processBiquadBuffer(left, scratchL, hp150);
+  if (numChannels > 1) processBiquadBuffer(right, scratchR, hp150);
+  processBiquadBuffer(scratchL, scratchL, lp3500);
+  if (numChannels > 1) processBiquadBuffer(scratchR, scratchR, lp3500);
+  const midBandCorrelation = measureCorrelation(scratchL, scratchR);
+
+  processBiquadBuffer(left, scratchL, hp3500);
+  if (numChannels > 1) processBiquadBuffer(right, scratchR, hp3500);
+  const highBandCorrelation = measureCorrelation(scratchL, scratchR);
+
   const stereoBandCorrelation = {
-    low: Number(measureCorrelation(lowBandL, lowBandR).toFixed(3)),
-    mid: Number(measureCorrelation(midL, midR).toFixed(3)),
-    high: Number(measureCorrelation(highL, highR).toFixed(3)),
+    low: Number(lowBandCorrelation.toFixed(3)),
+    mid: Number(midBandCorrelation.toFixed(3)),
+    high: Number(highBandCorrelation.toFixed(3)),
   };
 
-  // Fold-down compatibility includes localized bands, not just the full-program average.
   const monoCompatibilityScore = Math.round(Math.max(0, Math.min(100,
     ((phaseCorrelation + 1) * 0.5) * 20 +
     ((stereoBandCorrelation.low + 1) * 0.5) * 30 +
@@ -387,16 +385,11 @@ export function analyzeAudioBuffer(
 
   // 3. ITU-R BS.1770-4 K-Weighted LUFS
   const { shelf, rlb } = designKWeightingFilters(sampleRate);
-  const tmpL = new Float32Array(length);
-  const kL = new Float32Array(length);
-  processBiquadBuffer(left, tmpL, shelf);
-  processBiquadBuffer(tmpL, kL, rlb);
-
-  const kR = numChannels > 1 ? new Float32Array(length) : kL;
+  processBiquadBuffer(left, scratchL, shelf);
+  processBiquadBuffer(scratchL, scratchL, rlb);
   if (numChannels > 1) {
-    const tmpR = new Float32Array(length);
-    processBiquadBuffer(right, tmpR, shelf);
-    processBiquadBuffer(tmpR, kR, rlb);
+    processBiquadBuffer(right, scratchR, shelf);
+    processBiquadBuffer(scratchR, scratchR, rlb);
   }
 
   const blockSamples = Math.max(1, Math.round(sampleRate * 0.4)); // 400ms
@@ -407,22 +400,26 @@ export function analyzeAudioBuffer(
   if (length < blockSamples) {
     let ms = 0;
     for (let i = 0; i < length; i++) {
-      ms += kL[i] * kL[i] + (numChannels > 1 ? kR[i] * kR[i] : 0);
+      ms += scratchL[i] * scratchL[i] + (numChannels > 1 ? scratchR[i] * scratchR[i] : 0);
     }
     const meanSq = ms / Math.max(1, length);
     blockMeanSquares.push(meanSq);
     blockLufsList.push(-0.691 + 10 * Math.log10(Math.max(meanSq, 1e-12)));
   } else {
-    // Prefix sum for O(N) block energy
-    const prefix = new Float64Array(length + 1);
+    // Rolling 400ms energy window with 100ms hops; storage is bounded by one window.
+    const energyRing = new Float64Array(blockSamples);
+    let rollingEnergy = 0;
     for (let i = 0; i < length; i++) {
-      const e = kL[i] * kL[i] + (numChannels > 1 ? kR[i] * kR[i] : 0);
-      prefix[i + 1] = prefix[i] + e;
-    }
-    for (let start = 0; start + blockSamples <= length; start += hopSamples) {
-      const meanSq = (prefix[start + blockSamples] - prefix[start]) / blockSamples;
-      blockMeanSquares.push(meanSq);
-      blockLufsList.push(-0.691 + 10 * Math.log10(Math.max(meanSq, 1e-12)));
+      const energy = scratchL[i] * scratchL[i] + (numChannels > 1 ? scratchR[i] * scratchR[i] : 0);
+      const slot = i % blockSamples;
+      if (i >= blockSamples) rollingEnergy -= energyRing[slot];
+      energyRing[slot] = energy;
+      rollingEnergy += energy;
+      if (i + 1 >= blockSamples && (i + 1 - blockSamples) % hopSamples === 0) {
+        const meanSq = Math.max(0, rollingEnergy) / blockSamples;
+        blockMeanSquares.push(meanSq);
+        blockLufsList.push(-0.691 + 10 * Math.log10(Math.max(meanSq, 1e-12)));
+      }
     }
   }
 
@@ -441,8 +438,7 @@ export function analyzeAudioBuffer(
     }
   }
 
-  const momentaryLufsMax =
-    blockLufsList.length > 0 ? Math.max(...blockLufsList) : integratedLufs;
+  const momentaryLufsMax = blockLufsList.reduce((max, value) => Math.max(max, value), integratedLufs);
 
   // Short-term 3-second sliding LUFS (30 x 100ms hops)
   const shortTermBlocks: number[] = [];
@@ -455,8 +451,7 @@ export function analyzeAudioBuffer(
   } else if (blockLufsList.length > 0) {
     shortTermBlocks.push(...blockLufsList);
   }
-  const shortTermLufsMax =
-    shortTermBlocks.length > 0 ? Math.max(...shortTermBlocks) : integratedLufs;
+  const shortTermLufsMax = shortTermBlocks.reduce((max, value) => Math.max(max, value), integratedLufs);
 
   // Loudness Range (LRA)
   const lraCandidates = shortTermBlocks.filter((l) => l > -70 && l > integratedLufs - 20).sort((a, b) => a - b);
