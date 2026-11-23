@@ -12,6 +12,9 @@ class FakeFile implements StoredFile {
   async text(): Promise<string> {
     return this.value;
   }
+  async getFile(): Promise<{ text(): Promise<string> }> {
+    return { text: async () => this.value };
+  }
   async createWritable() {
     return {
       write: async (data: string) => { this.value = data; },
