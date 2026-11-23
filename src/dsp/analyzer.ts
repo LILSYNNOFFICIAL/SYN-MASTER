@@ -612,8 +612,11 @@ export function analyzeAudioBuffer(
   const slopeOctaves = Math.log2(presenceCenterHz / bassCenterHz);
   const spectralSlopeDbPerOct = Number(((zoneEnergyDb.presence - zoneEnergyDb.bass) / slopeOctaves).toFixed(2));
 
-  // Resonance detection across 80 Hz - 10 kHz
-  const resonances: ResonancePeak[] = [];
+  // Resonance candidates are local spectral prominences, not simply loud partials.
+  // A coherent harmonic family is treated as musical/instrument energy rather than a
+  // collection of independent resonances. Cutting each partial dynamically would
+  // hollow sustained notes and can make pitched instruments sound dull or unstable.
+  const resonanceCandidates: Array<{ freqHz: number; excessDb: number; levelDb: number }> = [];
   for (let i = 4; i < spectrumBinsDb.length - 4; i++) {
     const f = spectrumBinsFreq[i];
     if (f < 80 || f > 12000) continue;
@@ -632,14 +635,48 @@ export function analyzeAudioBuffer(
       spectrumBinsDb[i] >= spectrumBinsDb[i + 1] &&
       spectrumBinsDb[i] > -65
     ) {
-      resonances.push({
+      resonanceCandidates.push({
         freqHz: f,
         excessDb: Number(excess.toFixed(1)),
-        severity: excess > 8 ? 'high' : excess > 6 ? 'moderate' : 'low',
+        levelDb: spectrumBinsDb[i],
       });
     }
   }
-  resonances.sort((a, b) => b.excessDb - a.excessDb);
+
+  const isHarmonicRelated = (aHz: number, bHz: number): boolean => {
+    const ratio = Math.max(aHz, bHz) / Math.min(aHz, bHz);
+    const harmonicNumber = Math.round(ratio);
+    return harmonicNumber >= 2 &&
+      harmonicNumber <= 8 &&
+      Math.abs(ratio - harmonicNumber) / harmonicNumber <= 0.035;
+  };
+  const harmonicFamily = new Set<number>();
+  for (let i = 0; i < resonanceCandidates.length; i++) {
+    let relatedPartials = 0;
+    for (let j = 0; j < resonanceCandidates.length; j++) {
+      if (i === j) continue;
+      const candidate = resonanceCandidates[i];
+      const related = resonanceCandidates[j];
+      if (
+        Math.abs(candidate.levelDb - related.levelDb) <= 24 &&
+        isHarmonicRelated(candidate.freqHz, related.freqHz)
+      ) {
+        relatedPartials++;
+      }
+    }
+    // Require at least two related partials before suppressing a candidate. This is
+    // deliberately conservative so one coincidental octave does not hide a real peak.
+    if (relatedPartials >= 2) harmonicFamily.add(i);
+  }
+
+  const resonances: ResonancePeak[] = resonanceCandidates
+    .filter((_candidate, index) => !harmonicFamily.has(index))
+    .map((candidate) => ({
+      freqHz: candidate.freqHz,
+      excessDb: candidate.excessDb,
+      severity: candidate.excessDb > 8 ? 'high' : candidate.excessDb > 6 ? 'moderate' : 'low',
+    }))
+    .sort((a, b) => b.excessDb - a.excessDb);
 
   // Harmonic / Saturation / Clipping indicator
   // Measure spectral harmonic THD when a dominant tonal fundamental peak rises > 18 dB above broadband floor
