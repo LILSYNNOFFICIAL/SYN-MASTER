@@ -508,3 +508,67 @@ test('Manual Director mode reports stem chains without executing them', async ()
   assert.deepEqual(report.stemIntelligence?.processingChains['vocal-bus'], ['parametric-eq']);
 });
 
+test('Reference EQ matching removes overall loudness bias and responds only to relative tonal differences', () => {
+  const source = makeBalancedStereo(1.2, 0.18);
+  // Add repeatable high-air content so both the bass and air bands remain measurable.
+  for (let i = 0; i < source[0].length; i++) {
+    const air = 0.025 * Math.sin((2 * Math.PI * 14000 * i) / SR);
+    source[0][i] += air;
+    source[1][i] += air;
+  }
+
+  const sourceAnalysis = analyzeAudioBuffer(source, SR);
+  const louderReferenceChannels = source.map((channel) =>
+    Float32Array.from(channel, (sample) => sample * 2),
+  );
+  const louderReference = analyzeAudioBuffer(louderReferenceChannels, SR);
+
+  assert.ok(
+    louderReference.integratedLufs - sourceAnalysis.integratedLufs > 5.5,
+    'Reference fixture must be materially louder than the source',
+  );
+  assert.ok(
+    louderReference.zoneEnergyDb.bass - sourceAnalysis.zoneEnergyDb.bass > 5.5,
+    'Reference bass band must carry the same overall level offset',
+  );
+  assert.ok(
+    louderReference.zoneEnergyDb.air - sourceAnalysis.zoneEnergyDb.air > 5.5,
+    'Reference air band must carry the same overall level offset',
+  );
+
+  const levelOnlyPlan = buildExplainableMasterPlan({
+    analysis: sourceAnalysis,
+    objectiveId: 'streaming',
+    referenceAnalysis: louderReference,
+  });
+  const levelOnlyEq = levelOnlyPlan.chain.find((module) => module.type === 'parametric-eq');
+  const levelOnlyBands = ((levelOnlyEq?.params as { bands?: Array<{ id: string; gain: number }> } | undefined)?.bands) ?? [];
+  assert.equal(
+    levelOnlyBands.some((band) => band.id === 'b2' || band.id === 'b4'),
+    false,
+    'A level-only reference difference must not create bass or air EQ boosts/cuts',
+  );
+
+  const shapedReference = {
+    ...louderReference,
+    zoneEnergyDb: {
+      ...louderReference.zoneEnergyDb,
+      bass: louderReference.zoneEnergyDb.bass + 2.0,
+      air: louderReference.zoneEnergyDb.air - 1.5,
+    },
+  };
+  const shapedPlan = buildExplainableMasterPlan({
+    analysis: sourceAnalysis,
+    objectiveId: 'streaming',
+    referenceAnalysis: shapedReference,
+  });
+  const shapedEq = shapedPlan.chain.find((module) => module.type === 'parametric-eq');
+  const shapedBands = ((shapedEq?.params as { bands?: Array<{ id: string; gain: number }> } | undefined)?.bands) ?? [];
+  const bassMatch = shapedBands.find((band) => band.id === 'b2');
+  const airMatch = shapedBands.find((band) => band.id === 'b4');
+
+  assert.ok(bassMatch, 'A genuine +2 dB relative bass difference should produce a restrained lowshelf adjustment');
+  assert.ok(airMatch, 'A genuine -1.5 dB relative air difference should produce a restrained highshelf adjustment');
+  assert.ok(Math.abs(bassMatch.gain - 0.9) <= 0.11, 'Expected +0.9 dB relative bass trim, got ' + bassMatch.gain + ' dB');
+  assert.ok(Math.abs(airMatch.gain + 0.6) <= 0.11, 'Expected -0.6 dB relative air trim, got ' + airMatch.gain + ' dB');
+});
