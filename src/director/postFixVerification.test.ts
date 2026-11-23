@@ -987,7 +987,7 @@ test('Sub/Bass excess uses one blocking <= 0 dB target and produces a measured E
     command.op === 'add' && command.processorType === 'parametric-eq',
   );
   assert.ok(eqAdd && eqAdd.op === 'add', 'The gate failure must create a parametric EQ repair');
-  const params = eqAdd.params as { bands: Array<{ id: string; shape: string; freq: number; gain: number }> };
+  const params = eqAdd.params as { bands: Array<{ id: string; shape: string; freq: number; gain: number; q: number }> };
   const subBand = params.bands.find((band) => band.id === 'syn-sub-excess');
   assert.ok(subBand, 'The correction must have a dedicated, trackable Sub/Bass control band');
   assert.equal(subBand.shape, 'bell');
@@ -1031,7 +1031,7 @@ test('Sub/Bass correction extends an existing EQ instead of duplicating its band
     command.op === 'configure' && command.processorType === 'parametric-eq',
   );
   assert.ok(configure && configure.op === 'configure');
-  const bands = (configure.paramsPatch as { bands: Array<{ id: string; freq: number; gain: number }> }).bands;
+  const bands = (configure.paramsPatch as { bands: Array<{ id: string; shape: string; freq: number; gain: number }> }).bands;
   assert.equal(bands.length, (eq.params as { bands: unknown[] }).bands.length + 1);
   assert.ok(bands.some((band) => band.id === 'syn-sub-excess' && band.shape === 'bell' && band.freq === 40 && band.gain < 0));
   assert.equal(repair.commands.some((command) => command.op === 'add' && command.processorType === 'parametric-eq'), false);
@@ -1066,8 +1066,13 @@ test('Sub/Bass repair removes additive Bass Enhancer sub gain and refines its ow
   assert.ok(eqPatch && eqPatch.op === 'configure');
   assert.ok(enhancerPatch && enhancerPatch.op === 'configure');
   assert.equal((enhancerPatch.paramsPatch as { subGainDb: number }).subGainDb, 0);
-  const bands = (eqPatch.paramsPatch as { bands: Array<{ id: string; gain: number }> }).bands;
-  assert.ok(bands.find((band) => band.id === 'syn-sub-excess')!.gain < -3);
+  const bands = (eqPatch.paramsPatch as { bands: Array<{ id: string; shape: string; freq: number; gain: number; q: number }> }).bands;
+  const controlBand = bands.find((band) => band.id === 'syn-sub-excess');
+  assert.ok(controlBand);
+  assert.equal(controlBand.shape, 'bell', 'Legacy fixed shelves must migrate to the measured bell correction');
+  assert.equal(controlBand.freq, 40);
+  assert.equal(controlBand.q, 1.0);
+  assert.ok(controlBand.gain < -3);
 });
 
 test('Objective gate uses the objective-specific integrated loudness tolerance', () => {

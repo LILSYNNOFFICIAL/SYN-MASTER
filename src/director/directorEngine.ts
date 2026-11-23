@@ -1274,9 +1274,6 @@ export function buildBattleCandidatesIntelligent(analysis: AudioAnalysis): Array
 }
 
 /**
- * Derives targeted ChainCommand[] from measured post-analysis, QC failures, and MultiObjective gaps.
- */
-/**
  * Centre frequency for a Sub/Bass correction: the strongest 1/3-octave-smoothed point
  * inside the measured 20-60 Hz sub band. Keeping the correction inside the sub band
  * avoids the broad, fixed 45 Hz shelf reaching its gain limit while leaving residual
@@ -1341,6 +1338,9 @@ export function findMudCenterHz(analysis: AudioAnalysis): number {
   return bestHz;
 }
 
+/**
+ * Derives targeted ChainCommand[] from measured post-analysis, QC failures, and MultiObjective gaps.
+ */
 export function deriveRefinementCommands(
   pre: AudioAnalysis,
   post: AudioAnalysis,
@@ -2817,7 +2817,7 @@ export function deriveGateRepairCommands(
         targetId: eqMod.id,
         processorType: 'parametric-eq',
         paramsPatch: { bands },
-        rationale: `Apply measured Sub/Bass correction with a 45 Hz low shelf at ${nextBand.gain.toFixed(1)} dB.`,
+        rationale: `Apply measured Sub/Bass correction with a ${nextBand.freq} Hz spectrum-centered bell at ${nextBand.gain.toFixed(1)} dB.`,
       });
       reasons.push(`${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
     } else {
