@@ -311,9 +311,12 @@ test('Rejects out-of-inventory aiRefineCallback output safely and continues dete
     sourceChannels: quiet,
     sampleRate: SR,
     operatingMode: 'autonomous',
-    objectiveId: 'streaming',
     maxIterations: 2,
     // Force the refinement path so this test actually exercises AI-chain rejection.
+    // The loop now stops as soon as the objective gate passes, so make the gate
+    // fail (spectral balance far from a muddy reference curve) instead of failing QC only.
+    objectiveId: 'streaming',
+    referenceAnalysis: analyzeAudioBuffer(makeMuddyLowMidStereo(1.0), SR),
     qcProfile: { ...QC_TARGET_PROFILES[0], minDynamicRangeDb: 100 },
     aiRefineCallback: async () => {
       return [

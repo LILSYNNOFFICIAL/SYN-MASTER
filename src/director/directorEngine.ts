@@ -2156,6 +2156,9 @@ export async function runAutonomousDirectorLoop(
 
   let bestCheckpoint: DirectorCheckpoint = baseCheckpoint;
   let lastFit = baseEval.engineeringFitIndex;
+  // Chains already rendered and measured. Re-rendering one of them cannot change the
+  // result, so the loop stops instead of burning passes on an identical render.
+  const renderedChainKeys = new Set<string>();
   let prevLufsError: number | undefined;
   let finalStatus: MasterFinalReport['status'] = 'completed';
   let stopReason = 'Completed scheduled mastering passes.';
@@ -2347,6 +2350,7 @@ export async function runAutonomousDirectorLoop(
       },
     };
     checkpoints.push(cp);
+    renderedChainKeys.add(JSON.stringify(cp.chain));
     iterationsExecuted = pass;
 
     emit(
@@ -2400,17 +2404,16 @@ export async function runAutonomousDirectorLoop(
     // while the chain actually delivered was an older pass that never met the targets.
     // Convergence is now judged only on the retained best pass, using the objective gate
     // measured on its rendered audio.
+    // STOP-ON-PASS: the loop stops on the first retained pass whose re-measured render
+    // meets every objective target. Advisory findings (e.g. open low-mid "mud") and the
+    // heuristic QC no longer keep it refining after the gate passes; continuing used to
+    // add passes that were then rejected, ending in "rolled back to best pass N".
     const bestIsThisPass = bestCheckpoint === cp;
     const mudStillOpen = postDiagnosis.findings.some((f) => f.id === 'diag-mud');
-    if (
-      bestIsThisPass &&
-      targetGate.passed &&
-      !mudStillOpen &&
-      qcReport.overallStatus !== 'fail'
-    ) {
+    if (bestIsThisPass && targetGate.passed) {
       if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
       finalStatus = 'converged';
-      stopReason = `Converged on Pass ${pass}: re-measured render meets every objective target (LUFS ${post.integratedLufs.toFixed(1)}, True Peak ${post.truePeakDb.toFixed(2)} dBTP, clips ${post.clippedSamples}, clicks ${post.clickCount ?? 0}).`;
+      stopReason = `Converged on Pass ${pass}: re-measured render meets every objective target (LUFS ${post.integratedLufs.toFixed(1)}, True Peak ${post.truePeakDb.toFixed(2)} dBTP, clips ${post.clippedSamples}, clicks ${post.clickCount ?? 0}).${mudStillOpen ? ' Low-mid density remains as an advisory note.' : ''}${qcReport.overallStatus === 'fail' ? ' QC heuristics still list advisory items.' : ''}`;
       emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
       break;
     }
@@ -2521,6 +2524,12 @@ export async function runAutonomousDirectorLoop(
         }
         emit('Optimizing', pass, makeActivity(pass, 'refine', 'hypothesis', hypothesis), undefined, undefined, 'Optimizing');
         const applied = applyStructuredChainCommands(refinementSourceChain, commands);
+        if (renderedChainKeys.has(JSON.stringify(applied.chain))) {
+          finalStatus = 'completed';
+          stopReason = `Stopped after Pass ${pass}: the next correction would re-render a chain that was already measured (its parameters are at their limits), so another pass cannot change the result.`;
+          emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
+          break;
+        }
         workingChain = applied.chain;
         emit(
           'Building chain',
