@@ -11,6 +11,23 @@ const execFile = promisify(execFileCallback);
 const TEST_TIMEOUT_MS = 240_000;
 const MAX_BUFFER = 32 * 1024 * 1024;
 
+async function commandAvailable(command) {
+  try {
+    await execFile(command, ['-version'], { maxBuffer: MAX_BUFFER, encoding: 'utf8' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const [ffmpegAvailable, ffprobeAvailable] = await Promise.all([
+  commandAvailable('ffmpeg'),
+  commandAvailable('ffprobe'),
+]);
+const exportToolSkip = ffmpegAvailable && ffprobeAvailable
+  ? false
+  : 'FFmpeg and/or ffprobe are not installed on PATH';
+
 async function getFreePort() {
   const server = createServer();
   await new Promise((resolve, reject) => {
@@ -141,7 +158,7 @@ async function decodeToS32(filePath, outputPath) {
   return readFile(outputPath);
 }
 
-test('SYN-MASTER export endpoint creates measurable contract-format files', { timeout: TEST_TIMEOUT_MS }, async (t) => {
+test('SYN-MASTER export endpoint creates measurable contract-format files', { timeout: TEST_TIMEOUT_MS, skip: exportToolSkip }, async (t) => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'syn-master-export-test-'));
   const port = await getFreePort();
   const baseUrl = 'http://127.0.0.1:' + port;
