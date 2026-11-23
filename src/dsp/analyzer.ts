@@ -48,26 +48,40 @@ function designKWeightingFilters(sampleRate: number): {
 }
 
 /**
- * ITU-R BS.1770-4 4x oversampling polyphase windowed-sinc FIR kernels (12 taps per phase, phases 1/4, 2/4, 3/4)
+ * 4x oversampling polyphase windowed-sinc FIR kernels for true peak (BS.1770-4 style):
+ * 16 taps per phase, Kaiser window (beta 6), phases 1/4, 2/4, 3/4.
+ *
+ * The previous 12-tap Blackman kernel drooped above ~12 kHz (-0.3 dB at 18 kHz), so bright,
+ * saturated masters read up to ~0.1 dB low: a real -9.5 LUFS master measured -0.80 dBTP
+ * here but -0.74 dBTP in ffmpeg ebur128 (-0.71 with 8x FFT interpolation). The limiter uses
+ * the same kernel for its true-peak detector, so it also under-limited.
  */
-const TP_HALF_TAPS = 6; // m in [-5, 6] => 12 taps
+const TP_HALF_TAPS = 8; // m in [-7, 8] => 16 taps
+const TP_KAISER_BETA = 6;
+function besselI0(x: number): number {
+  let sum = 1;
+  let term = 1;
+  for (let k = 1; k < 32; k++) {
+    term *= (x / (2 * k)) * (x / (2 * k));
+    sum += term;
+    if (term < 1e-12 * sum) break;
+  }
+  return sum;
+}
 export const TP_POLYPHASE_PHASES: readonly Float64Array[] = (() => {
   const tapsPerPhase = TP_HALF_TAPS * 2;
   const phases: Float64Array[] = [];
+  const i0b = besselI0(TP_KAISER_BETA);
   for (let p = 1; p <= 3; p++) {
     const frac = p * 0.25;
     const kernel = new Float64Array(tapsPerPhase);
     let sum = 0;
     for (let k = 0; k < tapsPerPhase; k++) {
-      const m = k - (TP_HALF_TAPS - 1); // -5 .. +6
+      const m = k - (TP_HALF_TAPS - 1); // -7 .. +8
       const x = m - frac;
       const sinc = Math.abs(x) < 1e-9 ? 1.0 : Math.sin(Math.PI * x) / (Math.PI * x);
-      // Blackman-Harris / Blackman window over [-TP_HALF_TAPS, TP_HALF_TAPS]
-      const u = (x + TP_HALF_TAPS) / (2 * TP_HALF_TAPS);
-      const w =
-        u >= 0 && u <= 1
-          ? 0.42 - 0.5 * Math.cos(2 * Math.PI * u) + 0.08 * Math.cos(4 * Math.PI * u)
-          : 0;
+      const r = x / TP_HALF_TAPS;
+      const w = Math.abs(r) <= 1 ? besselI0(TP_KAISER_BETA * Math.sqrt(1 - r * r)) / i0b : 0;
       kernel[k] = sinc * w;
       sum += kernel[k];
     }
