@@ -114,6 +114,11 @@ const PluginManagerView = React.lazy(() =>
 );
 import { ExportModal, SettingsModal } from './components/Modals';
 import { WorkspaceNavigation } from './components/WorkspaceNavigation';
+import { ImportScreen } from './components/studio/ImportScreen';
+import { FixItStage } from './components/studio/FixItStage';
+import { applyFades, hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
+import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
+import { buildDiagnosticLog } from './director/diagnosticLog';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -183,6 +188,12 @@ export default function App() {
   );
   const [spectrumMode, setSpectrumMode] = useState<'spectrum' | 'spectrogram'>('spectrum');
   const [fullscreenWorkspace, setFullscreenWorkspace] = useState(false);
+  // New one-button flow: import screen first, then the Fix-It stage.
+  const [showWorkstationWithoutTrack, setShowWorkstationWithoutTrack] = useState(false);
+  const [fades, setFades] = useState<FadeSettings>(NO_FADES);
+  const [targetPresetId, setTargetPresetId] = useState<string | null>(null);
+  const [postPeaksHi, setPostPeaksHi] = useState<number[] | null>(null);
+  const [rackWindowOpen, setRackWindowOpen] = useState(false);
 
   const [projectId, setProjectId] = useState(() => `proj-${Date.now()}`);
   const [projectName, setProjectName] = useState('Untitled Mastering Session');
@@ -343,9 +354,33 @@ export default function App() {
     [],
   );
 
+  // Source used for every render (preview, Fix-All, battle, export): the imported audio
+  // with the timeline fades applied, so what is verified is exactly what is exported.
+  const fadesRef = useRef(fades);
+  fadesRef.current = fades;
+  const sourceRateRef = useRef(44100);
+  const fadedCacheRef = useRef<{ src: Float32Array[] | null; key: string; out: Float32Array[] | null }>({ src: null, key: '', out: null });
+  const getRenderSource = useCallback((): Float32Array[] | null => {
+    const src = sourceChannelsRef.current;
+    if (!src) return null;
+    const f = fadesRef.current;
+    if (!hasFades(f)) return src;
+    const key = JSON.stringify(f);
+    const cache = fadedCacheRef.current;
+    if (cache.src === src && cache.key === key && cache.out) return cache.out;
+    const out = applyFades(src, sourceRateRef.current, f);
+    fadedCacheRef.current = { src, key, out };
+    return out;
+  }, []);
+
+  const prePeaksHi = useMemo(
+    () => (activeTrack && sourceChannelsRef.current ? extractWaveformPeaks(sourceChannelsRef.current, 1600) : []),
+    [activeTrack],
+  );
+
   // Recompute offline DSP analysis off the main UI thread (debounced 120ms)
   useEffect(() => {
-    const src = sourceChannelsRef.current;
+    const src = getRenderSource();
     const track = activeTrack;
     if (!src || !track) return;
 
@@ -372,6 +407,7 @@ export default function App() {
           });
           if (cancelled || offlineRenderSeqRef.current !== seq) return;
           postChannelsRef.current = result.channels;
+          setPostPeaksHi(extractWaveformPeaks(result.channels, 1600));
           setStageTelemetry(result.telemetry);
           setPostPeaks(result.peaks ?? null);
           setPostAnalysis(result.analysis);
@@ -413,7 +449,7 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [chain, chainBypassed, activeTrack, hostSnapshot.status, processExternalStage]);
+  }, [chain, chainBypassed, activeTrack, hostSnapshot.status, processExternalStage, fades, getRenderSource]);
 
   // Sync live Web Audio chain
   useEffect(() => {
@@ -875,7 +911,7 @@ export default function App() {
 
   const handleStartWasapiAudition = useCallback(
     async (deviceId: string) => {
-      const src = sourceChannelsRef.current;
+      const src = getRenderSource();
       if (!src || !activeTrack) {
         throw new Error('Load an audio track before starting native WASAPI audition.');
       }
@@ -939,6 +975,9 @@ export default function App() {
 
       const engine = engineRef.current!;
       sourceChannelsRef.current = channels;
+      sourceRateRef.current = sampleRate;
+      setFades(NO_FADES);
+      setPostPeaksHi(null);
       engine.setSourceChannels(channels, sampleRate);
       setIsPlaying(false);
       telemetryStore.reset();
@@ -1288,7 +1327,7 @@ export default function App() {
 
   const handleRunMasterDirector = useCallback(async (forceAutonomous = false) => {
     const runOperatingMode: DirectorOperatingMode = forceAutonomous ? 'autonomous' : operatingMode;
-    const src = sourceChannelsRef.current;
+    const src = getRenderSource();
     if (!src || !activeTrack || directorRunningRef.current) return;
 
     const runId = ++directorRunIdRef.current;
@@ -1698,7 +1737,7 @@ export default function App() {
   }, [latestDiagnosticBundle]);
 
   const handleGenerateBattle = useCallback(async () => {
-    const src = sourceChannelsRef.current;
+    const src = getRenderSource();
     const track = activeTrack;
     if (!src || !track) return;
     setBattleGenerating(true);
@@ -1787,7 +1826,7 @@ export default function App() {
   };
 
   const handleRenderExport = async () => {
-    const src = sourceChannelsRef.current;
+    const src = getRenderSource();
     if (!src || !activeTrack) return;
     setRenderingExport(true);
     try {
@@ -1955,6 +1994,55 @@ export default function App() {
     setMonitorVolume(v);
     engineRef.current!.setMonitorVolume(v);
   }, []);
+
+  const activeObjective = resolveObjectiveTarget(objectiveId, customObjective, referenceTrack?.analysis ?? null);
+  const targetLabel = targetPresetId
+    ? LOUDNESS_TARGET_PRESETS.find((t) => t.id === targetPresetId)?.label ?? activeObjective.label
+    : `${activeObjective.label} (${activeObjective.targetLufs} LUFS)`;
+  const diagnosticLog = activeTrack
+    ? buildDiagnosticLog({
+        trackName: activeTrack.name,
+        objective: directorReport?.objective ?? activeObjective,
+        source: directorReport?.preAnalysis ?? activeTrack.analysis,
+        findings: (directorReport?.diagnosis ?? baselineDiagnosis)?.findings ?? [],
+        chain,
+        report: directorReport,
+        referenceAnalysis: referenceTrack?.analysis ?? null,
+      })
+    : null;
+
+  const handleTargetPreset = (id: string) => {
+    const preset = LOUDNESS_TARGET_PRESETS.find((t) => t.id === id);
+    if (!preset) return;
+    setTargetPresetId(id);
+    setCustomObjective((prev) => ({
+      ...prev,
+      targetLufs: preset.targetLufs,
+      maxTruePeakDb: preset.maxTruePeakDb,
+      minDynamicRangeDb: preset.minDynamicRangeDb,
+    }));
+    setObjectiveId('custom');
+    setStatusNotice(`Target set to ${preset.label}: ${preset.targetLufs} LUFS / ${preset.maxTruePeakDb} dBTP.`);
+  };
+
+  const handleNewTrack = () => {
+    engineRef.current?.stop();
+    setIsPlaying(false);
+    telemetryStore.publish({ isPlaying: false, currentTimeSec: 0, live: null });
+    setActiveTrack(null);
+    setDirectorReport(null);
+    setShowWorkstationWithoutTrack(false);
+  };
+
+  if (!activeTrack && !showWorkstationWithoutTrack) {
+    return (
+      <ImportScreen
+        onFile={handleUploadSourceFile}
+        onDemo={() => handleLoadDemoSource('main-mix')}
+        onOpenWorkstation={() => setShowWorkstationWithoutTrack(true)}
+      />
+    );
+  }
 
   return (
     <div className="syn-workstation min-h-screen lg:h-screen w-full flex flex-col bg-[#070709] text-[#F7F8FA] lg:overflow-hidden">
@@ -2176,7 +2264,7 @@ export default function App() {
 
         {/* Center Mastering Stage */}
         <main className="lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">
-          {activeTrack && (
+          {activeTrack && activeTab !== 'studio' && (
             <section data-testid="mastering-control-desk" aria-label="Mastering Control Desk"
               className="rounded-xl border border-[#D4AF37]/65 bg-gradient-to-br from-[#151006] via-[#0D0B06] to-[#070604] p-3.5 shadow-[0_12px_32px_rgba(0,0,0,.35)]">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2215,6 +2303,41 @@ export default function App() {
           )}
           <WorkspaceNavigation activeTab={activeTab} onSelect={setActiveTab} />
 
+          {activeTab === 'studio' && activeTrack && diagnosticLog && (
+            <FixItStage
+              trackName={activeTrack.name}
+              durationSec={activeTrack.durationSec}
+              sampleRate={activeTrack.sampleRate}
+              source={activeTrack.analysis}
+              master={postAnalysisState.status === 'ready' ? postAnalysis : null}
+              prePeaks={prePeaksHi}
+              postPeaks={postPeaksHi}
+              isPlaying={isPlaying}
+              onTogglePlay={togglePlay}
+              auditionTarget={auditionTarget}
+              onAudition={(t) => switchAuditionTarget(t)}
+              fades={fades}
+              onFadesChange={setFades}
+              onSeek={(sec) => {
+                engineRef.current!.seek(sec);
+                telemetryStore.publish({ currentTimeSec: sec });
+              }}
+              running={directorRunning}
+              stage={directorStage}
+              pass={directorPass}
+              maxPasses={10}
+              lastActivity={directorActivityLog.length > 0 ? directorActivityLog[directorActivityLog.length - 1].message : null}
+              report={directorReport}
+              log={diagnosticLog}
+              targetPresetId={targetPresetId}
+              targetLabel={targetLabel}
+              onTargetPreset={handleTargetPreset}
+              onFix={() => { setOperatingMode('autonomous'); void handleRunMasterDirector(true); }}
+              onOpenRack={() => setRackWindowOpen(true)}
+              onNewTrack={handleNewTrack}
+            />
+          )}
+
           {/* Transport & Waveform Stage (Full waveform on Studio & Reference; compact transport bar on other tabs) */}
           {!activeTrack && (activeTab === 'plugins' || activeTab === 'stems') ? null : !activeTrack ? (
             <section className="p-8 rounded bg-[#111217] border border-[#D4AF37]/30 flex flex-col items-center text-center gap-4">
@@ -2249,7 +2372,7 @@ export default function App() {
                 </button>
               </div>
             </section>
-          ) : activeTab === 'studio' || activeTab === 'reference' ? (
+          ) : activeTab === 'studio' ? null : activeTab === 'reference' ? (
             <section className="p-3.5 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
               {/* Track Metadata + A/B Switch */}
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2663,7 +2786,7 @@ export default function App() {
               }}
               onApplyRecommendation={handleApplyRecommendation}
               onAuditionCheckpoint={async (cp) => {
-                const src = sourceChannelsRef.current;
+                const src = getRenderSource();
                 if (!src || !activeTrack) return;
                 const res = await renderAndAnalyzeOffThread({
                   sourceChannels: src,

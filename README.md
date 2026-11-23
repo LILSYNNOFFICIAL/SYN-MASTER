@@ -55,9 +55,9 @@ Priority order. Tick as done; note open problems inline.
 
 - [x] Rewrite README with Vision / Spec + Roadmap (handoff note)
 - [x] Audit + fix the Fix-All verify / re-analyze loop (root cause documented below)
-- [ ] New first screen: "Import your track" drag-and-drop
-- [ ] Waveform with time grid + big centered "FIX IT ALL WITH AI" button that runs the full auto-master and reveals technical details
-- [ ] Diagnostic log panel (every issue + exact per-tool settings), downloadable as JSON and text
+- [x] New first screen: "Import your track" drag-and-drop (`src/components/studio/ImportScreen.tsx`)
+- [x] Waveform with time grid + big centered "FIX IT ALL WITH AI" button that runs the full auto-master and reveals technical details (`FixItStage.tsx`, `TimelineWaveform.tsx`)
+- [x] Diagnostic log panel (every issue + exact per-tool settings), downloadable as JSON and text (`src/director/diagnosticLog.ts`, `DiagnosticLogPanel.tsx`)
 - [x] Iterative fix/verify engine on objective metrics (LUFS, dBTP, LRA, crest, clips, clicks, spectral balance vs reference curve, phase correlation, DC) with max-iteration cap (`src/director/masterTargets.ts`, gate wired into `runAutonomousDirectorLoop`, cap 10 passes / 120 s)
 - [x] De-click / de-crackle / transient spike repair (`src/dsp/repair.ts`, detector `src/dsp/clickDetect.ts`, exposed as SYN-Restore params `declick`, `decrackle`, `spikeRepair`)
 - [x] AI-shimmer / metallic artifact reduction (SYN-Restore `deShimmer`, dynamic 9 kHz+ band reduction weighted to the side channel)
@@ -65,10 +65,10 @@ Priority order. Tick as done; note open problems inline.
 - [ ] Floating draggable/resizable FX rack window with reorder, bypass and add/remove dropdown
 - [ ] FL-style parametric EQ (spectrum, draggable nodes, band types)
 - [ ] Dynamics modules with knobs (compressor, multiband, limiter/maximizer, clipper, transient shaper, de-esser, dynamic EQ)
-- [ ] Draggable fade-in / fade-out lines on the waveform
+- [x] Draggable fade-in / fade-out lines on the waveform (gold corner handles; S-curve/linear/exponential; applied to every render and the export via `src/dsp/fades.ts`)
 - [ ] Maximus-style multiband maximizer
-- [ ] Loudness target presets (Spotify / Apple / YouTube)
-- [ ] A/B compare
+- [x] Loudness target presets (Spotify / Spotify Loud / Apple / YouTube / Tidal / Amazon / SoundCloud / Club / EBU R128) in `src/dsp/loudnessTargets.ts`, selectable on the Fix-It stage
+- [x] A/B compare (Original vs Master toggle on the Fix-It stage; loudness-matched when the Preferences option is on)
 - [ ] Remaining tools (HPF/LPF, crossovers, imager, saturation/exciter, dither) exposed in manual mode and controllable by the AI
 
 ### Verification bug: root cause (fixed)
