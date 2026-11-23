@@ -148,6 +148,7 @@ export function buildDiagnosticLog(input: {
     'dc-offset': ['restore'],
     phase: ['stereo-imager'],
     'low-end-phase': ['stereo-imager', 'bass-enhancer'],
+    'sub-excess': ['parametric-eq', 'bass-enhancer'],
     lra: ['compressor', 'maximizer'],
     crest: ['limiter', 'maximizer'],
     'spectral-balance': ['parametric-eq'],
@@ -243,20 +244,7 @@ export function buildDiagnosticLog(input: {
     }
   }
 
-  // Low end
-  if (source.zoneEnergyDb.sub - source.zoneEnergyDb.bass > 2) {
-    entries.push({
-      id: 'sub-excess',
-      issue: 'Sub-bass excess / rumble',
-      category: 'Low end',
-      severity: 'moderate',
-      measured: `Sub ${(source.zoneEnergyDb.sub - source.zoneEnergyDb.bass).toFixed(1)} dB over bass`,
-      target: '≤ 0 dB over bass',
-      tools: ['parametric-eq', 'bass-enhancer'],
-      settings: settingsFor(chain, ['parametric-eq', 'bass-enhancer']),
-      status: master ? (master.zoneEnergyDb.sub - master.zoneEnergyDb.bass <= 1 ? 'fixed' : 'not-fixed') : 'open',
-    });
-  }
+  // Sub/Bass excess is emitted by the objective gate above. The gate owns the single <= 0 dB verdict.
 
   const passes = (report?.checkpoints ?? []).map((cp) => ({
     pass: cp.passNumber,

@@ -5,7 +5,8 @@ import { createProcessorModule } from '../dsp/chainValidation';
 import { processChainOffline } from '../dsp/offlineDsp';
 import type { AppliedCorrectionRecord, ProcessorModule } from '../types/mastering';
 import { analyzeTrackIntelligence, computeRegionEnergyDb } from './analyzeIntelligence';
-import { runAutonomousDirectorLoop } from './directorEngine';
+import { deriveGateRepairCommands, resolveObjectiveTarget, runAutonomousDirectorLoop } from './directorEngine';
+import { evaluateMasterTargets } from './masterTargets';
 import { computeChainFingerprint, verifyPostFixAnalysis } from './postFixVerification';
 
 const SR = 44100;
@@ -955,4 +956,106 @@ test('Noise cleanup reports collateral transient and air loss instead of claimin
   assert.equal(noise.status, 'PARTIALLY_RESOLVED');
   assert.match(noise.verificationSummary, /transient|air|collateral/i);
   assert.match(noise.nextRecommendedAction ?? '', /conservative|restor|reduction/i);
+});
+
+test('Sub/Bass excess uses one blocking <= 0 dB target and produces a measured EQ repair', () => {
+  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const source = {
+    ...measured,
+    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 5.3 },
+  };
+  const objective = resolveObjectiveTarget('streaming');
+  const gate = evaluateMasterTargets(source, objective, { preAnalysis: source });
+  const subCheck = gate.checks.find((check) => check.id === 'sub-excess');
+
+  assert.ok(subCheck, 'The objective gate must expose the Sub/Bass check');
+  assert.equal(subCheck.status, 'fail', 'A +5.3 dB source finding must not pass');
+  assert.equal(subCheck.measured, '+5.3 dB over bass');
+  assert.match(subCheck.target, /≤ 0\.0 dB/i);
+
+  const repair = deriveGateRepairCommands(gate, [], source);
+  const eqAdd = repair.commands.find((command) =>
+    command.op === 'add' && command.processorType === 'parametric-eq',
+  );
+  assert.ok(eqAdd && eqAdd.op === 'add', 'The gate failure must create a parametric EQ repair');
+  const params = eqAdd.params as { bands: Array<{ id: string; shape: string; freq: number; gain: number }> };
+  const subBand = params.bands.find((band) => band.id === 'syn-sub-excess');
+  assert.ok(subBand, 'The correction must have a dedicated, trackable Sub/Bass control band');
+  assert.equal(subBand.shape, 'lowshelf');
+  assert.equal(subBand.freq, 45);
+  assert.ok(subBand.gain < 0, 'The correction must attenuate, not boost, the sub band');
+
+  const partiallyCorrected = {
+    ...source,
+    zoneEnergyDb: { ...source.zoneEnergyDb, sub: source.zoneEnergyDb.bass + 0.5 },
+  };
+  assert.equal(
+    evaluateMasterTargets(partiallyCorrected, objective, { preAnalysis: source })
+      .checks.find((check) => check.id === 'sub-excess')?.status,
+    'fail',
+    'A +0.5 dB result must not be accepted by the former <= +1 dB diagnostic tolerance',
+  );
+
+  const corrected = {
+    ...source,
+    zoneEnergyDb: { ...source.zoneEnergyDb, sub: source.zoneEnergyDb.bass - 0.1 },
+  };
+  assert.equal(
+    evaluateMasterTargets(corrected, objective, { preAnalysis: source })
+      .checks.find((check) => check.id === 'sub-excess')?.status,
+    'pass',
+    'The source finding must pass only after the rendered Sub/Bass ratio reaches <= 0 dB',
+  );
+});
+
+test('Sub/Bass correction extends an existing EQ instead of duplicating its bands', () => {
+  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const source = {
+    ...measured,
+    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 3.5 },
+  };
+  const gate = evaluateMasterTargets(source, resolveObjectiveTarget('streaming'), { preAnalysis: source });
+  const eq = createProcessorModule('parametric-eq');
+  const repair = deriveGateRepairCommands(gate, [eq], source);
+  const configure = repair.commands.find((command) =>
+    command.op === 'configure' && command.processorType === 'parametric-eq',
+  );
+  assert.ok(configure && configure.op === 'configure');
+  const bands = (configure.paramsPatch as { bands: Array<{ id: string; freq: number; gain: number }> }).bands;
+  assert.equal(bands.length, (eq.params as { bands: unknown[] }).bands.length + 1);
+  assert.ok(bands.some((band) => band.id === 'syn-sub-excess' && band.freq === 45 && band.gain < 0));
+  assert.equal(repair.commands.some((command) => command.op === 'add' && command.processorType === 'parametric-eq'), false);
+});
+
+test('Sub/Bass repair removes additive Bass Enhancer sub gain and refines its own EQ band', () => {
+  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const source = {
+    ...measured,
+    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 4.2 },
+  };
+  const objective = resolveObjectiveTarget('streaming');
+  const gate = evaluateMasterTargets(source, objective, { preAnalysis: source });
+  const eq = createProcessorModule('parametric-eq', {
+    params: {
+      phaseMode: 'minimum',
+      msMode: 'stereo',
+      tiltDb: 0,
+      bands: [{ id: 'syn-sub-excess', enabled: true, shape: 'lowshelf', freq: 45, gain: -3, q: 0.71 }],
+    },
+  });
+  const enhancer = createProcessorModule('bass-enhancer', {
+    params: { subFreqHz: 55, subGainDb: 2.5, harmonicDrive: 24, tightness: 55, monoFocus: true },
+  });
+  const repair = deriveGateRepairCommands(gate, [eq, enhancer], source);
+  const eqPatch = repair.commands.find((command) =>
+    command.op === 'configure' && command.processorType === 'parametric-eq',
+  );
+  const enhancerPatch = repair.commands.find((command) =>
+    command.op === 'configure' && command.processorType === 'bass-enhancer',
+  );
+  assert.ok(eqPatch && eqPatch.op === 'configure');
+  assert.ok(enhancerPatch && enhancerPatch.op === 'configure');
+  assert.equal((enhancerPatch.paramsPatch as { subGainDb: number }).subGainDb, 0);
+  const bands = (eqPatch.paramsPatch as { bands: Array<{ id: string; gain: number }> }).bands;
+  assert.ok(bands.find((band) => band.id === 'syn-sub-excess')!.gain < -3);
 });

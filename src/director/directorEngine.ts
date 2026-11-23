@@ -2721,6 +2721,7 @@ export function deriveGateRepairCommands(
   const restoreMod = chain.find((m) => m.type === 'restore');
   const wantsClicks = failed.has('clicks');
   const wantsDc = failed.has('dc-offset');
+  const wantsSubExcess = failed.has('sub-excess');
   // Crest-factor collapse: give transients back with a transient shaper before the limiter.
   if (failed.has('crest')) {
     const ts = chain.find((m) => m.type === 'transient-shaper');
@@ -2743,6 +2744,69 @@ export function deriveGateRepairCommands(
       reasons.push('Add transient shaper before the limiter (crest-factor gate)');
     }
   }
+
+  if (wantsSubExcess) {
+    const subBassExcessDb = post.zoneEnergyDb.sub - post.zoneEnergyDb.bass;
+    const reductionStepDb = Math.min(3, Math.max(1, subBassExcessDb + 1));
+    const eqMod = chain.find((m) => m.type === 'parametric-eq' && m.enabled && !m.bypassed);
+    const eqBands = eqMod ? ((eqMod.params as { bands?: EQBand[] }).bands ?? []) : [];
+    const controlBandIndex = eqBands.findIndex((band) => band.id === 'syn-sub-excess');
+    const existingControlBand = controlBandIndex >= 0 ? eqBands[controlBandIndex] : null;
+    const nextBand: EQBand = existingControlBand
+      ? { ...existingControlBand, enabled: true, gain: Math.max(-12, existingControlBand.gain - reductionStepDb) }
+      : {
+          id: 'syn-sub-excess',
+          enabled: true,
+          shape: 'lowshelf',
+          freq: 45,
+          gain: -Math.min(8, Math.max(2, subBassExcessDb + 1)),
+          q: 0.71,
+        };
+
+    if (eqMod && (controlBandIndex >= 0 || eqBands.length < 8)) {
+      const bands = controlBandIndex >= 0
+        ? eqBands.map((band, index) => index === controlBandIndex ? nextBand : band)
+        : [...eqBands, nextBand];
+      commands.push({
+        op: 'configure',
+        targetId: eqMod.id,
+        processorType: 'parametric-eq',
+        paramsPatch: { bands },
+        rationale: `Apply measured Sub/Bass correction with a 45 Hz low shelf at ${nextBand.gain.toFixed(1)} dB.`,
+      });
+      reasons.push(`45 Hz Sub/Bass shelf ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
+    } else {
+      const dynamicsIndex = chain.findIndex((m) =>
+        m.type === 'compressor' || m.type === 'multiband-comp' || m.type === 'limiter' ||
+        m.type === 'maximizer' || m.type === 'multiband-maximizer',
+      );
+      commands.push({
+        op: 'add',
+        processorType: 'parametric-eq',
+        position: dynamicsIndex >= 0 ? dynamicsIndex : chain.length,
+        name: 'Sub/Bass Excess Control',
+        params: { phaseMode: 'minimum', msMode: 'stereo', tiltDb: 0, bands: [nextBand] },
+        rationale: 'Reduce the measured 20-60 Hz Sub/Bass excess with a restrained 45 Hz low shelf, before dynamics.',
+      });
+      reasons.push(`Add 45 Hz low shelf ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
+    }
+
+    const bassEnhancer = chain.find((m) => m.type === 'bass-enhancer' && m.enabled && !m.bypassed);
+    if (bassEnhancer) {
+      const params = bassEnhancer.params as { subGainDb: number };
+      if (params.subGainDb > 0) {
+        commands.push({
+          op: 'configure',
+          targetId: bassEnhancer.id,
+          processorType: 'bass-enhancer',
+          paramsPatch: { subGainDb: 0 },
+          rationale: 'Remove additive sub-band gain while the Sub/Bass excess gate is failing.',
+        });
+        reasons.push('Bass Enhancer sub gain set to 0 dB');
+      }
+    }
+  }
+
   if (!wantsClicks && !wantsDc) return { commands, reasons };
   if (restoreMod) {
     const rp = restoreMod.params as RestoreParams;

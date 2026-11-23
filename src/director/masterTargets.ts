@@ -24,6 +24,7 @@ export interface MasterTargetCheck {
     | 'dc-offset'
     | 'phase'
     | 'low-end-phase'
+    | 'sub-excess'
     | 'lra'
     | 'crest'
     | 'spectral-balance'
@@ -157,6 +158,24 @@ export function evaluateMasterTargets(
     target: `≥ ${lowFloor.toFixed(2)}`,
     status: st(post.lowEndCorrelation >= lowFloor),
     fix: 'Stereo imager: mono-maker below 120 Hz; bass enhancer mono focus',
+  });
+
+  // The diagnostic log raises this finding when the source has > +2 dB Sub/Bass
+  // excess. Once raised, the delivered render must meet its displayed <= 0 dB target.
+  // Keep the check visible on every report, but do not penalize intentional bass-heavy
+  // sources whose measured ratio never crossed the diagnostic trigger.
+  const postSubBassExcessDb = post.zoneEnergyDb.sub - post.zoneEnergyDb.bass;
+  const sourceSubBassExcessDb = pre
+    ? pre.zoneEnergyDb.sub - pre.zoneEnergyDb.bass
+    : postSubBassExcessDb;
+  const subBassFindingTriggered = sourceSubBassExcessDb > 2 || postSubBassExcessDb > 2;
+  checks.push({
+    id: 'sub-excess',
+    label: 'Sub-bass excess / rumble',
+    measured: `${postSubBassExcessDb >= 0 ? '+' : ''}${postSubBassExcessDb.toFixed(1)} dB over bass`,
+    target: '≤ 0.0 dB over bass when triggered (> +2.0 dB at source)',
+    status: st(!subBassFindingTriggered || postSubBassExcessDb <= 0),
+    fix: 'Parametric EQ: measured 45 Hz low-shelf reduction; disable Bass Enhancer sub boost; re-measure',
   });
 
   // Dynamics: fail only when PROCESSING collapsed dynamics below the objective's
