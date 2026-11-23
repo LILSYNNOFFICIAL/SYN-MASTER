@@ -1,3 +1,4 @@
+import { isNoiseLikeFloor } from '../dsp/analyzer';
 import type { FadeSettings } from '../dsp/fades';
 import { evaluateMasterTargets, type MasterTargetGate } from './masterTargets';
 import type { RestoreParams } from '../types/mastering';
@@ -354,7 +355,7 @@ export function buildExplainableMasterPlan(input: {
   }
 
   // Stage 1: SYN-Restore ONLY if genuine DC offset, elevated quiet-frame noise floor, or strong sibilance/resonance exists
-  const hasGenuineNoiseFloor = nf > -48 && analysis.rmsDb - nf >= 12;
+  const hasGenuineNoiseFloor = nf > -48 && analysis.rmsDb - nf >= 12 && isNoiseLikeFloor(analysis);
   const baselineClicks = analysis.clickCount ?? 0;
   const needsRestore =
     baselineClicks > 0 ||
@@ -363,7 +364,7 @@ export function buildExplainableMasterPlan(input: {
     (analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 && analysis.resonances.some((r) => r.freqHz > 4500));
 
   if (needsRestore) {
-    const hiss = nf > -48 ? Math.min(42, Math.round((nf + 55) * 2.2)) : 4;
+    const hiss = hasGenuineNoiseFloor ? Math.min(42, Math.round((nf + 55) * 2.2)) : 4;
     const deEss = analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 ? 24 : 8;
     const restoreParams = {
       dcOffset: analysis.dcOffset >= 0.004,

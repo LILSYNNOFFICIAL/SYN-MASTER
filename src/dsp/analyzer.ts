@@ -248,6 +248,14 @@ export function measureIntegratedLufs(channels: Float32Array[], sampleRate: numb
 /**
  * Compute full SYN-ANALYZE AudioAnalysis from stereo/mono Float32Array channels
  */
+/**
+ * True when the quietest frames look like noise (hiss/hum-free broadband) rather than quiet
+ * music. Older analyses without the HF measurement are treated as noise-like (old behaviour).
+ */
+export function isNoiseLikeFloor(a: { noiseFloorHfRatio?: number }): boolean {
+  return a.noiseFloorHfRatio === undefined || a.noiseFloorHfRatio >= 0.05;
+}
+
 export function analyzeAudioBuffer(
   channels: Float32Array[],
   sampleRate: number,

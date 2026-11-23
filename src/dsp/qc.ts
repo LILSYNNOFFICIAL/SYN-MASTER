@@ -1,3 +1,4 @@
+import { isNoiseLikeFloor } from './analyzer';
 import type { AudioAnalysis, ExportConfig, QCCheckItem, QCReport, QCTargetProfile } from '../types/mastering';
 
 export const QC_TARGET_PROFILES: QCTargetProfile[] = [
@@ -278,7 +279,8 @@ export function runQualityControl(
 
   // 10. Broadband Noise Floor (only evaluate quiet-frame noise floor when quiet passages exist >= 12 dB below program RMS)
   const nf = post.noiseFloorDb ?? -72;
-  const hasQuietGapMargin = post.rmsDb - nf >= 12;
+  // Quiet frames that are quiet MUSIC (low HF share) are not a noise floor.
+  const hasQuietGapMargin = post.rmsDb - nf >= 12 && isNoiseLikeFloor(post);
   const nfStatus = !hasQuietGapMargin || nf <= -52 ? 'pass' : nf <= -42 ? 'warning' : 'fail';
   checks.push({
     id: 'qc-noise-floor',

@@ -1,3 +1,4 @@
+import { isNoiseLikeFloor } from '../dsp/analyzer';
 import { MUD_REGION_HZ } from '../dsp/bandMap';
 import type {
   AnalysisFinding,
@@ -296,7 +297,7 @@ export function analyzeTrackIntelligence(
   // Only call it a noise floor when those frames carry a noise-like HF share
   // (noiseFloorHfRatio: ~2 white noise, ~0.02 quiet bass-heavy music). Found on a real
   // Suno track whose -30 dBFS "noise floor" was its quietest bass passage.
-  const quietFramesNoiseLike = analysis.noiseFloorHfRatio === undefined || analysis.noiseFloorHfRatio >= 0.05;
+  const quietFramesNoiseLike = isNoiseLikeFloor(analysis);
   if (nf > thresholds.noiseFloorMax && analysis.rmsDb > -40 && analysis.rmsDb - nf >= 12 && quietFramesNoiseLike) {
     findings.push({
       id: 'diag-noise',
