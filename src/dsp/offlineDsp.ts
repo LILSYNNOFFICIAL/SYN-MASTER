@@ -257,10 +257,12 @@ function applyDynamicEQ(
     const bpStateL = createBiquadState();
     const bpStateR = createBiquadState();
 
-    const attCoeff = Math.exp(-1 / Math.max(1, (band.attackMs / 1000) * sampleRate));
-    const relCoeff = Math.exp(-1 / Math.max(1, (band.releaseMs / 1000) * sampleRate));
-    const gainAttackCoeff = attCoeff;
-    const gainReleaseCoeff = relCoeff;
+    // Keep detector smoothing fast and stable; user attack/release values govern
+    // the actual gain envelope exactly once, rather than being applied twice.
+    const detectorAttackCoeff = Math.exp(-1 / Math.max(1, sampleRate * 0.001));
+    const detectorReleaseCoeff = Math.exp(-1 / Math.max(1, sampleRate * 0.03));
+    const gainAttackCoeff = Math.exp(-1 / Math.max(1, (band.attackMs / 1000) * sampleRate));
+    const gainReleaseCoeff = Math.exp(-1 / Math.max(1, (band.releaseMs / 1000) * sampleRate));
     let env = 0;
     let currentGainDb = 0;
     let coeffs = designPeakingEQ(band.freq, 0, band.q, sampleRate);
@@ -271,7 +273,9 @@ function applyDynamicEQ(
       const detL = processBiquadSample(left[i], bpCoeffs, bpStateL);
       const detR = processBiquadSample(right[i], bpCoeffs, bpStateR);
       const det = Math.max(Math.abs(detL), Math.abs(detR));
-      env = det > env ? attCoeff * env + (1 - attCoeff) * det : relCoeff * env + (1 - relCoeff) * det;
+      env = det > env
+        ? detectorAttackCoeff * env + (1 - detectorAttackCoeff) * det
+        : detectorReleaseCoeff * env + (1 - detectorReleaseCoeff) * det;
 
       const envDb = linearToDb(env);
       let targetCut = 0;
