@@ -79,8 +79,25 @@ Four problems combined so that "FIX ALL & VERIFY" could say a track was mastered
 3. **No objective pass/fail gate.** "Done" leaned on a heuristic fit score (≥ 90) and QC. Now every pass's rendered audio is re-measured by `evaluateMasterTargets` (LUFS, dBTP, clipped samples, clicks, DC, phase, low-end phase, dynamics collapse, crest collapse, spectral balance vs reference). A gate-passing pass always beats a failing one, convergence requires the gate, plateaus no longer stop the loop while the gate fails, and the final report states plainly whether targets were met (`report.targetGate`). Clicks/pops were not measured at all before; they are now detected and fixed on the first pass.
 4. **What you heard was not what was verified.** "Mastered" playback ran an approximate realtime Web Audio graph, while verification and export used the offline renderer. Playback now uses the exact verified offline render (hot-swapped after each re-render).
 
+### Where the new work lives (map for the next dev)
+| Area | Files |
+| --- | --- |
+| Objective pass/fail gate | `src/director/masterTargets.ts` (used in `runAutonomousDirectorLoop`, `src/director/directorEngine.ts`) |
+| Click detection / AI-audio repair | `src/dsp/clickDetect.ts`, `src/dsp/repair.ts` (SYN-Restore params `declick`, `decrackle`, `spikeRepair`, `deShimmer`) |
+| New processors | `src/dsp/extraProcessors.ts` (transient shaper, clipper), `applyMultibandMaximizer` in `src/dsp/offlineDsp.ts` |
+| Diagnostic log (JSON/text) | `src/director/diagnosticLog.ts`, `src/components/studio/DiagnosticLogPanel.tsx` |
+| New UX | `src/components/studio/` (`ImportScreen`, `FixItStage`, `TimelineWaveform`, `FxRackWindow`, `FloatingWindow`, `ParametricEQ2`, `moduleCatalog`) wired in `src/App.tsx` |
+| Fades / loudness targets | `src/dsp/fades.ts`, `src/dsp/loudnessTargets.ts` |
+| Styling | `src/index.css` (SYN2 section at the bottom) |
+
 ### Open items
-_None yet._
+- The realtime Web Audio graph (`src/engine/audioEngine.ts`) passes the three new processors (transient shaper, clipper, multiband maximizer) through. "Mastered" playback uses the verified offline render, so this only matters for the ~120 ms before a re-render lands; when a re-render lands during playback it restarts at the same position (a tiny gap).
+- AI-shimmer detection in the diagnostic log is a heuristic (high-band stereo correlation + air energy). The deterministic engine does not switch `deShimmer` on by itself; Gemini or the user can. A measured shimmer metric would let the gate verify it.
+- The loop keeps refining open low-mid "mud" findings after the gate passes (by design of the existing mud refinement), so a run can take several passes and end with "rolled back to best pass N" even when it passed. Consider stopping as soon as the gate passes if the owner prefers speed.
+- Mouse-wheel Q on EQ nodes uses React's passive wheel handler, so the page can scroll while adjusting Q.
+- Fades are applied to the source before the chain (so the limiter sees the faded signal). A post-chain fade option could be added.
+- Only the director, post-fix verification, inventory and DSP unit tests were re-run for these changes, plus `tsc` and `vite build`. Run `npm test` before the next release and test inside AI Studio after syncing.
+- The click detector ignores clicks in the first and last ~3 ms of the file (not enough audio to judge isolation).
 
 ---
 
