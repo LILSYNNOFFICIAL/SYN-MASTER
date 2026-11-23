@@ -321,8 +321,10 @@ function buildBaselineComparisonsForFinding(
     }
 
     case 'diag-noise': {
-      const preNf = pre.noiseFloorDb ?? -72;
-      const postNf = post ? (post.noiseFloorDb ?? -72) : null;
+      const preNf = pre.noiseFloorDb ?? -96;
+      const postNf = post ? (post.noiseFloorDb ?? -96) : null;
+      const preSnr = pre.rmsDb - preNf;
+      const postSnr = post && postNf !== null ? post.rmsDb - postNf : null;
       return [
         makeComparison({
           key: 'noiseFloorDb',
@@ -336,14 +338,45 @@ function buildBaselineComparisonsForFinding(
           meetsThreshold: postNf !== null ? postNf <= thresholds.noiseFloorMax : null,
         }),
         makeComparison({
-          key: 'rmsDb',
-          label: 'Program RMS',
-          unit: 'dBFS',
+          key: 'signalToNoiseDb',
+          label: 'Signal-to-Noise Ratio',
+          unit: 'dB',
           decimals: 1,
-          beforeValue: pre.rmsDb,
-          afterValue: post ? post.rmsDb : null,
+          beforeValue: preSnr,
+          afterValue: postSnr,
+          thresholdFormatted: 'improve by >= 1.0 dB',
+          improved: postSnr !== null ? postSnr >= preSnr + 1.0 : null,
+          meetsThreshold: postSnr !== null ? postSnr >= preSnr + 1.0 : null,
+        }),
+        makeComparison({
+          key: 'transientDensity',
+          label: 'Transient Density',
+          unit: '',
+          decimals: 2,
+          beforeValue: pre.transientDensity,
+          afterValue: post ? post.transientDensity : null,
           improved: null,
-          meetsThreshold: true,
+          meetsThreshold: post ? post.transientDensity >= pre.transientDensity * 0.65 : null,
+        }),
+        makeComparison({
+          key: 'crestFactorDb',
+          label: 'Crest Factor',
+          unit: 'dB',
+          decimals: 1,
+          beforeValue: pre.crestFactorDb,
+          afterValue: post ? post.crestFactorDb : null,
+          improved: null,
+          meetsThreshold: post ? post.crestFactorDb >= pre.crestFactorDb - 1.5 : null,
+        }),
+        makeComparison({
+          key: 'airEnergyDb',
+          label: 'Air Band Energy',
+          unit: 'dB',
+          decimals: 1,
+          beforeValue: pre.zoneEnergyDb.air,
+          afterValue: post ? post.zoneEnergyDb.air : null,
+          improved: null,
+          meetsThreshold: post ? post.zoneEnergyDb.air >= pre.zoneEnergyDb.air - 3.0 : null,
         }),
       ];
     }
@@ -527,6 +560,63 @@ function classifyVerifiedFinding(opts: {
       'Return to a cleaner premaster or original stems, or use a dedicated distortion-restoration process with independent artifact checks. This mastering chain has no verified source de-distortion reconstruction step.';
     verificationSummary =
       `VERIFICATION: The source entered mastering with ${pre.thdEstimatePercent.toFixed(2)}% estimated harmonic distortion. The rendered output reports ${post.thdEstimatePercent.toFixed(2)}%, but a lower estimate alone does not establish that source distortion artifacts were reconstructed or removed transparently. This workflow has no verified source de-distortion reconstruction step. Status: UNRESOLVED`;
+  } else if (finding.id === 'diag-noise') {
+    const preNoise = pre.noiseFloorDb ?? -96;
+    const postNoise = post.noiseFloorDb ?? -96;
+    const preSnr = pre.rmsDb - preNoise;
+    const postSnr = post.rmsDb - postNoise;
+    const noiseFloorDrop = preNoise - postNoise;
+    const snrGain = postSnr - preSnr;
+    const transientDamage =
+      pre.transientDensity >= 0.08 && post.transientDensity < pre.transientDensity * 0.65;
+    const crestDamage = post.crestFactorDb < pre.crestFactorDb - 1.5;
+    const airDamage = post.zoneEnergyDb.air < pre.zoneEnergyDb.air - 3.0;
+    const collateral = transientDamage || crestDamage || airDamage;
+
+    if (noiseFloorDrop >= 1.5 && snrGain >= 1.0) {
+      if (collateral) {
+        status = 'PARTIALLY_RESOLVED';
+        const losses = [
+          ...(transientDamage ? ['transient density'] : []),
+          ...(crestDamage ? ['crest factor'] : []),
+          ...(airDamage ? ['high-frequency air'] : []),
+        ];
+        remainingDeviation = 'Noise reduction improved SNR by ' + fmtSigned(snrGain, 1, 'dB') +
+          ', but processing also reduced ' + losses.join(', ') + '.';
+        nextRecommendedAction =
+          'Reduce restoration intensity or narrow its frequency/time action. Preserve transient attacks and air tails, then compare the result using level-matched A/B auditioning.';
+        verificationSummary =
+          'VERIFICATION: Noise floor fell ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
+          ' and signal-to-noise ratio improved ' + fmtSigned(snrGain, 1, 'dB') +
+          ', but collateral signal loss was detected (' + losses.join(', ') + '). Status: PARTIALLY RESOLVED';
+      } else if (postNoise <= thresholds.noiseFloorMax && !stillFlagged) {
+        status = 'RESOLVED';
+        verificationSummary =
+          'VERIFICATION: Noise floor fell ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
+          ' and signal-to-noise ratio improved ' + fmtSigned(snrGain, 1, 'dB') +
+          '. Transient density, crest factor, and high-frequency air remained within preservation checks. Status: RESOLVED';
+      } else {
+        status = 'IMPROVED';
+        remainingDeviation =
+          'Noise floor is ' + fmtSigned(postNoise, 1, 'dBFS') +
+          ' (target <= ' + thresholds.noiseFloorMax.toFixed(1) + ' dBFS).';
+        nextRecommendedAction =
+          'Continue with conservative, noise-specific reduction only if level-matched audition confirms the remaining noise is audible.';
+        verificationSummary =
+          'VERIFICATION: Signal-to-noise ratio improved ' + fmtSigned(snrGain, 1, 'dB') +
+          ' without measured transient/air collateral, but the noise-floor target remains unmet. Status: IMPROVED';
+      }
+    } else {
+      status = 'UNRESOLVED';
+      remainingDeviation =
+        'Noise floor changed ' + fmtSigned(noiseFloorDrop, 1, 'dB') +
+        ', while signal-to-noise ratio changed ' + fmtSigned(snrGain, 1, 'dB') +
+        '.';
+      nextRecommendedAction =
+        'Use noise-specific reduction rather than lowering the whole signal. Verify improvement from quiet passages relative to program level.';
+      verificationSummary =
+        'VERIFICATION: A lower absolute noise-floor reading is not sufficient. Signal-to-noise ratio did not improve by at least 1.0 dB, so uniform attenuation or level movement cannot be counted as noise removal. Status: UNRESOLVED';
+    }
   } else if (finding.id === 'diag-mud') {
     const preLowMid = pre.zoneEnergyDb.lowMid - pre.zoneEnergyDb.mid;
     const postLowMid = post.zoneEnergyDb.lowMid - post.zoneEnergyDb.mid;
