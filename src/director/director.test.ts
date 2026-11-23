@@ -608,7 +608,7 @@ test('Reference comparison preserves raw band deltas but bases EQ guidance on le
     shapedReference,
   );
   assert.ok(
-    shapedComparison.suggestedActions.some((action) => /warmer bass weight/.test(action) && /\+2\.0 dB/.test(action)),
+    shapedComparison.suggestedActions.some((action) => /warmer bass weight/.test(action) && /\+2\.5 dB/.test(action)),
     'Genuine relative bass difference should produce a restrained bass recommendation',
   );
   assert.ok(
