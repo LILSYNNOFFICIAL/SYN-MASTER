@@ -142,7 +142,8 @@ export function detectClicks(
  * next 3 ms, and 6-33 samples above 30% of the peak at 48 kHz), so they are not counted.
  *
  * Tests, all on the second difference d2:
- *  - width: samples within ±1 ms whose d2 exceeds 30% of the spike stay ≤ ~0.1 ms + 3,
+ *  - width: samples within ±1 ms whose d2 exceeds 30% of the spike stay ≤ ~0.05 ms + 3
+ *    (5 at 48 kHz),
  *  - recovery: mean d2 over 0.1-3 ms after the spike < 1.5x the mean over 2-12 ms before.
  * Shared by the detector and the de-click repair so the repair never smooths an onset
  * the detector would not call a click.
@@ -155,7 +156,9 @@ export function isIsolatedClick(ch: Float32Array, index: number, sampleRate: num
   const span = Math.max(4, Math.round(ms));
   let width = 0;
   for (let j = index - span; j <= index + span; j++) if (d(j) > 0.3 * peak) width++;
-  if (width > Math.round(0.1 * ms) + 3) return false;
+  // A one-sample impulse has a d2 burst 3 samples wide, a step 2, a 2-sample spike 4.
+  // Drum onsets driven hard into a limiter showed 6+ (measured on a real track at -9.5 LUFS).
+  if (width > Math.round(0.05 * ms) + 3) return false;
   const bA = Math.max(2, index - Math.round(12 * ms));
   const bB = Math.max(2, index - Math.round(2 * ms));
   const aA = Math.min(n, index + Math.max(4, Math.round(0.1 * ms)));
