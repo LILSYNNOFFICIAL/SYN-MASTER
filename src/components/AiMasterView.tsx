@@ -586,7 +586,7 @@ export const AiMasterView: React.FC<Props> = ({
                     onChange={(e) => onChangeUseGeminiCloud(e.target.checked)}
                     className="accent-[#D4AF37]"
                   />
-                  Include Cloud Gemini Reasoning (when configured)
+                  Include cloud AI reasoning (provider: see AI chip in the top bar; built-in Gemini by default)
                 </label>
               </div>
             )}

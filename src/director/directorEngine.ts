@@ -1746,7 +1746,7 @@ export interface RunAutonomousDirectorOptions {
     targetTruePeakDb: number;
     preserveDynamics: boolean;
     qcReport: QCReport;
-  }) => Promise<ProcessorModule[] | null>;
+  }) => Promise<ProcessorModule[] | null | AiRefineSuggestion>;
   maxIterations?: number;
   maxCpuBudgetMs?: number;
   convergenceThreshold?: number;
@@ -1761,6 +1761,17 @@ export interface RunAutonomousDirectorOptions {
     checkpoint?: DirectorCheckpoint;
     currentChain?: ProcessorModule[];
   }) => void;
+}
+
+/**
+ * What an AI refinement callback may return: a proposed chain plus who produced it and any
+ * provider notices (errors, fallbacks). It can only PROPOSE a chain; the loop renders it,
+ * re-measures it and judges it against the objective gate like any other candidate.
+ */
+export interface AiRefineSuggestion {
+  chain: ProcessorModule[] | null;
+  producedBy?: string | null;
+  notices?: string[];
 }
 
 function makeActivity(
@@ -2478,9 +2489,10 @@ export async function runAutonomousDirectorLoop(
     if (pass < loopMax) {
       emit('Optimizing', pass, undefined, undefined, workingChain, 'Optimizing');
       let nextChainFromAi: ProcessorModule[] | null = null;
+      let aiProducedBy = 'cloud AI';
       if (opts.aiRefineCallback) {
         try {
-          const candidateAiChain = await opts.aiRefineCallback({
+          const rawSuggestion = await opts.aiRefineCallback({
             preAnalysis,
             postAnalysis: post,
             currentChain: workingChain,
@@ -2489,6 +2501,16 @@ export async function runAutonomousDirectorLoop(
             preserveDynamics: objective.preserveTransients,
             qcReport,
           });
+          const suggestion: AiRefineSuggestion = Array.isArray(rawSuggestion) || rawSuggestion === null
+            ? { chain: rawSuggestion }
+            : rawSuggestion;
+          for (const notice of suggestion.notices ?? []) {
+            emit('Optimizing', pass, makeActivity(pass, 'refine', 'warning', notice), undefined, undefined, 'Optimizing');
+          }
+          if (suggestion.producedBy) {
+            aiProducedBy = suggestion.producedBy;
+          }
+          const candidateAiChain = suggestion.chain;
           if (candidateAiChain) {
             const invCheck = validateChainAgainstInventory(candidateAiChain);
             if (invCheck.valid) {
@@ -2517,7 +2539,7 @@ export async function runAutonomousDirectorLoop(
               pass,
               'refine',
               'warning',
-              `Cloud Gemini refinement skipped (${err instanceof Error ? err.message : 'unavailable'}); continuing with deterministic DSP Director remediation.`,
+              `AI refinement skipped (${err instanceof Error ? err.message : 'unavailable'}); continuing with deterministic DSP Director remediation.`,
             ),
             undefined,
             undefined,
@@ -2531,7 +2553,7 @@ export async function runAutonomousDirectorLoop(
         emit(
           'Optimizing',
           pass,
-          makeActivity(pass, 'refine', 'hypothesis', 'Applied cloud Gemini refinement adjustments for next render pass.'),
+          makeActivity(pass, 'refine', 'hypothesis', `Applied AI refinement suggested by ${aiProducedBy} for the next render pass (it is re-rendered and re-measured against the objective gate like any other candidate).`),
           undefined,
           workingChain,
           'Optimizing',

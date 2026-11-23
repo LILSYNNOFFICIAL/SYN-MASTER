@@ -120,6 +120,10 @@ import { FxRackWindow } from './components/studio/FxRackWindow';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
 import { buildDiagnosticLog } from './director/diagnosticLog';
+import { requestRefine, requestStrategy } from './ai/masteringClient';
+import { AiProviderChip, AiProviderPanel } from './components/AiProviderPanel';
+import { describeProvider } from './ai/providerAdapters';
+import { getActiveProviderConfig, runProviderCall } from './ai/providerStore';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -1356,7 +1360,9 @@ export default function App() {
     setDirectorPlan(plan);
     setAiStrategy(plan.strategy);
 
-    // Optional Cloud Gemini initial strategy in Autonomous/Assisted when user opted in
+    // Optional cloud AI (active provider; built-in Gemini by default) initial strategy in Autonomous/Assisted when user opted in
+    const aiProviderLog: string[] = [];
+    const aiProviderUsed = describeProvider(getActiveProviderConfig());
     let geminiInitialChain: ProcessorModule[] | undefined;
     if (useGeminiCloud && runOperatingMode !== 'manual') {
       setAiLoading(true);
@@ -1368,29 +1374,40 @@ export default function App() {
           activeTrack.analysis,
           plan.objective,
         );
-        const res = await fetch('/api/ai/master', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(12_000),
-          body: JSON.stringify({
-            analysis: activeTrack.analysis,
-            mode,
-            objective: objectiveId,
-            customObjective,
-            operatingMode: runOperatingMode,
-            targetLufs: plan.objective.targetLufs,
-            referenceAnalysis: referenceTrack?.analysis ?? null,
-            availablePlugins: pluginSummary.matches.map((m) => ({
-              name: m.name,
-              role: m.role,
-              manufacturer: m.manufacturer,
-            })),
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `Server responded ${res.status}`);
+        const strategyInput = {
+          analysis: activeTrack.analysis,
+          mode,
+          objective: objectiveId,
+          customObjective,
+          operatingMode: runOperatingMode,
+          targetLufs: plan.objective.targetLufs,
+          referenceAnalysis: referenceTrack?.analysis ?? null,
+          availablePlugins: pluginSummary.matches.map((m) => ({
+            name: m.name,
+            role: m.role,
+            manufacturer: m.manufacturer,
+          })),
+        };
+        // Built-in Gemini (default): exactly the existing server call.
+        const builtinStrategy = async () => {
+          const res = await fetch('/api/ai/master', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(12_000),
+            body: JSON.stringify(strategyInput),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || `Server responded ${res.status}`);
+          return data.strategy;
+        };
+        const providerRun = await runProviderCall('strategy', (opts) =>
+          requestStrategy(getActiveProviderConfig(), strategyInput, builtinStrategy, opts),
+        );
         if (isStale()) return;
-        const strat = data.strategy as AIMasteringStrategy;
+        aiProviderLog.push(...providerRun.notices.map((n) => `Plan: ${n}`));
+        if (providerRun.producedBy) aiProviderLog.push(`Plan: initial strategy produced by ${providerRun.producedBy}.`);
+        if (!providerRun.result) throw new Error(providerRun.notices[0] ?? 'AI strategy skipped.');
+        const strat = providerRun.result as unknown as AIMasteringStrategy;
         const invCheck = validateChainAgainstInventory(strat.chain);
         if (invCheck.valid && invCheck.sanitizedChain.length > 0) {
           strat.chain = invCheck.sanitizedChain;
@@ -1408,6 +1425,18 @@ export default function App() {
       } finally {
         if (!isStale()) setAiLoading(false);
       }
+    }
+
+    if (aiProviderLog.length > 0 && !isStale()) {
+      const planEntries: DirectorActivityEntry[] = aiProviderLog.map((message, idx) => ({
+        id: `act-ai-provider-${Date.now()}-${idx}`,
+        timestamp: Date.now(),
+        passNumber: 0,
+        phase: 'plan',
+        kind: /fail|cancel|skipp/i.test(message) ? 'warning' : 'observation',
+        message,
+      }));
+      setDirectorActivityLog((prev) => [...prev, ...planEntries]);
     }
 
     let tempWorkspace: Awaited<ReturnType<typeof createTemporaryMasteringWorkspace>> | null = null;
@@ -1460,15 +1489,23 @@ export default function App() {
         aiRefineCallback:
           useGeminiCloud && runOperatingMode === 'autonomous'
             ? async (ctx) => {
-                const res = await fetch('/api/ai/refine', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  signal: AbortSignal.timeout(12_000),
-                  body: JSON.stringify(ctx),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || `Refine error ${res.status}`);
-                return data.refined?.chain ?? null;
+                const builtinRefine = async () => {
+                  const res = await fetch('/api/ai/refine', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: AbortSignal.timeout(12_000),
+                    body: JSON.stringify(ctx),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.error || `Refine error ${res.status}`);
+                  return data.refined;
+                };
+                const run = await runProviderCall('refine', (opts) =>
+                  requestRefine(getActiveProviderConfig(), ctx, builtinRefine, opts),
+                );
+                aiProviderLog.push(...run.notices.map((n) => `Refine: ${n}`));
+                if (run.producedBy) aiProviderLog.push(`Refine: suggestion produced by ${run.producedBy}.`);
+                return { chain: run.result?.chain ?? null, producedBy: run.producedBy, notices: run.notices };
               }
             : undefined,
         onProgress: (upd) => {
@@ -1546,6 +1583,7 @@ export default function App() {
             convergenceThreshold,
             exportConfig,
             useGeminiCloud,
+            aiProvider: useGeminiCloud ? { ...aiProviderUsed, log: aiProviderLog } : null,
             referenceAnalysis: referenceTrack?.analysis ?? null,
             externalPlugins: hostSnapshot.plugins,
           },
@@ -2205,6 +2243,7 @@ export default function App() {
               ? `Host (${hostSnapshot.plugins.length})`
               : 'Host: Browser-Only'}
           </button>
+          <AiProviderChip onOpen={() => setSettingsModalOpen(true)} />
           <button
             type="button"
             onClick={() => setActiveTab('ai')}
@@ -2946,7 +2985,9 @@ export default function App() {
           void saveAppSettings(next);
         }}
         onClose={() => setSettingsModalOpen(false)}
-      />
+      >
+        <AiProviderPanel />
+      </SettingsModal>
     </div>
   );
 }

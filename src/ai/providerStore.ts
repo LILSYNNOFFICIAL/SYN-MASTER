@@ -8,7 +8,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { BUILTIN_PROVIDER_ID, getPreset } from './providerPresets.ts';
-import type { ProviderConfig } from './providerAdapters.ts';
+import { describeProvider, type ProviderConfig } from './providerAdapters.ts';
 
 export interface ProviderSettings {
   presetId: string;
@@ -20,6 +20,7 @@ export interface ProviderSettings {
 }
 
 export interface ActiveAiCall {
+  kind: 'strategy' | 'refine';
   label: string;
   agentic: boolean;
   startedAt: number;
@@ -132,6 +133,22 @@ export function getActiveProviderConfig(s: ProviderSettings = settings): Provide
 export function setActiveAiCall(call: ActiveAiCall | null) {
   activeCall = call;
   notify();
+}
+
+/**
+ * Run one AI suggestion call with a cancel handle and the "agent is working" state the top-bar
+ * chip shows. Cancelling aborts only this provider request; the deterministic engine carries on.
+ */
+export async function runProviderCall<T>(kind: 'strategy' | 'refine', fn: (opts: { signal: AbortSignal }) => Promise<T>): Promise<T> {
+  const d = describeProvider(getActiveProviderConfig());
+  const controller = new AbortController();
+  const call: ActiveAiCall = { kind, label: d.label, agentic: d.agentic, startedAt: Date.now(), cancel: () => controller.abort() };
+  setActiveAiCall(call);
+  try {
+    return await fn({ signal: controller.signal });
+  } finally {
+    if (activeCall === call) setActiveAiCall(null);
+  }
 }
 
 export function getActiveAiCall(): ActiveAiCall | null {

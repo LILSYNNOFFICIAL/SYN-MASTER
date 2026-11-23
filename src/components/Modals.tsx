@@ -217,6 +217,8 @@ interface SettingsModalProps {
   settings: AppSettings;
   onChange: (next: AppSettings) => void;
   onClose: () => void;
+  /** Extra sections (e.g. the AI Provider panel). */
+  children?: React.ReactNode;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -224,6 +226,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
   onChange,
   onClose,
+  children,
 }) => {
   if (!open) return null;
 
@@ -234,7 +237,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       aria-label="Workstation Settings"
       className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
     >
-      <div className="w-full max-w-md rounded bg-[#111217] border border-[#D4AF37]/45 shadow-2xl overflow-hidden">
+      <div className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded bg-[#111217] border border-[#D4AF37]/45 shadow-2xl">
         <div className="px-5 py-3.5 border-b border-[#242732] flex items-center justify-between bg-[#151720]">
           <h2 className="text-sm font-bold text-[#F2CA52] uppercase tracking-wider">
             Workstation Preferences
@@ -283,6 +286,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className="accent-[#D4AF37]"
             />
           </label>
+
+          {children}
 
           <div className="p-3 rounded bg-[#0C0D12] border border-[#222530] text-[11px] text-[#9CA3AF]">
             <div className="font-semibold text-[#D4AF37] mb-1">Keyboard Shortcuts</div>
