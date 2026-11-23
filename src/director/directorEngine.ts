@@ -436,8 +436,12 @@ export function buildExplainableMasterPlan(input: {
       ? 13.5
       : 11.0;
   if (referenceAnalysis) {
-    eqBassGain = Number(Math.max(-3.0, Math.min(3.0, (referenceAnalysis.zoneEnergyDb.bass - analysis.zoneEnergyDb.bass) * 0.45)).toFixed(1));
-    eqReasons.push(`Reference bass delta: ${(referenceAnalysis.zoneEnergyDb.bass - analysis.zoneEnergyDb.bass).toFixed(1)} dB (45% weighted)`);
+    // Compare bass relative to the midrange so a reference's overall mastering level
+    // cannot masquerade as a tonal deficit or trigger an unnecessary low-shelf move.
+    const referenceBassMidDiff = referenceAnalysis.zoneEnergyDb.bass - referenceAnalysis.zoneEnergyDb.mid;
+    const levelMatchedBassDelta = referenceBassMidDiff - bassMidDiff;
+    eqBassGain = Number(Math.max(-3.0, Math.min(3.0, levelMatchedBassDelta * 0.45)).toFixed(1));
+    eqReasons.push(`Reference-relative Bass/Mid delta: ${levelMatchedBassDelta >= 0 ? '+' : ''}${levelMatchedBassDelta.toFixed(1)} dB (45% weighted, level-matched)`);
   } else if (bassMidDiff > eqBassLimit && (lowMidBuildup > 2.6 || analysis.zoneEnergyDb.sub - analysis.zoneEnergyDb.bass > 4.5)) {
     eqBassGain = Number(Math.max(-3.0, -(bassMidDiff - (eqBassLimit - 1.5)) * 0.55).toFixed(1));
     eqReasons.push(`Bass-to-Mid excess: +${bassMidDiff.toFixed(1)} dB`);
@@ -474,7 +478,12 @@ export function buildExplainableMasterPlan(input: {
 
   let highAirGain = 0;
   if (referenceAnalysis) {
-    highAirGain = Number(Math.max(-2.5, Math.min(3.0, (referenceAnalysis.zoneEnergyDb.air - analysis.zoneEnergyDb.air) * 0.4)).toFixed(1));
+    // Match air relative to the midrange, not absolute dBFS. This preserves real
+    // brightness differences while cancelling a uniform reference level offset.
+    const referenceAirMidDiff = referenceAnalysis.zoneEnergyDb.air - referenceAnalysis.zoneEnergyDb.mid;
+    const sourceAirMidDiff = analysis.zoneEnergyDb.air - analysis.zoneEnergyDb.mid;
+    const levelMatchedAirDelta = referenceAirMidDiff - sourceAirMidDiff;
+    highAirGain = Number(Math.max(-2.5, Math.min(3.0, levelMatchedAirDelta * 0.4)).toFixed(1));
   } else if (objective.tonalBias === 'bright' && analysis.spectralSlopeDbPerOct < -1.1) {
     highAirGain = analysis.spectralSlopeDbPerOct < -2.2 ? 1.8 : 0.9;
   } else if (objective.tonalBias === 'warm') {
@@ -1092,19 +1101,27 @@ export function compareReferenceIntelligent(
     air: Number((reference.zoneEnergyDb.air - post.zoneEnergyDb.air).toFixed(2)),
   };
   const suggestedActions: string[] = [];
+  // Keep absolute zone deltas above for diagnostics, but derive tonal recommendations
+  // from each band's relationship to the midrange so global loudness differences cancel.
+  const referenceBassMid = reference.zoneEnergyDb.bass - reference.zoneEnergyDb.mid;
+  const masterBassMid = post.zoneEnergyDb.bass - post.zoneEnergyDb.mid;
+  const relativeBassDeltaDb = referenceBassMid - masterBassMid;
+  const referenceAirMid = reference.zoneEnergyDb.air - reference.zoneEnergyDb.mid;
+  const masterAirMid = post.zoneEnergyDb.air - post.zoneEnergyDb.mid;
+  const relativeAirDeltaDb = referenceAirMid - masterAirMid;
 
-  if (Math.abs(zoneDeltasDb.bass) > 2.0) {
+  if (Math.abs(relativeBassDeltaDb) > 2.0) {
     suggestedActions.push(
-      zoneDeltasDb.bass > 0
-        ? `Reference carries +${zoneDeltasDb.bass.toFixed(1)} dB warmer bass weight — consider gentle +${(zoneDeltasDb.bass * 0.4).toFixed(1)} dB low-shelf @ 85 Hz.`
-        : `Your master has ${Math.abs(zoneDeltasDb.bass).toFixed(1)} dB heavier bass than reference — trim low shelf gently to preserve punch.`,
+      relativeBassDeltaDb > 0
+        ? `Reference carries +${relativeBassDeltaDb.toFixed(1)} dB warmer bass weight relative to the midrange — consider gentle +${(relativeBassDeltaDb * 0.4).toFixed(1)} dB low-shelf @ 85 Hz.`
+        : `Your master has ${Math.abs(relativeBassDeltaDb).toFixed(1)} dB heavier bass relative to the midrange — trim low shelf gently to preserve punch.`,
     );
   }
-  if (Math.abs(zoneDeltasDb.air) > 2.2) {
+  if (Math.abs(relativeAirDeltaDb) > 2.2) {
     suggestedActions.push(
-      zoneDeltasDb.air > 0
-        ? `Reference has +${zoneDeltasDb.air.toFixed(1)} dB brighter air band — try +${(zoneDeltasDb.air * 0.35).toFixed(1)} dB high-shelf @ 11 kHz.`
-        : `Reference is darker in the top octave by ${Math.abs(zoneDeltasDb.air).toFixed(1)} dB — preserve air if intentional or trim slightly.`,
+      relativeAirDeltaDb > 0
+        ? `Reference has +${relativeAirDeltaDb.toFixed(1)} dB brighter air relative to the midrange — try +${(relativeAirDeltaDb * 0.35).toFixed(1)} dB high-shelf @ 11 kHz.`
+        : `Reference is darker in the top octave relative to the midrange by ${Math.abs(relativeAirDeltaDb).toFixed(1)} dB — preserve air if intentional or trim slightly.`,
     );
   }
   const drDelta = post.dynamicRangeDb - reference.dynamicRangeDb;
