@@ -999,8 +999,8 @@ function applyLookaheadLimiter(
   const relCoeff = Math.exp(-1 / Math.max(1, (releaseMs / 1000) * sampleRate));
 
   // A sliding monotonic deque computes the minimum required gain over each lookahead
-  // window. Only L+1 entries are needed; the previous implementation retained four
-  // additional full-track arrays (true-peak envelope, required gain, held gain, deque).
+  // window. Only L+1 deque entries and an L-sample held-gain ring are needed.
+  // True-peak reads use the untouched source window ahead of the in-place output cursor.
   const L = lookSamples;
   const dequeCapacity = L + 1;
   const dequeIndices = new Int32Array(dequeCapacity);
@@ -1287,11 +1287,11 @@ export function processChainOffline(
     }
 
     const useWetDry = mod.wetDry < 99.5;
-    const moduleUsesLimiterScratch = isLimiterModule(mod.type);
+    const moduleNeedsSeparateDrySnapshot = isLimiterModule(mod.type);
     let dryL: Float32Array | null = null;
     let dryR: Float32Array | null = null;
     if (useWetDry) {
-      if (moduleUsesLimiterScratch) {
+      if (moduleNeedsSeparateDrySnapshot) {
         limiterDryScratchL ??= new Float32Array(length);
         limiterDryScratchR ??= new Float32Array(length);
         limiterDryScratchL.set(left);

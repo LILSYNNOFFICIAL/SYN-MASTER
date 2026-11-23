@@ -215,6 +215,36 @@ test('SYN-MASTER export endpoint creates measurable contract-format files', { ti
     request.flushHeaders();
   });
   assert.equal(oversizedStatus, 413, 'Declared uploads over 512 MiB must be rejected before buffering.');
+
+  const pendingExports = [1, 2].map(() => {
+    const request = httpRequest(baseUrl + '/api/export/encode?format=wav&sampleRate=48000', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        Origin: baseUrl,
+        'Content-Length': String(512 * 1024 * 1024),
+      },
+    });
+    request.on('error', () => {});
+    request.flushHeaders();
+    return request;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await fetch(baseUrl + '/api/health');
+  const queuedStatus = await new Promise((resolve, reject) => {
+    const request = httpRequest(baseUrl + '/api/export/encode?format=wav', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', Origin: baseUrl, 'Content-Length': '0' },
+    }, (response) => {
+      response.resume();
+      response.on('end', () => resolve(response.statusCode));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+  assert.equal(queuedStatus, 503, 'A third concurrent export must be rejected while two uploads are active.');
+  pendingExports.forEach((request) => request.destroy());
+  await new Promise((resolve) => setTimeout(resolve, 100));
   const source48 = createFloatWav(48000);
   const source48Path = path.join(tempDir, 'source-48000-float.wav');
   await writeFile(source48Path, source48);
