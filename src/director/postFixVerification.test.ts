@@ -5,7 +5,7 @@ import { createProcessorModule } from '../dsp/chainValidation';
 import { processChainOffline } from '../dsp/offlineDsp';
 import type { AppliedCorrectionRecord, ProcessorModule } from '../types/mastering';
 import { analyzeTrackIntelligence, computeRegionEnergyDb } from './analyzeIntelligence';
-import { deriveGateRepairCommands, resolveObjectiveTarget, runAutonomousDirectorLoop } from './directorEngine';
+import { deriveGateRepairCommands, findSubBassCorrectionHz, resolveObjectiveTarget, runAutonomousDirectorLoop } from './directorEngine';
 import { evaluateMasterTargets } from './masterTargets';
 import { computeChainFingerprint, verifyPostFixAnalysis } from './postFixVerification';
 
@@ -33,6 +33,14 @@ function makeMuddyWithSubAndClipRisk(durationSec = 1.4): Float32Array[] {
     R[i] = 0.25 * (bass + mud + midHigh * 0.96);
   }
   return [L, R];
+}
+
+function withSubPeakSpectrum(analysis: ReturnType<typeof analyzeAudioBuffer>): ReturnType<typeof analyzeAudioBuffer> {
+  return {
+    ...analysis,
+    spectrumBinsFreq: [25, 31, 35, 39, 43, 48, 53, 59, 65, 72],
+    spectrumBinsDb: [-40, -34, -28, -20, -20, -27, -31, -34, -36, -38],
+  };
 }
 
 function makeCleanBassHeavyHipHop(durationSec = 1.4): Float32Array[] {
@@ -959,7 +967,7 @@ test('Noise cleanup reports collateral transient and air loss instead of claimin
 });
 
 test('Sub/Bass excess uses one blocking <= 0 dB target and produces a measured EQ repair', () => {
-  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const measured = withSubPeakSpectrum(analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR));
   const source = {
     ...measured,
     zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 5.3 },
@@ -973,6 +981,7 @@ test('Sub/Bass excess uses one blocking <= 0 dB target and produces a measured E
   assert.equal(subCheck.measured, '+5.3 dB over bass');
   assert.match(subCheck.target, /≤ 0\.0 dB/i);
 
+  assert.equal(findSubBassCorrectionHz(source), 40, 'The correction centre must follow the strongest measured sub-band region');
   const repair = deriveGateRepairCommands(gate, [], source);
   const eqAdd = repair.commands.find((command) =>
     command.op === 'add' && command.processorType === 'parametric-eq',
@@ -981,8 +990,9 @@ test('Sub/Bass excess uses one blocking <= 0 dB target and produces a measured E
   const params = eqAdd.params as { bands: Array<{ id: string; shape: string; freq: number; gain: number }> };
   const subBand = params.bands.find((band) => band.id === 'syn-sub-excess');
   assert.ok(subBand, 'The correction must have a dedicated, trackable Sub/Bass control band');
-  assert.equal(subBand.shape, 'lowshelf');
-  assert.equal(subBand.freq, 45);
+  assert.equal(subBand.shape, 'bell');
+  assert.equal(subBand.freq, 40);
+  assert.equal(subBand.q, 1.0);
   assert.ok(subBand.gain < 0, 'The correction must attenuate, not boost, the sub band');
 
   const partiallyCorrected = {
@@ -1009,7 +1019,7 @@ test('Sub/Bass excess uses one blocking <= 0 dB target and produces a measured E
 });
 
 test('Sub/Bass correction extends an existing EQ instead of duplicating its bands', () => {
-  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const measured = withSubPeakSpectrum(analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR));
   const source = {
     ...measured,
     zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 3.5 },
@@ -1023,12 +1033,12 @@ test('Sub/Bass correction extends an existing EQ instead of duplicating its band
   assert.ok(configure && configure.op === 'configure');
   const bands = (configure.paramsPatch as { bands: Array<{ id: string; freq: number; gain: number }> }).bands;
   assert.equal(bands.length, (eq.params as { bands: unknown[] }).bands.length + 1);
-  assert.ok(bands.some((band) => band.id === 'syn-sub-excess' && band.freq === 45 && band.gain < 0));
+  assert.ok(bands.some((band) => band.id === 'syn-sub-excess' && band.shape === 'bell' && band.freq === 40 && band.gain < 0));
   assert.equal(repair.commands.some((command) => command.op === 'add' && command.processorType === 'parametric-eq'), false);
 });
 
 test('Sub/Bass repair removes additive Bass Enhancer sub gain and refines its own EQ band', () => {
-  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const measured = withSubPeakSpectrum(analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR));
   const source = {
     ...measured,
     zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 4.2 },
@@ -1084,7 +1094,7 @@ test('Objective gate uses the objective-specific integrated loudness tolerance',
 });
 
 test('Sub/Bass iterative correction uses smaller bounded increments near the target', () => {
-  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const measured = withSubPeakSpectrum(analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR));
   const source = {
     ...measured,
     zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 5.3 },

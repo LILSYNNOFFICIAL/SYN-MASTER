@@ -173,7 +173,7 @@ export function evaluateMasterTargets(
     measured: `${postSubBassExcessDb >= 0 ? '+' : ''}${postSubBassExcessDb.toFixed(1)} dB over bass`,
     target: '≤ 0.0 dB over bass when triggered (> +2.0 dB at source)',
     status: st(!subBassFindingTriggered || postSubBassExcessDb <= 0),
-    fix: 'Parametric EQ: measured 45 Hz low-shelf reduction; disable Bass Enhancer sub boost; re-measure',
+    fix: 'Parametric EQ: spectrum-centered bell cut at the dominant 20-60 Hz sub peak; disable Bass Enhancer sub boost; re-measure',
   });
 
   // Dynamics: fail only when PROCESSING collapsed dynamics below the objective's

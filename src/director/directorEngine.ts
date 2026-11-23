@@ -1277,6 +1277,40 @@ export function buildBattleCandidatesIntelligent(analysis: AudioAnalysis): Array
  * Derives targeted ChainCommand[] from measured post-analysis, QC failures, and MultiObjective gaps.
  */
 /**
+ * Centre frequency for a Sub/Bass correction: the strongest 1/3-octave-smoothed point
+ * inside the measured 20-60 Hz sub band. Keeping the correction inside the sub band
+ * avoids the broad, fixed 45 Hz shelf reaching its gain limit while leaving residual
+ * excess above the gate. The selected centre is retained once the control band exists,
+ * so later passes refine the same notch instead of chasing a moving spectral peak.
+ */
+export function findSubBassCorrectionHz(analysis: AudioAnalysis): number {
+  const freqs = analysis.spectrumBinsFreq;
+  const dbs = analysis.spectrumBinsDb;
+  if (!freqs?.length || !dbs?.length || freqs.length !== dbs.length) return 40;
+  let bestHz = 40;
+  let bestDb = -Infinity;
+  for (let hz = 28; hz <= 56; hz += 2) {
+    const lo = Math.max(20, hz / Math.pow(2, 1 / 6));
+    const hi = Math.min(60, hz * Math.pow(2, 1 / 6));
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < freqs.length; i++) {
+      if (freqs[i] >= lo && freqs[i] <= hi && freqs[i] >= 20 && freqs[i] <= 60 && Number.isFinite(dbs[i])) {
+        sum += Math.pow(10, dbs[i] / 10);
+        count++;
+      }
+    }
+    if (count === 0) continue;
+    const db = 10 * Math.log10(sum / count);
+    if (db > bestDb) {
+      bestDb = db;
+      bestHz = hz;
+    }
+  }
+  return Number.isFinite(bestDb) ? bestHz : 40;
+}
+
+/**
  * Centre frequency for a low-mid correction: the loudest 1/3-octave-smoothed point of the
  * measured spectrum inside the correction window, so the cut lands where the build-up is.
  */
@@ -2752,15 +2786,26 @@ export function deriveGateRepairCommands(
     const eqBands = eqMod ? ((eqMod.params as { bands?: EQBand[] }).bands ?? []) : [];
     const controlBandIndex = eqBands.findIndex((band) => band.id === 'syn-sub-excess');
     const existingControlBand = controlBandIndex >= 0 ? eqBands[controlBandIndex] : null;
+    const correctionFreqHz =
+      existingControlBand?.shape === 'bell' && existingControlBand.freq >= 20 && existingControlBand.freq <= 60
+        ? existingControlBand.freq
+        : findSubBassCorrectionHz(post);
     const nextBand: EQBand = existingControlBand
-      ? { ...existingControlBand, enabled: true, gain: Math.max(-12, existingControlBand.gain - reductionStepDb) }
+      ? {
+          ...existingControlBand,
+          enabled: true,
+          shape: 'bell',
+          freq: correctionFreqHz,
+          q: 1.0,
+          gain: Math.max(-12, existingControlBand.gain - reductionStepDb),
+        }
       : {
           id: 'syn-sub-excess',
           enabled: true,
-          shape: 'lowshelf',
-          freq: 45,
+          shape: 'bell',
+          freq: correctionFreqHz,
           gain: -Math.min(8, Math.max(0.5, subBassExcessDb * 0.75)),
-          q: 0.71,
+          q: 1.0,
         };
 
     if (eqMod && (controlBandIndex >= 0 || eqBands.length < 8)) {
@@ -2774,7 +2819,7 @@ export function deriveGateRepairCommands(
         paramsPatch: { bands },
         rationale: `Apply measured Sub/Bass correction with a 45 Hz low shelf at ${nextBand.gain.toFixed(1)} dB.`,
       });
-      reasons.push(`45 Hz Sub/Bass shelf ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
+      reasons.push(`${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
     } else {
       const dynamicsIndex = chain.findIndex((m) =>
         m.type === 'compressor' || m.type === 'multiband-comp' || m.type === 'limiter' ||
@@ -2786,9 +2831,9 @@ export function deriveGateRepairCommands(
         position: dynamicsIndex >= 0 ? dynamicsIndex : chain.length,
         name: 'Sub/Bass Excess Control',
         params: { phaseMode: 'minimum', msMode: 'stereo', tiltDb: 0, bands: [nextBand] },
-        rationale: 'Reduce the measured 20-60 Hz Sub/Bass excess with a restrained 45 Hz low shelf, before dynamics.',
+        rationale: `Reduce measured 20-60 Hz Sub/Bass excess with a spectrum-centered ${nextBand.freq} Hz bell, before dynamics.`,
       });
-      reasons.push(`Add 45 Hz low shelf ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
+      reasons.push(`Add ${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
     }
 
     const bassEnhancer = chain.find((m) => m.type === 'bass-enhancer' && m.enabled && !m.bypassed);

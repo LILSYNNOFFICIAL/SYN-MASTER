@@ -132,7 +132,7 @@ This section is the active implementation queue and progress ledger. Update it i
 
 ### Execution order
 
-- [x] **P0-1: Unify sub-bass excess reporting, correction, and objective verification.** The source finding trigger (> +2 dB) and delivered-render target (≤ 0 dB) now share one measured Sub (20-60 Hz) minus Bass (60-250 Hz) gate. The diagnostic log no longer uses its former separate +1 dB fixed-status threshold. The director applies a 45 Hz low-shelf correction in bounded measured steps and removes positive Bass Enhancer sub gain; every pass is re-analyzed. Synthetic boundary and repair tests passed CI run 45279307130. The owner's original-track re-render and Android/browser listening check remain pending.
+- [ ] **P0-1: Unify sub-bass excess reporting, correction, and objective verification.** The source finding trigger (> +2 dB) and delivered-render target (≤ 0 dB) share one measured Sub (20-60 Hz) minus Bass (60-250 Hz) gate. The director now selects a 1/3-octave-smoothed correction centre from the measured 20-60 Hz spectrum and applies a bounded bell cut there, rather than relying on a fixed 45 Hz shelf that can hit its gain limit without reaching the gate. Positive Bass Enhancer sub gain is still removed and every pass is re-measured. Regression coverage and CI are pending; owner-track rendered-output and Android/browser verification remain separate gates.
 - [ ] **P0-2: Bound offline-render memory and CPU on long tracks/mobile browsers.** Implemented: reusable wet/dry snapshots; chunked 8192-sample multiband scratch; streaming analyzer K-weight/LR correlation with bounded 400 ms energy ring; and in-place lookahead limiting that removes the full-track driven stereo copies. True-peak interpolation applies drive scaling with Float32-equivalent rounding and maintains a nine-sample minimum source guard so the in-place cursor never corrupts future interpolation windows. Regression tests for these paths passed CI run 45281206214. Remaining: profile complete worker/session peak memory on a long track and verify Android Chrome stability before marking complete.
 - [x] **P1-1: Align objective and QC loudness tolerances.** The final gate now uses the same `objective.lufsTolerance` carried by each objective instead of a fixed 0.65 LU tolerance. Boundary regression tests passed CI run 45279307130.
 - [ ] **P1-2: Review click acceptance policy.** The current relative allowance can retain 25% of source clicks. Do not impose a new absolute cap until calibrated against real tracks and the existing source-transient false-positive protections.
@@ -172,6 +172,8 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **docs: record strict TypeScript CI evidence** — [`e8807b6f`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/e8807b6f7e7ddc9f4796d1844daa62d6c56d23a7); P1-6 updated with Node 22 CI run 45281813691.
 
 - [x] **test: verify production npm start on Node 22** — [`902735de`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/902735defd60a76ef0e9d2595fe46bb70ac412c4); Node 22.23.5 production startup, `/api/health`, and root-page smoke test passed in CI run 45282058467.
+
+- [ ] **fix: target the measured sub-bass peak** — this commit; replace the fixed 45 Hz shelf with a spectrum-centered bell and add regression coverage. CI pending; owner-track output and Android verification not yet available.
 
 # Reference: existing capabilities and setup
 
