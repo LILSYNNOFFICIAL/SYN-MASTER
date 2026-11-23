@@ -277,12 +277,7 @@ function measureKWeightedBlocks(channels: Float32Array[], sampleRate: number): K
   return { blockMeanSquares, blockLufsList };
 }
 
-/**
- * Fast ITU-R BS.1770-4 K-weighted integrated LUFS helper.
- * Uses a streaming biquad pass and a bounded 400 ms energy ring.
- */
-export function measureIntegratedLufs(channels: Float32Array[], sampleRate: number): number {
-  const { blockMeanSquares } = measureKWeightedBlocks(channels, sampleRate);
+function integratedLufsFromBlocks(blockMeanSquares: number[]): number {
   const absGate = Math.pow(10, (-70 + 0.691) / 10);
   const absPassed = blockMeanSquares.filter((z) => z > absGate);
   if (absPassed.length === 0) return -70;
@@ -293,6 +288,14 @@ export function measureIntegratedLufs(channels: Float32Array[], sampleRate: numb
   if (relPassed.length === 0) return -70;
   const gatedMean = relPassed.reduce((a, b) => a + b, 0) / relPassed.length;
   return -0.691 + 10 * Math.log10(Math.max(gatedMean, 1e-12));
+}
+
+/**
+ * Fast ITU-R BS.1770-4 K-weighted integrated LUFS helper.
+ * Uses a streaming biquad pass and a bounded 400 ms energy ring.
+ */
+export function measureIntegratedLufs(channels: Float32Array[], sampleRate: number): number {
+  return integratedLufsFromBlocks(measureKWeightedBlocks(channels, sampleRate).blockMeanSquares);
 }
 
 /**
@@ -424,6 +427,7 @@ export function analyzeAudioBuffer(
     numChannels > 1 ? [left, right] : [left],
     sampleRate,
   );
+  const integratedLufs = integratedLufsFromBlocks(blockMeanSquares);
 
   const momentaryLufsMax = blockLufsList.reduce((max, value) => Math.max(max, value), integratedLufs);
 
