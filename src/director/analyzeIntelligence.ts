@@ -47,26 +47,59 @@ export function isAnalysisMeasurementReliable(
   const requiredFinite = [
     analysis.durationSec,
     analysis.sampleRate,
+    analysis.channels,
     analysis.integratedLufs,
     analysis.shortTermLufsMax,
+    analysis.momentaryLufsMax,
+    analysis.loudnessRangeLu,
     analysis.rmsDb,
     analysis.samplePeakDb,
     analysis.truePeakDb,
     analysis.dynamicRangeDb,
     analysis.crestFactorDb,
     analysis.plrDb,
+    analysis.transientDensity,
     analysis.spectralCentroidHz,
     analysis.spectralSlopeDbPerOct,
+    analysis.stereoWidth,
+    analysis.midSideRatioDb,
     analysis.phaseCorrelation,
     analysis.lowEndCorrelation,
     analysis.lrBalanceDb,
+    analysis.monoCompatibilityScore,
+    analysis.clippedSamples,
+    analysis.interSamplePeaks,
     analysis.thdEstimatePercent,
     analysis.noiseFloorDb,
     analysis.dcOffset,
+    ...Object.values(analysis.zoneEnergyDb ?? {}),
   ];
   if (requiredFinite.some((v) => !Number.isFinite(v))) return false;
   if (analysis.durationSec <= 0 || analysis.sampleRate < 8000) return false;
-  if (!analysis.spectrumBinsFreq?.length || !analysis.spectrumBinsDb?.length) return false;
+  if (!Number.isInteger(analysis.channels) || analysis.channels < 1) return false;
+  if (!Number.isInteger(analysis.clippedSamples) || analysis.clippedSamples < 0) return false;
+  if (!Number.isInteger(analysis.interSamplePeaks) || analysis.interSamplePeaks < 0) return false;
+  if (analysis.dynamicRangeDb < 0 || analysis.loudnessRangeLu < 0 || analysis.thdEstimatePercent < 0) return false;
+  if (analysis.transientDensity < 0 || analysis.transientDensity > 1) return false;
+  if (analysis.stereoWidth < 0 || analysis.stereoWidth > 2) return false;
+  if (analysis.phaseCorrelation < -1 || analysis.phaseCorrelation > 1) return false;
+  if (analysis.lowEndCorrelation < -1 || analysis.lowEndCorrelation > 1) return false;
+  if (analysis.monoCompatibilityScore < 0 || analysis.monoCompatibilityScore > 100) return false;
+  if (analysis.dcOffset < 0) return false;
+
+  const freqs = analysis.spectrumBinsFreq;
+  const bins = analysis.spectrumBinsDb;
+  if (!Array.isArray(freqs) || !Array.isArray(bins) || freqs.length === 0 || freqs.length !== bins.length) return false;
+  for (let i = 0; i < freqs.length; i++) {
+    if (!Number.isFinite(freqs[i]) || freqs[i] <= 0 || !Number.isFinite(bins[i])) return false;
+    if (i > 0 && freqs[i] <= freqs[i - 1]) return false;
+  }
+
+  if (!Array.isArray(analysis.resonances) || analysis.resonances.some(
+    (peak) => !Number.isFinite(peak.freqHz) || peak.freqHz <= 0 || !Number.isFinite(peak.excessDb),
+  )) return false;
+  if (!Array.isArray(analysis.loudnessHistoryLufs) || analysis.loudnessHistoryLufs.length === 0 ||
+    analysis.loudnessHistoryLufs.some((value) => !Number.isFinite(value))) return false;
   if (analysis.rmsDb <= -85 && analysis.samplePeakDb <= -75) return false;
   return true;
 }
