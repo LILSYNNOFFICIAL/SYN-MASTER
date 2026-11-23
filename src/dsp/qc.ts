@@ -135,26 +135,35 @@ export function runQualityControl(
   });
 
   // 5. Phase Correlation & Mono Compatibility
+  const localizedBandPhaseRisk = post.stereoBandCorrelation
+    ? post.stereoBandCorrelation.mid < 0 || post.stereoBandCorrelation.high < 0
+    : false;
   const phaseStatus =
-    post.phaseCorrelation >= profile.minPhaseCorrelation && post.lowEndCorrelation >= 0.4
-      ? 'pass'
-      : post.phaseCorrelation >= 0.0
+    post.phaseCorrelation < 0
+      ? 'fail'
+      : localizedBandPhaseRisk
         ? 'warning'
-        : 'fail';
+        : post.phaseCorrelation >= profile.minPhaseCorrelation && post.lowEndCorrelation >= 0.4
+          ? 'pass'
+          : 'warning';
   checks.push({
     id: 'qc-phase',
     category: 'Stereo',
     label: 'Stereo Phase & Mono Compatibility',
     status: phaseStatus,
-    measuredValue: `Corr ${post.phaseCorrelation.toFixed(2)} (Low ${post.lowEndCorrelation.toFixed(2)})`,
+    measuredValue: `Corr ${post.phaseCorrelation.toFixed(2)} (Low ${post.lowEndCorrelation.toFixed(2)})${post.stereoBandCorrelation ? ` · Bands L/M/H ${post.stereoBandCorrelation.low.toFixed(2)}/${post.stereoBandCorrelation.mid.toFixed(2)}/${post.stereoBandCorrelation.high.toFixed(2)}` : ''}`,
     targetValue: `>= +${profile.minPhaseCorrelation.toFixed(2)}`,
     explanation:
       phaseStatus === 'pass'
-        ? 'Strong stereo coherence with reliable mono fold-down.'
-        : 'Wide out-of-phase components or unfocused low-end stereo may cancel in mono playback.',
+        ? 'Strong stereo coherence with reliable mono fold-down across measured bands.'
+        : localizedBandPhaseRisk
+          ? 'At least one mid/high frequency band has negative L/R correlation. This may be intentional stereo design, but audition the band-limited mono fold-down for audible cancellation.'
+          : 'Wide out-of-phase components or unfocused low-end stereo may cancel in mono playback.',
     suggestedFix:
       phaseStatus === 'pass'
         ? undefined
+        : localizedBandPhaseRisk
+        ? 'Audition band-limited mono fold-down. If cancellation is unintended, reduce width or correct polarity only in the affected frequency range.'
         : 'Enable Mono Bass (<100 Hz) and reduce Stereo Imager high/mid width.',
   });
 
