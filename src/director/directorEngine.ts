@@ -1029,29 +1029,35 @@ export function evaluateMultiObjectiveMetrics(
   const preNoiseFloorAtTargetLufs = preNf + (objective.targetLufs - pre.integratedLufs);
   const levelMatchedNoiseReductionDb = preNoiseFloorAtTargetLufs - noiseFloorAtTargetLufs;
   const snrGainDb = (post.rmsDb - nf) - (pre.rmsDb - preNf);
-  const noiseScore = !nfHasMargin || noiseFloorAtTargetLufs <= -58
-    ? 100
-    : Math.max(0, Math.round(100 - (noiseFloorAtTargetLufs + 58) * 3.5));
+  const noiseScore = !nfHasMargin
+    ? 70
+    : noiseFloorAtTargetLufs <= -58
+      ? 100
+      : Math.max(0, Math.round(100 - (noiseFloorAtTargetLufs + 58) * 3.5));
   dimensions.push({
     key: 'noise',
     label: 'Noise Floor',
-    status: !nfHasMargin || noiseFloorAtTargetLufs <= -52
-      ? 'optimal'
-      : noiseFloorAtTargetLufs <= -44
-        ? 'acceptable'
-        : 'attention',
+    status: !nfHasMargin
+      ? 'attention'
+      : noiseFloorAtTargetLufs <= -52
+        ? 'optimal'
+        : noiseFloorAtTargetLufs <= -44
+          ? 'acceptable'
+          : 'attention',
     score: noiseScore,
     measuredSummary: nfHasMargin
       ? `${nf.toFixed(1)} dBFS raw · ${noiseFloorAtTargetLufs.toFixed(1)} dBFS at target loudness · NF Δ ${levelMatchedNoiseReductionDb >= 0 ? '+' : ''}${levelMatchedNoiseReductionDb.toFixed(1)} dB · SNR Δ ${snrGainDb >= 0 ? '+' : ''}${snrGainDb.toFixed(1)} dB`
       : 'Continuous program · no reliable quiet-passage noise margin',
     targetSummary: '<= -52.0 dBFS normalized to delivery LUFS',
     note: !nfHasMargin
-      ? 'No sufficiently quiet passages to estimate a separate noise floor.'
+      ? 'Noise floor is unverified because the recording has no sufficiently quiet passage for an independent estimate.'
       : noiseFloorAtTargetLufs > -48
         ? 'Elevated level-matched quiet-passage noise floor.'
         : 'Level-matched noise floor is controlled.',
   });
-  if (nfHasMargin && noiseFloorAtTargetLufs > -48) {
+  if (!nfHasMargin) {
+    limitingFactors.push('Noise floor cannot be independently verified from the available quiet passages');
+  } else if (noiseFloorAtTargetLufs > -48) {
     limitingFactors.push('Level-matched quiet-passage noise floor remains elevated');
   }
 
