@@ -757,6 +757,11 @@ test('Director narrows only the frequency band with localized anti-phase correla
   const objective = resolveObjectiveTarget('streaming');
   const qc = runQualityControl(measured, post, QC_TARGET_PROFILES[0]);
   const evaluation = evaluateMultiObjectiveMetrics(measured, post, objective, qc);
+  const stereoDimension = evaluation.dimensions.find((dimension) => dimension.key === 'stereoIntegrity');
+  assert.ok(
+    stereoDimension && stereoDimension.score < 85,
+    'Localized high-band phase cancellation must reduce the stereo-integrity objective score',
+  );
   const result = deriveRefinementCommands(
     measured,
     post,
