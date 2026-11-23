@@ -101,8 +101,11 @@ export function maxInterSampleAbsAt(
   idx: number,
   length = samples.length,
   oversampling: 1 | 2 | 4 = 4,
+  scale = 1,
 ): number {
-  let maxAbs = Math.abs(samples[idx]);
+  // Math.fround reproduces Float32 driven-buffer values without allocating
+  // a second full-track array when the limiter applies input drive.
+  let maxAbs = Math.abs(Math.fround(samples[idx] * scale));
   if (oversampling === 1) return maxAbs;
 
   const phaseIndices = oversampling === 2 ? [1] : [0, 1, 2];
@@ -112,11 +115,11 @@ export function maxInterSampleAbsAt(
     for (let t = 0; t < k.length; t++) {
       const pos = idx + (t - (TP_HALF_TAPS - 1));
       if (pos >= 0 && pos < length) {
-        acc += samples[pos] * k[t];
+        acc += Math.fround(samples[pos] * scale) * k[t];
       }
     }
-    const a = Math.abs(acc);
-    if (a > maxAbs) maxAbs = a;
+    const value = Math.abs(acc);
+    if (value > maxAbs) maxAbs = value;
   }
   return maxAbs;
 }

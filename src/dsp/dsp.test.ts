@@ -506,6 +506,20 @@ test('Click detector covers the first and last ~3 ms; de-click repairs edge clic
   assert.equal(after.endClick, false);
   assert.equal(after.clickCount, 0);
 });
+test('Scaled true-peak interpolation matches an explicit Float32 driven buffer', () => {
+  const [source] = makeSineStereo(731, 0.83, 0.08, 48000);
+  const drive = dbToLinear(5.7);
+  const driven = new Float32Array(source.length);
+  for (let i = 0; i < source.length; i++) driven[i] = source[i] * drive;
+  for (let i = 0; i + 1 < source.length; i++) {
+    assert.equal(
+      maxInterSampleAbsAt(source, i, source.length, 4, drive),
+      maxInterSampleAbsAt(driven, i, driven.length, 4),
+      `Scaled true-peak mismatch at sample ${i}`,
+    );
+  }
+});
+
 test('Lookahead limiter bounded-window deque matches the previous sample-peak reference render', () => {
   const sr = 48000;
   const [sourceL, sourceR] = makeSineStereo(440, 0.72, 0.4, sr);

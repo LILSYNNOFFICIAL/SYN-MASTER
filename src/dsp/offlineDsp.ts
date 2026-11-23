@@ -383,11 +383,6 @@ interface MultibandScratchBuffers {
   highR: Float32Array;
 }
 
-interface LimiterScratchBuffers {
-  drivenL: Float32Array;
-  drivenR: Float32Array;
-}
-
 const MULTIBAND_SCRATCH_CHUNK_SIZE = 8192;
 
 function createMultibandScratchBuffers(length: number): MultibandScratchBuffers {
@@ -988,7 +983,6 @@ function applyLookaheadLimiter(
   intensityScale: number,
   truePeak = true,
   oversampling: 1 | 2 | 4 = 4,
-  scratch?: LimiterScratchBuffers,
 ): number {
   const n = left.length;
   if (n === 0) return 0;
@@ -996,15 +990,13 @@ function applyLookaheadLimiter(
   const driveDb = -thresholdDb * intensityScale;
   const driveLin = dbToLinear(driveDb);
 
-  const lookSamples = Math.max(1, Math.min(512, Math.round((lookaheadMs / 1000) * sampleRate)));
+  const requestedLookSamples = Math.max(1, Math.min(512, Math.round((lookaheadMs / 1000) * sampleRate)));
+  // The 16-tap true-peak interpolation reads eight samples behind its center.
+  // Keep that source window ahead of the in-place output cursor so no source copy is needed.
+  const lookSamples = truePeak && oversampling > 1
+    ? Math.max(9, requestedLookSamples)
+    : requestedLookSamples;
   const relCoeff = Math.exp(-1 / Math.max(1, (releaseMs / 1000) * sampleRate));
-
-  const drivenL = scratch?.drivenL ?? new Float32Array(n);
-  const drivenR = scratch?.drivenR ?? new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    drivenL[i] = left[i] * driveLin;
-    drivenR[i] = right[i] * driveLin;
-  }
 
   // A sliding monotonic deque computes the minimum required gain over each lookahead
   // window. Only L+1 entries are needed; the previous implementation retained four
@@ -1019,10 +1011,13 @@ function applyLookaheadLimiter(
   const requiredGainAt = (i: number): number => {
     const peak = truePeak && oversampling > 1 && i + 1 < n
       ? Math.max(
-          maxInterSampleAbsAt(drivenL, i, n, oversampling),
-          maxInterSampleAbsAt(drivenR, i, n, oversampling),
+          maxInterSampleAbsAt(left, i, n, oversampling, driveLin),
+          maxInterSampleAbsAt(right, i, n, oversampling, driveLin),
         )
-      : Math.max(Math.abs(drivenL[i]), Math.abs(drivenR[i]));
+      : Math.max(
+          Math.abs(Math.fround(left[i] * driveLin)),
+          Math.abs(Math.fround(right[i] * driveLin)),
+        );
     return peak > ceilingLin ? ceilingLin / peak : 1.0;
   };
 
@@ -1062,8 +1057,8 @@ function applyLookaheadLimiter(
     const grDb = -linearToDb(Math.max(gain, 1e-6));
     if (grDb > maxGr) maxGr = grDb;
 
-    const outL = drivenL[i] * gain;
-    const outR = drivenR[i] * gain;
+    const outL = Math.fround(left[i] * driveLin) * gain;
+    const outR = Math.fround(right[i] * driveLin) * gain;
     if (Math.abs(outL) > ceilingLin * 1.000001 || Math.abs(outR) > ceilingLin * 1.000001) clampCount++;
     left[i] = Math.max(-ceilingLin, Math.min(ceilingLin, outL));
     right[i] = Math.max(-ceilingLin, Math.min(ceilingLin, outR));
@@ -1082,7 +1077,6 @@ function applyMaximizer(
   params: MaximizerParams,
   sampleRate: number,
   intensityScale: number,
-  limiterScratch: LimiterScratchBuffers,
 ): number {
   if (left.length === 0 || intensityScale <= 1e-4) return 0;
 
@@ -1136,7 +1130,6 @@ function applyMaximizer(
     1.0,
     params.truePeak,
     4,
-    limiterScratch,
   );
 
   // One adaptive correction pass compensates for gain reduction at the ceiling.
@@ -1156,7 +1149,6 @@ function applyMaximizer(
         1.0,
         params.truePeak,
         4,
-        limiterScratch,
       );
       gr = Math.max(gr, trimGr);
     }
@@ -1176,7 +1168,6 @@ function applyMultibandMaximizer(
   sampleRate: number,
   intensityScale: number,
   scratch: MultibandScratchBuffers,
-  limiterScratch: LimiterScratchBuffers,
 ): number {
   const n = left.length;
   const bwQ = Math.SQRT1_2;
@@ -1250,7 +1241,7 @@ function applyMultibandMaximizer(
   }
 
   const maxBandGr = Math.max(states[0].maxGr, states[1].maxGr, states[2].maxGr);
-  const limGr = applyLookaheadLimiter(left, right, params.ceilingDb, 0, params.releaseMs, 3, sampleRate, 1, true, 4, limiterScratch);
+  const limGr = applyLookaheadLimiter(left, right, params.ceilingDb, 0, params.releaseMs, 3, sampleRate, 1, true, 4);
   return Number(Math.max(maxBandGr, limGr).toFixed(2));
 }
 
@@ -1275,18 +1266,14 @@ export function processChainOffline(
   const multibandScratch = needsMultibandScratch ? createMultibandScratchBuffers(length) : null;
   const isLimiterModule = (type: ProcessorModule['type']): boolean =>
     type === 'limiter' || type === 'maximizer' || type === 'multiband-maximizer';
-  const needsLimiterScratch = chain.some((mod) =>
-    mod.enabled && !mod.bypassed && isLimiterModule(mod.type),
-  );
-  // One pair is shared between wet/dry snapshots and limiter input snapshots because
-  // those lifetimes do not overlap. Wet/dry limiter modules need a separate dry pair.
+  // Reuse one stereo pair only for wet/dry snapshots of non-limiter modules.
+  // The limiter reads its source in place with a bounded lookahead window.
   const needsSharedScratch = chain.some((mod) =>
-    mod.enabled && !mod.bypassed && (isLimiterModule(mod.type) || mod.wetDry < 99.5),
+    mod.enabled && !mod.bypassed && mod.wetDry < 99.5 && !isLimiterModule(mod.type),
   );
   const sharedScratch = needsSharedScratch
-    ? { drivenL: new Float32Array(length), drivenR: new Float32Array(length) }
+    ? { dryL: new Float32Array(length), dryR: new Float32Array(length) }
     : null;
-  const limiterScratch = needsLimiterScratch ? sharedScratch : null;
   let limiterDryScratchL: Float32Array | null = null;
   let limiterDryScratchR: Float32Array | null = null;
 
@@ -1312,10 +1299,10 @@ export function processChainOffline(
         dryL = limiterDryScratchL;
         dryR = limiterDryScratchR;
       } else if (sharedScratch) {
-        sharedScratch.drivenL.set(left);
-        sharedScratch.drivenR.set(right);
-        dryL = sharedScratch.drivenL;
-        dryR = sharedScratch.drivenR;
+        sharedScratch.dryL.set(left);
+        sharedScratch.dryR.set(right);
+        dryL = sharedScratch.dryL;
+        dryR = sharedScratch.dryR;
       }
     }
 
@@ -1369,12 +1356,11 @@ export function processChainOffline(
           intensityScale,
           lp.truePeak,
           lp.oversampling,
-          limiterScratch!,
         );
         break;
       }
       case 'maximizer':
-        grDb = applyMaximizer(left, right, mod.params as MaximizerParams, sampleRate, intensityScale, limiterScratch!);
+        grDb = applyMaximizer(left, right, mod.params as MaximizerParams, sampleRate, intensityScale);
         break;
       case 'transient-shaper':
         grDb = applyTransientShaper(left, right, mod.params as TransientShaperParams, sampleRate, intensityScale);
@@ -1383,7 +1369,7 @@ export function processChainOffline(
         grDb = applyClipper(left, right, mod.params as ClipperParams, sampleRate, intensityScale);
         break;
       case 'multiband-maximizer':
-        grDb = applyMultibandMaximizer(left, right, mod.params as MultibandMaximizerParams, sampleRate, intensityScale, multibandScratch!, limiterScratch!);
+        grDb = applyMultibandMaximizer(left, right, mod.params as MultibandMaximizerParams, sampleRate, intensityScale, multibandScratch!);
         break;
       case 'dither':
         // Telemetry: no gain reduction; the dither level is not a GR value.
