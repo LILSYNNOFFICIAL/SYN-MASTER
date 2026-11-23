@@ -423,6 +423,19 @@ function applyMultibandCompressor(
   const highL = new Float32Array(n);
   const highR = new Float32Array(n);
 
+  let inputPowerL = 0;
+  let inputPowerR = 0;
+  for (let i = 0; i < n; i++) {
+    inputPowerL += left[i] * left[i];
+    inputPowerR += right[i] * right[i];
+  }
+  const inputRmsL = Math.sqrt(inputPowerL / Math.max(1, n));
+  const inputRmsR = Math.sqrt(inputPowerR / Math.max(1, n));
+  const hasUsableInputBalance = inputRmsL > 1e-9 && inputRmsR > 1e-9;
+  const targetBalanceDb = hasUsableInputBalance
+    ? 20 * Math.log10(inputRmsR / inputRmsL) + params.lrBalanceDb * intensityScale
+    : 0;
+
   const s = Array.from({ length: 18 }, () => createBiquadState());
 
   for (let i = 0; i < n; i++) {
@@ -618,6 +631,30 @@ function applyStereoImager(
 
     left[i] = totalM + totalS;
     right[i] = totalM - totalS;
+  }
+
+  // Width and mono-bass filtering can change the integrated L/R energy ratio,
+  // even when the input channels are balanced. Preserve the intended balance
+  // after all M/S processing, including any deliberate user-requested trim.
+  if (hasUsableInputBalance) {
+    let outputPowerL = 0;
+    let outputPowerR = 0;
+    for (let i = 0; i < n; i++) {
+      outputPowerL += left[i] * left[i];
+      outputPowerR += right[i] * right[i];
+    }
+    const outputRmsL = Math.sqrt(outputPowerL / Math.max(1, n));
+    const outputRmsR = Math.sqrt(outputPowerR / Math.max(1, n));
+    if (outputRmsL > 1e-9 && outputRmsR > 1e-9) {
+      const outputBalanceDb = 20 * Math.log10(outputRmsR / outputRmsL);
+      const correctionDb = Math.max(-6, Math.min(6, targetBalanceDb - outputBalanceDb));
+      const gainL = dbToLinear(-correctionDb * 0.5);
+      const gainR = dbToLinear(correctionDb * 0.5);
+      for (let i = 0; i < n; i++) {
+        left[i] *= gainL;
+        right[i] *= gainR;
+      }
+    }
   }
 }
 

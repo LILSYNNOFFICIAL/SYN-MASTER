@@ -182,6 +182,39 @@ test('Stereo Imager mono width (0%) collapses stereo difference to mono', () => 
   assert.ok(post.phaseCorrelation > 0.99, `Expected correlation ~1.0, got ${post.phaseCorrelation}`);
 });
 
+test('Stereo Imager width processing preserves intended L/R energy balance', () => {
+  const sr = 44100;
+  const n = Math.floor(sr * 1.2);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const subL = 0.55 * Math.sin(2 * Math.PI * 62 * t);
+    const subR = 0.55 * Math.sin(2 * Math.PI * 62 * t + 2.25);
+    const mids = 0.24 * Math.sin(2 * Math.PI * 820 * t) + 0.14 * Math.sin(2 * Math.PI * 2600 * t);
+    left[i] = 0.32 * (subL + mids);
+    right[i] = 0.32 * (subR + mids);
+  }
+  const imager = createProcessorModule('stereo-imager', {
+    params: {
+      lowWidth: 55,
+      midWidth: 114,
+      highWidth: 124,
+      lowCrossHz: 150,
+      highCrossHz: 3500,
+      monoBassBelowHz: 115,
+      lrBalanceDb: 0,
+      midSideGainDb: 0,
+    },
+  });
+  const result = processChainOffline([left, right], sr, [imager]);
+  const post = analyzeAudioBuffer(result.channels, sr);
+  assert.ok(
+    Math.abs(post.lrBalanceDb) <= 0.15,
+    `Stereo width processing introduced unintended L/R skew: ${post.lrBalanceDb.toFixed(2)} dB`,
+  );
+});
+
 test('Bypass & 0% Wet/Dry preserve original audio bit-identically', () => {
   const sr = 44100;
   const stem = generateDemoMasterStem('main-mix', sr, 2);
