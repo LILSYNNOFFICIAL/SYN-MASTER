@@ -1000,7 +1000,7 @@ export function evaluateMultiObjectiveMetrics(
   if (
     post.lowEndCorrelation < 0.35 ||
     post.phaseCorrelation < 0.1 ||
-    (bandPhase && (bandPhase.low < 0.45 || bandPhase.mid < 0 || bandPhase.high < 0))
+    (bandPhase && (bandPhase.low < 0.45 || bandPhase.mid < 0.15 || bandPhase.high < 0.15))
   ) {
     limitingFactors.push('Phase / frequency-band mono compatibility below safe threshold');
   }
@@ -1422,8 +1422,8 @@ export function deriveRefinementCommands(
   const bandPhase = post.stereoBandCorrelation;
   const globalPhaseRisk = post.phaseCorrelation < 0;
   const lowPhaseRisk = globalPhaseRisk || (bandPhase ? bandPhase.low < 0.45 : post.lowEndCorrelation < 0.45);
-  const midPhaseRisk = globalPhaseRisk || (bandPhase ? bandPhase.mid < 0 : post.phaseCorrelation < 0.25);
-  const highPhaseRisk = globalPhaseRisk || (bandPhase ? bandPhase.high < 0 : post.phaseCorrelation < 0.25);
+  const midPhaseRisk = globalPhaseRisk || (bandPhase ? bandPhase.mid < 0.15 : post.phaseCorrelation < 0.25);
+  const highPhaseRisk = globalPhaseRisk || (bandPhase ? bandPhase.high < 0.15 : post.phaseCorrelation < 0.25);
   const lrBalanceRisk = Math.abs(post.lrBalanceDb) > 0.65;
   if (qcPhaseFail || lowPhaseRisk || midPhaseRisk || highPhaseRisk || lrBalanceRisk) {
     const reducedWidth = (current: number, floor: number) => Math.max(floor, current - 15);
@@ -2182,8 +2182,9 @@ export async function runAutonomousDirectorLoop(
     const bandPhaseRegressed = (['low', 'mid', 'high'] as const).some((band) => {
       const before = preAnalysis.stereoBandCorrelation?.[band];
       const after = post.stereoBandCorrelation?.[band];
+      const riskThreshold = band === 'low' ? 0.45 : 0.15;
       return typeof before === 'number' && typeof after === 'number' &&
-        after < 0 && (before >= 0 || after < before - 0.25);
+        after < riskThreshold && (before >= riskThreshold || after < before - 0.25);
     });
     const processingDynamicsRegressed =
       objective.preserveTransients &&
