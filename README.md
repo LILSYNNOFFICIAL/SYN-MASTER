@@ -173,7 +173,8 @@ This section is the active implementation queue and progress ledger. Update it i
 
 - [x] **test: verify production npm start on Node 22** — [`902735de`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/902735defd60a76ef0e9d2595fe46bb70ac412c4); Node 22.23.5 production startup, `/api/health`, and root-page smoke test passed in CI run 45282058467.
 
-- [ ] **fix: target the measured sub-bass peak** — this commit; replace the fixed 45 Hz shelf with a spectrum-centered bell and add regression coverage. CI pending; owner-track output and Android verification not yet available.
+- [ ] **fix: target the measured sub-bass peak** — [`0b872bf1`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/0b872bf10d91a0d4184bf495401f9d8034a4964f); replace the fixed 45 Hz shelf with a spectrum-centered bell; regression coverage and CI pending.
+- [ ] **fix: tighten sub-bass repair regression coverage** — [`ead907fe`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/ead907feb08a152b59f9a7cb5b34c4cbfe3f2c7d); preserve the `deriveRefinementCommands` documentation placement, align the EQ rationale with the actual adaptive band, and assert migration of legacy shelf controls to the measured bell. CI pending.
 
 # Reference: existing capabilities and setup
 
