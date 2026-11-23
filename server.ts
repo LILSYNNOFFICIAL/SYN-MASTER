@@ -3,8 +3,11 @@ import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { Transform } from 'node:stream';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, rm } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import {
   AiConfigError,
@@ -57,11 +60,35 @@ app.use('/api/export', (req, res, next) => {
   res.setHeader('X-RateLimit-Remaining', String(result.remaining));
   if (!result.allowed) {
     res.setHeader('Retry-After', String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))));
+    req.resume();
     res.status(429).json({ error: 'Export rate limit exceeded. Try again shortly.' });
     return;
   }
   next();
 });
+const MAX_EXPORT_BODY_BYTES = 512 * 1024 * 1024;
+const MAX_CONCURRENT_EXPORT_JOBS = 2;
+let activeExportJobs = 0;
+
+app.use('/api/export/encode', (req, res, next) => {
+  if (req.method !== 'POST') return next();
+  if (activeExportJobs >= MAX_CONCURRENT_EXPORT_JOBS) {
+    req.resume();
+    res.status(503).json({ error: 'The export queue is full. Try again shortly.' });
+    return;
+  }
+  activeExportJobs++;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    activeExportJobs = Math.max(0, activeExportJobs - 1);
+  };
+  res.once('finish', release);
+  res.once('close', release);
+  next();
+});
+
 app.use(express.json({ limit: '4mb' }));
 
 function sendSanitizedAiError(res: express.Response, err: unknown): void {
@@ -100,15 +127,53 @@ async function measureEncodedLoudness(filePath: string): Promise<{ integratedLuf
   return { integratedLufs: parse(lufsMatch), truePeakDbtp: parse(peakMatch) };
 }
 
-app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', limit: '512mb' }), async (req, res) => {
+class ExportPayloadTooLargeError extends Error {
+  constructor() {
+    super('Rendered WAV upload exceeds the 512 MiB export limit.');
+    this.name = 'ExportPayloadTooLargeError';
+  }
+}
+
+function isSameOriginExportRequest(req: express.Request): boolean {
+  const origin = req.get('origin');
+  if (!origin) return true;
+  try {
+    const forwardedProto = String(req.get('x-forwarded-proto') ?? req.protocol).split(',')[0].trim();
+    return new URL(origin).origin === forwardedProto + '://' + req.get('host');
+  } catch {
+    return false;
+  }
+}
+
+async function hasValidWavHeader(filePath: string): Promise<boolean> {
+  const handle = await open(filePath, 'r');
+  try {
+    const header = Buffer.alloc(12);
+    const { bytesRead } = await handle.read(header, 0, 12, 0);
+    return bytesRead === 12 && header.toString('ascii', 0, 4) === 'RIFF' && header.toString('ascii', 8, 12) === 'WAVE';
+  } finally {
+    await handle.close();
+  }
+}
+
+app.post('/api/export/encode', async (req, res) => {
+  const fetchSite = req.get('sec-fetch-site');
+  if (!isSameOriginExportRequest(req) || (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none')) {
+    req.resume();
+    res.status(403).json({ error: 'Audio export requests must originate from this SYN MASTER page.' });
+    return;
+  }
+  const declaredLength = Number(req.headers['content-length'] ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_EXPORT_BODY_BYTES) {
+    req.resume();
+    res.status(413).json({ error: 'Rendered WAV upload exceeds the 512 MiB export limit.' });
+    return;
+  }
   const allowedFormats = new Set(['wav', 'mp3', 'ogg', 'flac', 'm4a', 'webm-opus']);
   const format = String(req.query.format ?? '');
   if (!allowedFormats.has(format)) {
+    req.resume();
     res.status(400).json({ error: 'Unsupported audio export format.' });
-    return;
-  }
-  if (!Buffer.isBuffer(req.body) || req.body.length < 44 || req.body.toString('ascii', 0, 4) !== 'RIFF' || req.body.toString('ascii', 8, 12) !== 'WAVE') {
-    res.status(400).json({ error: 'A valid rendered WAV source is required for audio export.' });
     return;
   }
 
@@ -128,6 +193,7 @@ app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', l
       ![128, 192, 256, 320].includes(mp3Bitrate) || ![96, 128, 160, 192, 256, 320].includes(oggBitrate) ||
       ![128, 192, 256, 320].includes(aacBitrate) || ![96, 128, 160, 192, 256].includes(opusBitrate) ||
       !Number.isFinite(ceilingDb)) {
+    req.resume();
     res.status(400).json({ error: 'One or more export settings are outside the supported range.' });
     return;
   }
@@ -145,7 +211,19 @@ app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', l
   const outputPath = path.join(tempDir, 'master.' + extension);
 
   try {
-    await writeFile(inputPath, req.body);
+    let uploadedBytes = 0;
+    const byteLimit = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        uploadedBytes += chunk.length;
+        if (uploadedBytes > MAX_EXPORT_BODY_BYTES) callback(new ExportPayloadTooLargeError());
+        else callback(null, chunk);
+      },
+    });
+    await pipeline(req, byteLimit, createWriteStream(inputPath, { flags: 'wx' }));
+    if (uploadedBytes < 44 || !(await hasValidWavHeader(inputPath))) {
+      res.status(400).json({ error: 'A valid rendered WAV source is required for audio export.' });
+      return;
+    }
     const resampleOptions = [
       'aresample=' + sampleRate,
       'resampler=swr',
@@ -196,7 +274,6 @@ app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', l
       });
     });
 
-    const output = await readFile(outputPath);
     // Delivery check on the encoded file itself: resampling and lossy codecs can push
     // a master that met its ceiling in the float render over it.
     const measured = await measureEncodedLoudness(outputPath).catch(() => null);
@@ -210,13 +287,17 @@ app.post('/api/export/encode', express.raw({ type: 'application/octet-stream', l
     }
     res.setHeader('Content-Type', mimeTypes[format]);
     res.setHeader('Content-Disposition', 'attachment; filename="SYN_Master.' + extension + '"');
-    res.send(output);
+    await pipeline(createReadStream(outputPath), res);
   } catch (error) {
+    if (res.headersSent || res.destroyed) return;
     const message = error instanceof Error ? error.message : 'Audio codec export failed.';
     const unavailable = message.includes('FFmpeg is not installed');
+    const tooLarge = error instanceof ExportPayloadTooLargeError;
     console.error('[SYN-RENDER] Codec export failed:', message);
-    res.status(unavailable ? 503 : 500).json({
-      error: unavailable ? message : 'The selected audio codec could not render this master. Check FFmpeg codec support on the server.',
+    res.status(tooLarge ? 413 : unavailable ? 503 : 500).json({
+      error: tooLarge
+        ? 'Rendered WAV upload exceeds the 512 MiB export limit.'
+        : unavailable ? message : 'The selected audio codec could not render this master. Check FFmpeg codec support on the server.',
     });
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
