@@ -1,5 +1,17 @@
 import { isNoiseLikeFloor } from '../dsp/analyzer';
 
+/**
+ * Identity of a chain for "already rendered" checks: module ids, names and UI state are
+ * ignored and numbers are rounded, so A -> B -> A oscillations (e.g. maximizer target
+ * +0.5 / -0.5 LU) are caught despite float drift.
+ */
+export function chainRenderKey(chain: ProcessorModule[]): string {
+  return JSON.stringify(chain, (k, v) => {
+    if (k === 'id' || k === 'name' || k === 'expanded' || k === 'presetName' || k === 'group') return undefined;
+    return typeof v === 'number' ? Math.round(v * 1000) / 1000 : v;
+  });
+}
+
 /** Shimmer detection confidence at which the deterministic engine enables de-shimmer. */
 export const SHIMMER_AUTO_CONFIDENCE = 0.6;
 import type { FadeSettings } from '../dsp/fades';
@@ -2365,7 +2377,7 @@ export async function runAutonomousDirectorLoop(
       },
     };
     checkpoints.push(cp);
-    renderedChainKeys.add(JSON.stringify(cp.chain));
+    renderedChainKeys.add(chainRenderKey(cp.chain));
     iterationsExecuted = pass;
 
     emit(
@@ -2539,7 +2551,7 @@ export async function runAutonomousDirectorLoop(
         }
         emit('Optimizing', pass, makeActivity(pass, 'refine', 'hypothesis', hypothesis), undefined, undefined, 'Optimizing');
         const applied = applyStructuredChainCommands(refinementSourceChain, commands);
-        if (renderedChainKeys.has(JSON.stringify(applied.chain))) {
+        if (renderedChainKeys.has(chainRenderKey(applied.chain))) {
           finalStatus = 'completed';
           stopReason = `Stopped after Pass ${pass}: the next correction would re-render a chain that was already measured (its parameters are at their limits), so another pass cannot change the result.`;
           emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
