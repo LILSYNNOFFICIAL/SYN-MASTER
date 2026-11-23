@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { AudioAnalysis, EQBand, EQBandShape, ParametricEQParams } from '../../types/mastering';
 import { designEQBand } from '../../dsp/offlineDsp';
@@ -117,11 +117,29 @@ export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, o
   const onUp = () => {
     dragRef.current = null;
   };
-  const onWheelNode = (b: EQBand) => (e: React.WheelEvent) => {
-    e.preventDefault();
-    const q = Math.max(0.1, Math.min(18, b.q * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
-    setBand(b.id, { q: Number(q.toFixed(2)) });
-  };
+  // Mouse wheel over a node = Q. React attaches wheel listeners as passive, so
+  // preventDefault there cannot stop the page from scrolling; use a native non-passive
+  // listener on the SVG instead and look the band up from the node under the pointer.
+  const wheelStateRef = useRef({ bands, setBand });
+  wheelStateRef.current = { bands, setBand };
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e: WheelEvent) => {
+      const target = e.target as Element | null;
+      const id = target?.closest?.('[data-band-id]')?.getAttribute('data-band-id');
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const { bands: current, setBand: set } = wheelStateRef.current;
+      const b = current.find((x) => x.id === id);
+      if (!b) return;
+      const q = Math.max(0.1, Math.min(18, b.q * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+      set(b.id, { q: Number(q.toFixed(2)) });
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, []);
   const onDouble = (e: React.MouseEvent) => {
     if (bands.length >= 8) return;
     const p = toLocal(e);
@@ -187,7 +205,7 @@ export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, o
                 strokeWidth={2}
                 style={{ cursor: 'grab' }}
                 onPointerDown={onNodeDown(b)}
-                onWheel={onWheelNode(b)}
+                data-band-id={b.id}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
                   if (usesGain(b.shape)) setBand(b.id, { gain: 0 });
