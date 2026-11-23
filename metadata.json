@@ -1,6 +1,0 @@
-{
-  "name": "SYN MASTER",
-  "description": "Professional AI Audio Mastering, Real-Time DSP Processing & Audio Intelligence Workstation.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

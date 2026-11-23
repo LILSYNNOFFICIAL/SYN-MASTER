@@ -2662,7 +2662,7 @@ export async function runAutonomousDirectorLoop(
       rolledBack = true;
       if (finalStatus === 'completed') finalStatus = 'rolled-back';
       stopReason =
-        `The primary retention score rejected every pass. Safely retained Pass ${safeFallback.passNumber} because it reduced blocking objective/QC failures without a hard regression. Its measured objective gate remains ${safeFallback.targetGate?.passed ? 'PASS' : 'NOT PASSED'}.`;
+        `${stopReason} Safely retained Pass ${safeFallback.passNumber} because it reduced blocking objective/QC failures without a hard regression. Its measured objective gate remains ${safeFallback.targetGate?.passed ? 'PASS' : 'NOT PASSED'}.`;
       emit(
         'Validating',
         safeFallback.passNumber,

@@ -567,6 +567,7 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   .syn2-stat { min-width: 0; padding: 9px; }
   .syn2-stat-val { flex-wrap: wrap; overflow-wrap: anywhere; }
   .syn2-transport { gap: 8px; }
+  .syn2-wave { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
   .syn2-peq-svg { height: 180px; }
   .syn-daw-global-tabs button,
   .syn2-stage button,
