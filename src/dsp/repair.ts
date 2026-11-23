@@ -59,7 +59,7 @@ export function repairClicksChannel(
       let sum = 0;
       for (let j = s; j < e; j++) sum += d2(ch, j);
       const meanAfter = e > s ? sum / (e - s) : 0;
-      if (meanAfter < local * 3) {
+      if (meanAfter < local * 2) {
         const a = Math.max(2, i - halfWidth);
         const b = Math.min(n - 3, i + halfWidth);
         bridgeHermite(ch, a, b);
@@ -187,7 +187,7 @@ export function applyRepair(
   const declick = ((settings.declick ?? 0) / 100) * intensityScale;
   if (declick > 0) {
     // Higher strength = lower ratio (more sensitive) and wider repair window.
-    const ratio = 24 - 10 * declick;
+    const ratio = 20 - 12 * declick;
     const half = Math.max(2, Math.round(sampleRate * (0.0005 + 0.001 * declick)));
     clicksRepaired += repairClicksChannel(left, sampleRate, ratio, 0.02, half);
     if (!stereoSame) clicksRepaired += repairClicksChannel(right, sampleRate, ratio, 0.02, half);

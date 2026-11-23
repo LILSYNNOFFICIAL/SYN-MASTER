@@ -103,5 +103,5 @@ function isIsolatedSpike(
   let sum = 0;
   for (let j = start; j < end; j++) sum += Math.abs(ch[j] - 2 * ch[j - 1] + ch[j - 2]);
   const meanAfter = sum / (end - start);
-  return meanAfter < localBefore * Math.max(3, ratio / 4);
+  return meanAfter < localBefore * 2;
 }
