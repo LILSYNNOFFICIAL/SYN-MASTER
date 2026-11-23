@@ -432,11 +432,13 @@ test('Dynamic EQ attack and release controls shape transient response and recove
     for (let i = first; i < last; i++) sum += samples[i] * samples[i];
     return Math.sqrt(sum / Math.max(1, last - first));
   };
-  const fastAttackPeak = peak(fast.channels[0], 0.35, 0.55);
-  const slowAttackPeak = peak(slowAttack.channels[0], 0.35, 0.55);
+  // Compare the first 20 ms after the burst begins. Whole-window peak is
+  // identical by design because an attack envelope cannot attenuate the very first sample.
+  const fastAttackRms = rmsWindow(fast.channels[0], 0.35, 0.37);
+  const slowAttackRms = rmsWindow(slowAttack.channels[0], 0.35, 0.37);
   assert.ok(
-    slowAttackPeak > fastAttackPeak * 1.05,
-    `Slower attack should preserve more of the initial transient, fast=${fastAttackPeak}, slow=${slowAttackPeak}`,
+    slowAttackRms > fastAttackRms * 1.05,
+    `Slower attack should preserve more of the burst onset, fast=${fastAttackRms}, slow=${slowAttackRms}`,
   );
   const fastTail = rmsWindow(fastRelease.channels[0], 0.62, 0.78);
   const slowTail = rmsWindow(slowRelease.channels[0], 0.62, 0.78);
