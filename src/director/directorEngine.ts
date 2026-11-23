@@ -584,10 +584,15 @@ export function buildExplainableMasterPlan(input: {
     });
   }
 
-  // Stage 3: Dynamic EQ ONLY if harshness or narrow resonances detected
-  const topRes = analysis.resonances[0];
-  if (harshExcess > 3.0 || (topRes && topRes.excessDb >= 6.0)) {
-    const targetFreq = topRes && topRes.freqHz >= 250 ? topRes.freqHz : 3500;
+  // Stage 3: Dynamic EQ is reserved for a measured isolated upper-mid resonance.
+  // Broad high-mid energy and coherent musical harmonics are not enough evidence to
+  // trigger frequency-selective gain reduction; those are handled by the tonal plan
+  // and auditioned rather than automatically treated as defects.
+  const topRes = analysis.resonances.find((resonance) =>
+    resonance.freqHz >= 2000 && resonance.freqHz <= 12000 && resonance.excessDb >= 6.0,
+  );
+  if (topRes) {
+    const targetFreq = topRes.freqHz;
     const dynBands = [
       {
         id: 'd1',
