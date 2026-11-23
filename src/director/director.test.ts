@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeAudioBuffer } from '../dsp/analyzer';
 import { analyzeStemSet } from '../dsp/stemAnalysis';
+import { processChainOffline } from '../dsp/offlineDsp';
 import { createProcessorModule } from '../dsp/chainValidation';
 import { runQualityControl, QC_TARGET_PROFILES } from '../dsp/qc';
 import type { AiChainLifecycleState, MasteringObjectiveId } from '../types/mastering';
@@ -509,6 +510,44 @@ test('Manual Director mode reports stem chains without executing them', async ()
   assert.deepEqual(report.stemIntelligence?.processingChains['vocal-bus'], ['parametric-eq']);
 });
 
+
+
+test('Stereo Imager corrects either direction of measured left/right channel imbalance', () => {
+  for (const louderChannel of ['left', 'right'] as const) {
+    const source = makeBalancedStereo(1.2, 0.18);
+    const gain = Math.pow(10, 3 / 20);
+    const target = louderChannel === 'left' ? source[0] : source[1];
+    for (let i = 0; i < target.length; i++) target[i] *= gain;
+
+    const baseline = analyzeAudioBuffer(source, SR);
+    assert.ok(
+      Math.abs(baseline.lrBalanceDb) > 2.8,
+      'Fixture must contain a clear channel energy imbalance',
+    );
+    assert.equal(baseline.lrBalanceDb > 0, louderChannel === 'right');
+
+    const plan = buildExplainableMasterPlan({
+      analysis: baseline,
+      objectiveId: 'streaming',
+    });
+    const imager = plan.chain.find((module) => module.type === 'stereo-imager');
+    assert.ok(imager, 'Measured channel imbalance must insert the Stereo Imager');
+    const lrTrim = (imager!.params as { lrBalanceDb: number }).lrBalanceDb;
+    assert.equal(
+      lrTrim < 0,
+      louderChannel === 'right',
+      'A louder right channel must be attenuated with a negative imager balance value, and vice versa',
+    );
+
+    const rendered = processChainOffline(source, SR, plan.chain);
+    const post = analyzeAudioBuffer(rendered.channels, SR);
+    assert.ok(
+      Math.abs(post.lrBalanceDb) < Math.abs(baseline.lrBalanceDb) * 0.4,
+      'Rendered correction must materially reduce measured L/R energy skew: ' +
+        baseline.lrBalanceDb.toFixed(2) + ' -> ' + post.lrBalanceDb.toFixed(2) + ' dB',
+    );
+  }
+});
 
 test('Reference EQ matching removes overall loudness bias and responds only to relative tonal differences', () => {
   const source = makeBalancedStereo(1.2, 0.18);
