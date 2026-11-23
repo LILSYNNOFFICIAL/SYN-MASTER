@@ -328,3 +328,61 @@ test('Analyzer does not label a coherent musical harmonic series as isolated res
     'A coherent harmonic series should not be treated as isolated narrow resonances requiring dynamic cuts',
   );
 });
+
+
+test('SYN-Restore hiss reduction lowers quiet high-frequency noise while preserving short transients', () => {
+  const n = SR * 2;
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  const transientWindows = [[0.5, 0.52], [1.2, 1.22]];
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    let sample = 0.006 * Math.sin(2 * Math.PI * 9000 * t);
+    if (transientWindows.some(([start, end]) => t >= start && t < end)) {
+      sample += 0.35 * Math.sin(2 * Math.PI * 9000 * t);
+    }
+    left[i] = sample;
+    right[i] = sample;
+  }
+
+  const restore = createProcessorModule('restore', {
+    params: {
+      dcOffset: false,
+      humRemovalHz: 0,
+      hissReduction: 80,
+      deEssAmount: 0,
+      deEssFreqHz: 6500,
+      resonanceSuppress: 0,
+      mode: 'conservative',
+    } satisfies RestoreParams,
+  });
+  const rendered = processChainOffline([left, right], SR, [restore]);
+  const quietRms = (samples: Float32Array, start: number, end: number) => {
+    const first = Math.floor(start * SR);
+    const last = Math.floor(end * SR);
+    let sum = 0;
+    for (let i = first; i < last; i++) sum += samples[i] * samples[i];
+    return Math.sqrt(sum / Math.max(1, last - first));
+  };
+  const inputQuiet = quietRms(left, 0.2, 0.4);
+  const outputQuiet = quietRms(rendered.channels[0], 0.2, 0.4);
+  assert.ok(
+    outputQuiet < inputQuiet * 0.8,
+    `Quiet high-frequency noise should be reduced, input=${inputQuiet}, output=${outputQuiet}`,
+  );
+
+  let inputTransientPeak = 0;
+  let outputTransientPeak = 0;
+  for (const [start, end] of transientWindows) {
+    const first = Math.floor(start * SR);
+    const last = Math.floor(end * SR);
+    for (let i = first; i < last; i++) {
+      inputTransientPeak = Math.max(inputTransientPeak, Math.abs(left[i]));
+      outputTransientPeak = Math.max(outputTransientPeak, Math.abs(rendered.channels[0][i]));
+    }
+  }
+  assert.ok(
+    outputTransientPeak >= inputTransientPeak * 0.9,
+    `Hiss reduction must open quickly enough to preserve transient peaks, input=${inputTransientPeak}, output=${outputTransientPeak}`,
+  );
+});
