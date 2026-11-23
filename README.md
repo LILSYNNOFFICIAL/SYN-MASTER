@@ -166,6 +166,8 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **test: verify streamed export origin and size boundaries** — [\`8fd15667\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/8fd15667f95841de7ce6f3e5a24005cf47d373b4); same-origin export fixture, cross-origin rejection, and declared over-limit upload regression. CI run 45280450302 passed unit tests, TypeScript, and production build.
 - [x] **perf: remove full-track limiter source buffers** — [\`60e3de22\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/60e3de22a9bbe37b2788c31771978ef75d27915c); compute true-peak requirements directly from untouched source windows with Float32-equivalent drive scaling, then write in place after a bounded lookahead guard. Removes the full-track driven stereo pair. CI run 45280968896 passed unit tests, TypeScript, and production build.
 - [x] **test: verify in-place true-peak limiter and export concurrency** — [\`cc4331a1\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/cc4331a11d245ea20de02f30600488d7910a0f7f); compares in-place true-peak limiting against the prior driven-buffer reference and proves a third upload is rejected while two exports are active. CI run 45281206214 passed unit tests, TypeScript, and production build.
+- [x] **docs: record completed engineering verification** — [\`67bc4f0e\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/67bc4f0e9ce757a52bb9a5cadb21863670269a92); recorded CI outcomes and separated code-complete items from Android / real-track verification still pending.
+- [ ] **docs: close current commit ledger** — this commit; record the current README/worklist update as the latest main commit.
 
 # Reference: existing capabilities and setup
 
