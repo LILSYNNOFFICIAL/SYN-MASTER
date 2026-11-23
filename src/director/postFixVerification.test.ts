@@ -822,3 +822,60 @@ test('corrupted secondary telemetry is rejected before any finding can be resolv
     assert.ok(report.activeFindings.every((finding) => finding.status === 'UNVERIFIED'));
   }
 });
+
+test('Pre-existing dynamic compression and harmonic distortion cannot be marked resolved by changed output telemetry', () => {
+  const n = SR * 2;
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const sample = 0.35 * Math.tanh(7 * Math.sin((2 * Math.PI * 997 * i) / SR));
+    left[i] = sample;
+    right[i] = sample * 0.98;
+  }
+
+  const baseline = analyzeAudioBuffer([left, right], SR);
+  const baselineDiagnosis = analyzeTrackIntelligence(baseline, 'streaming');
+  const compressed = baselineDiagnosis.findings.find((finding) => finding.id === 'diag-overcompressed');
+  const distorted = baselineDiagnosis.findings.find((finding) => finding.id === 'diag-thd');
+  assert.ok(
+    compressed,
+    'Steady, low-crest source fixture must be identified as pre-compressed',
+  );
+  assert.ok(
+    distorted,
+    'Saturated source fixture must be identified as pre-existing harmonic distortion',
+  );
+
+  // Deliberately present optimistic post metrics to prove the verifier cannot mistake
+  // a lower THD estimate or altered DR/crest measurements for reconstructed source data.
+  const post = {
+    ...baseline,
+    dynamicRangeDb: Math.max(14, baseline.dynamicRangeDb + 8),
+    crestFactorDb: Math.max(10, baseline.crestFactorDb + 5),
+    loudnessRangeLu: Math.max(5, baseline.loudnessRangeLu + 4),
+    thdEstimatePercent: 0.5,
+  };
+  const report = verifyPostFixAnalysis({
+    baselineAnalysis: baseline,
+    postAnalysis: post,
+    objective: 'streaming',
+    baselineAnalysisId: 'damaged-source',
+    postAnalysisId: 'processed-output',
+    currentChainFingerprint: 'source-integrity-check',
+    postChainFingerprint: 'source-integrity-check',
+    postProcessingStatus: 'ready',
+  });
+
+  for (const findingId of ['diag-overcompressed', 'diag-thd']) {
+    const state = report.activeFindings.find((finding) => finding.findingId === findingId);
+    assert.ok(state, findingId + ' must remain visible after processing');
+    assert.equal(state.status, 'UNRESOLVED', findingId + ' cannot be resolved from meter movement alone');
+    assert.equal(
+      report.resolvedFindings.some((finding) => finding.findingId === findingId),
+      false,
+      findingId + ' must not be reported as reconstructed source material',
+    );
+    assert.match(state.verificationSummary, /source integrity|source entered mastering/i);
+    assert.match(state.nextRecommendedAction ?? '', /premaster|source/i);
+  }
+});
