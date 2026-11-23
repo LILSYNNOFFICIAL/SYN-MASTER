@@ -675,7 +675,7 @@ export function analyzeAudioBuffer(
   };
   const harmonicFamily = new Set<number>();
   for (let i = 0; i < resonanceCandidates.length; i++) {
-    let relatedPartials = 0;
+    const relatedIndices: number[] = [];
     for (let j = 0; j < resonanceCandidates.length; j++) {
       if (i === j) continue;
       const candidate = resonanceCandidates[i];
@@ -684,12 +684,16 @@ export function analyzeAudioBuffer(
         Math.abs(candidate.levelDb - related.levelDb) <= 24 &&
         isHarmonicRelated(candidate.freqHz, related.freqHz)
       ) {
-        relatedPartials++;
+        relatedIndices.push(j);
       }
     }
-    // Require at least two related partials before suppressing a candidate. This is
-    // deliberately conservative so one coincidental octave does not hide a real peak.
-    if (relatedPartials >= 2) harmonicFamily.add(i);
+    // When one measured fundamental has at least two matching partials, protect the
+    // entire family, not only the fundamental. Otherwise upper partials are still
+    // misclassified as isolated resonances and receive unnecessary dynamic cuts.
+    if (relatedIndices.length >= 2) {
+      harmonicFamily.add(i);
+      for (const relatedIndex of relatedIndices) harmonicFamily.add(relatedIndex);
+    }
   }
 
   const resonances: ResonancePeak[] = resonanceCandidates
