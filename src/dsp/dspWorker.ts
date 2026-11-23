@@ -1,5 +1,6 @@
 import type { AudioAnalysis, ProcessorModule } from '../types/mastering';
 import { analyzeAudioBuffer, extractWaveformPeaks } from './analyzer';
+import type { FadeSettings } from './fades';
 import { processChainOffline, type ProcessorMeterTelemetry } from './offlineDsp';
 
 export interface DspWorkerRequest {
@@ -9,6 +10,7 @@ export interface DspWorkerRequest {
   sampleRate: number;
   chain: ProcessorModule[];
   peakBins?: number;
+  postFades?: FadeSettings | null;
 }
 
 export interface DspWorkerSuccessResponse {
@@ -29,7 +31,7 @@ export interface DspWorkerErrorResponse {
 self.onmessage = (ev: MessageEvent<DspWorkerRequest>) => {
   const req = ev.data;
   try {
-    const processed = processChainOffline(req.channels, req.sampleRate, req.chain);
+    const processed = processChainOffline(req.channels, req.sampleRate, req.chain, req.postFades);
     const analysis = analyzeAudioBuffer(processed.channels, req.sampleRate);
     const peaks =
       req.kind === 'render-and-analyze'

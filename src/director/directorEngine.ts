@@ -1,3 +1,4 @@
+import type { FadeSettings } from '../dsp/fades';
 import { evaluateMasterTargets, type MasterTargetGate } from './masterTargets';
 import type { RestoreParams } from '../types/mastering';
 import type {
@@ -1707,6 +1708,8 @@ export interface RunAutonomousDirectorOptions {
   hostConnected?: boolean;
   initialChain?: ProcessorModule[];
   externalProcessor?: ExternalPluginProcessCallback;
+  /** Timeline fades applied after the chain on every render the loop measures. */
+  postFades?: FadeSettings | null;
   renderPassFn?: (
     channels: Float32Array[],
     sampleRate: number,
@@ -2018,6 +2021,7 @@ export async function runAutonomousDirectorLoop(
     sampleRate: opts.sampleRate,
     chain: [],
     externalProcessor: opts.externalProcessor,
+    postFades: opts.postFades,
   });
   const preAnalysis = baselineRendered.analysis;
   const objective = resolveObjectiveTarget(opts.objectiveId, opts.customSpec, opts.referenceAnalysis);
@@ -2188,6 +2192,7 @@ export async function runAutonomousDirectorLoop(
           sampleRate: opts.sampleRate,
           chain: workingChain,
           externalProcessor: opts.externalProcessor,
+          postFades: opts.postFades,
         });
 
     emit('Measuring', pass, undefined, undefined, workingChain, 'Measuring');

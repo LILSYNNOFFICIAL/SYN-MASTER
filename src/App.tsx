@@ -117,7 +117,7 @@ import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 import { ImportScreen } from './components/studio/ImportScreen';
 import { FixItStage } from './components/studio/FixItStage';
 import { FxRackWindow } from './components/studio/FxRackWindow';
-import { applyFades, hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
+import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
 import { buildDiagnosticLog } from './director/diagnosticLog';
 
@@ -360,19 +360,10 @@ export default function App() {
   const fadesRef = useRef(fades);
   fadesRef.current = fades;
   const sourceRateRef = useRef(44100);
-  const fadedCacheRef = useRef<{ src: Float32Array[] | null; key: string; out: Float32Array[] | null }>({ src: null, key: '', out: null });
-  const getRenderSource = useCallback((): Float32Array[] | null => {
-    const src = sourceChannelsRef.current;
-    if (!src) return null;
-    const f = fadesRef.current;
-    if (!hasFades(f)) return src;
-    const key = JSON.stringify(f);
-    const cache = fadedCacheRef.current;
-    if (cache.src === src && cache.key === key && cache.out) return cache.out;
-    const out = applyFades(src, sourceRateRef.current, f);
-    fadedCacheRef.current = { src, key, out };
-    return out;
-  }, []);
+  // Fades are no longer baked into the source: every render applies them AFTER the
+  // chain (postFades) so the limiter sees the unfaded signal.
+  const getRenderSource = useCallback((): Float32Array[] | null => sourceChannelsRef.current, []);
+  const getPostFades = useCallback((): FadeSettings | null => (hasFades(fadesRef.current) ? fadesRef.current : null), []);
 
   const prePeaksHi = useMemo(
     () => (activeTrack && sourceChannelsRef.current ? extractWaveformPeaks(sourceChannelsRef.current, 1600) : []),
@@ -405,6 +396,7 @@ export default function App() {
             includePeaks: true,
             peakBins: 400,
             externalProcessor: processExternalStage,
+            postFades: getPostFades(),
           });
           if (cancelled || offlineRenderSeqRef.current !== seq) return;
           postChannelsRef.current = result.channels;
@@ -917,7 +909,7 @@ export default function App() {
         throw new Error('Load an audio track before starting native WASAPI audition.');
       }
       const effectiveChain = chainBypassed ? [] : chain;
-      const rendered = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage);
+      const rendered = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage, getPostFades());
       const status = await hostBridgeRef.current!.startWasapiAudition(
         rendered.channels,
         activeTrack.sampleRate,
@@ -1459,6 +1451,7 @@ export default function App() {
         hostConnected: hostSnapshot.status === 'connected',
         initialChain: geminiInitialChain ?? (runOperatingMode === 'assisted' ? chain : undefined),
         externalProcessor: processExternalStage,
+        postFades: getPostFades(),
         maxIterations: forceAutonomous ? 10 : maxIterations,
         maxCpuBudgetMs: forceAutonomous ? 120_000 : 60_000,
         convergenceThreshold,
@@ -1751,6 +1744,7 @@ export default function App() {
           sourceChannels: src,
           sampleRate: track.sampleRate,
           chain: s.chain,
+          postFades: getPostFades(),
         });
         if (activeTrackIdRef.current !== track.id) return;
         engineRef.current!.setOverrideBuffer(`candidate-${s.id.toLowerCase()}`, res.channels, track.sampleRate);
@@ -1841,7 +1835,7 @@ export default function App() {
         extension = 'mid';
       } else {
         const effectiveChain = exportConfig.includeMasteringChain !== false && !chainBypassed ? chain : [];
-        const processed = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage);
+        const processed = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage, getPostFades());
 
         // Pass an untouched 32-bit float source-rate WAV to FFmpeg. It performs the
         // selected 512-point sinc sample-rate conversion and final PCM/codec encoding.
@@ -2793,6 +2787,7 @@ export default function App() {
                   sourceChannels: src,
                   sampleRate: activeTrack.sampleRate,
                   chain: cp.chain,
+                  postFades: getPostFades(),
                 });
                 engineRef.current!.setOverrideBuffer('iteration', res.channels, activeTrack.sampleRate);
                 switchAuditionTarget('iteration', settings.loudnessMatchAB ? -14 - cp.analysis.integratedLufs : 0);

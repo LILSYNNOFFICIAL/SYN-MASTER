@@ -95,7 +95,7 @@ Four problems combined so that "FIX ALL & VERIFY" could say a track was mastered
 - AI-shimmer detection in the diagnostic log is a heuristic (high-band stereo correlation + air energy). The deterministic engine does not switch `deShimmer` on by itself; Gemini or the user can. A measured shimmer metric would let the gate verify it.
 - The loop keeps refining open low-mid "mud" findings after the gate passes (by design of the existing mud refinement), so a run can take several passes and end with "rolled back to best pass N" even when it passed. Consider stopping as soon as the gate passes if the owner prefers speed.
 - Mouse-wheel Q on EQ nodes uses React's passive wheel handler, so the page can scroll while adjusting Q.
-- Fades are applied to the source before the chain (so the limiter sees the faded signal). A post-chain fade option could be added.
+- [x] Fades now run AFTER the effects chain (`processChainOffline(..., postFades)`), in preview, Fix-All, battle, checkpoint audition, WASAPI audition and export, so the limiter sees the unfaded signal.
 - Only the director, post-fix verification, inventory and DSP unit tests were re-run for these changes, plus `tsc` and `vite build`. Run `npm test` before the next release and test inside AI Studio after syncing.
 - The click detector ignores clicks in the first and last ~3 ms of the file (not enough audio to judge isolation).
 

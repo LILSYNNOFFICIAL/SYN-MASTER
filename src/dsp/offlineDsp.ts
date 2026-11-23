@@ -1,3 +1,4 @@
+import { applyFadesInPlace, hasFades, type FadeSettings } from './fades';
 import { applyClipper, applyTransientShaper } from './extraProcessors';
 import { applyRepair } from './repair';
 import type {
@@ -1195,6 +1196,7 @@ export function processChainOffline(
   sourceChannels: Float32Array[],
   sampleRate: number,
   chain: ProcessorModule[],
+  postFades?: FadeSettings | null,
 ): OfflineDspResult {
   const numCh = sourceChannels.length;
   const length = sourceChannels[0].length;
@@ -1308,8 +1310,12 @@ export function processChainOffline(
     });
   }
 
+  // Timeline fades are applied AFTER the whole chain (post-limiter, like a DAW master
+  // fade), so the limiter/maximizer sees the unfaded signal and its gain reduction is
+  // not distorted by a fade ramp. A fade only lowers level, so the ceiling still holds.
+  const out = numCh > 1 ? [left, right] : [left];
   return {
-    channels: numCh > 1 ? [left, right] : [left],
+    channels: postFades && hasFades(postFades) ? applyFadesInPlace(out, sampleRate, postFades) : out,
     telemetry,
   };
 }

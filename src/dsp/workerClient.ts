@@ -1,3 +1,4 @@
+import type { FadeSettings } from './fades';
 import type { AudioAnalysis, ProcessorModule } from '../types/mastering.ts';
 import { analyzeAudioBuffer, extractWaveformPeaks } from './analyzer.ts';
 import {
@@ -124,9 +125,10 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
     chain: ProcessorModule[],
     includePeaks: boolean,
     peakBins: number,
+    postFades: FadeSettings | null = null,
   ): Promise<OffThreadRenderResult> => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const processed = processChainOffline(sourceChannels, sampleRate, chain);
+    const processed = processChainOffline(sourceChannels, sampleRate, chain, postFades);
     const analysis = analyzeAudioBuffer(processed.channels, sampleRate);
     const peaks = includePeaks ? extractWaveformPeaks(processed.channels, peakBins) : undefined;
     return {
@@ -146,6 +148,8 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
     includePeaks?: boolean;
     peakBins?: number;
     externalProcessor?: ExternalPluginProcessCallback;
+    /** Timeline fades applied after the chain (post-limiter). */
+    postFades?: FadeSettings | null;
   }): Promise<OffThreadRenderResult> => {
     const {
       sourceChannels,
@@ -154,6 +158,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       includePeaks = false,
       peakBins = 400,
       externalProcessor,
+      postFades = null,
     } = opts;
     const safePeakBins = Math.max(1, Math.min(8192, Math.floor(peakBins)));
     const durationSec = (sourceChannels[0]?.length ?? 0) / sampleRate;
@@ -171,12 +176,12 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
           `Off-thread DSP rendering failed for ${durationSec.toFixed(1)}s audio. Main-thread fallback was skipped to prevent the interface from freezing. ${detail}`,
         );
       }
-      return renderFallback(sourceChannels, sampleRate, chain, includePeaks, safePeakBins);
+      return renderFallback(sourceChannels, sampleRate, chain, includePeaks, safePeakBins, postFades);
     };
 
     if (chainHasActiveExternalPlugins(chain)) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      const mixed = await renderMixedChain(sourceChannels, sampleRate, chain, externalProcessor);
+      const mixed = await renderMixedChain(sourceChannels, sampleRate, chain, externalProcessor, postFades);
       // Keep third-party VST3 execution in its host, but analyze its rendered output in the DSP worker.
       const analyzed = await renderAndAnalyzeOffThread({
         sourceChannels: mixed.channels,
@@ -207,6 +212,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       sampleRate,
       chain,
       peakBins: safePeakBins,
+      postFades,
     };
 
     try {
@@ -252,6 +258,7 @@ export function renderAndAnalyzeOffThread(opts: {
   includePeaks?: boolean;
   peakBins?: number;
   externalProcessor?: ExternalPluginProcessCallback;
+  postFades?: FadeSettings | null;
 }): Promise<OffThreadRenderResult> {
   return defaultClient.renderAndAnalyzeOffThread(opts);
 }

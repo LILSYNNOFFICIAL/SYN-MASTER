@@ -1,5 +1,6 @@
 import type { ExternalVST3Params, ProcessorModule } from '../types/mastering';
 import { dbToLinear, linearToDb } from './analyzer';
+import { applyFadesInPlace, type FadeSettings } from './fades';
 import { processChainOffline, type ProcessorMeterTelemetry } from './offlineDsp';
 
 export type ExternalPluginProcessCallback = (
@@ -35,9 +36,10 @@ export async function renderMixedChain(
   sampleRate: number,
   chain: ProcessorModule[],
   externalProcessor?: ExternalPluginProcessCallback,
+  postFades?: FadeSettings | null,
 ): Promise<MixedChainRenderResult> {
   if (!chainHasActiveExternalPlugins(chain)) {
-    const syncRes = processChainOffline(sourceChannels, sampleRate, chain);
+    const syncRes = processChainOffline(sourceChannels, sampleRate, chain, postFades);
     return {
       channels: syncRes.channels,
       telemetry: syncRes.telemetry,
@@ -137,6 +139,7 @@ export async function renderMixedChain(
   }
 
   flushNativeRun();
+  if (postFades) applyFadesInPlace(current, sampleRate, postFades);
 
   return {
     channels: current,

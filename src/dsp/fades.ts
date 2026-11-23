@@ -1,7 +1,8 @@
 /**
  * Timeline fades for the master (FL Studio style fade lines on the waveform).
- * Applied to the source before the chain so the analysis, the Fix-All loop,
- * playback of the verified render and the export all include the same fades.
+ * Applied AFTER the effects chain (processChainOffline's postFades), so the limiter
+ * sees the unfaded signal; the Fix-All loop, playback of the verified render and the
+ * export all include the same fades.
  */
 export type FadeCurve = 'linear' | 'exp' | 'scurve';
 
@@ -23,6 +24,19 @@ export function fadeGain(t01: number, curve: FadeCurve): number {
 
 export function hasFades(f: FadeSettings | null | undefined): boolean {
   return Boolean(f && (f.inSec > 0.001 || f.outSec > 0.001));
+}
+
+/** Same as applyFades but writes into the given arrays (used on freshly rendered output). */
+export function applyFadesInPlace(channels: Float32Array[], sampleRate: number, fades: FadeSettings): Float32Array[] {
+  if (!hasFades(fades)) return channels;
+  const n = channels[0]?.length ?? 0;
+  const inN = Math.min(n, Math.round(fades.inSec * sampleRate));
+  const outN = Math.min(n - inN, Math.round(fades.outSec * sampleRate));
+  for (const out of channels) {
+    for (let i = 0; i < inN; i++) out[i] *= fadeGain(i / inN, fades.inCurve);
+    for (let i = 0; i < outN; i++) out[n - 1 - i] *= fadeGain(i / outN, fades.outCurve);
+  }
+  return channels;
 }
 
 export function applyFades(channels: Float32Array[], sampleRate: number, fades: FadeSettings): Float32Array[] {
