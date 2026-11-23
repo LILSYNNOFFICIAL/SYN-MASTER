@@ -266,7 +266,8 @@ function buildBaselineComparisonsForFinding(
     }
 
     case 'diag-clipping': {
-      const ceilingLimit = objectiveTarget ? Math.min(-0.1, objectiveTarget.maxTruePeakDb + 0.05) : -0.1;
+      const maxTruePeakDb = objectiveTarget?.maxTruePeakDb ?? OBJECTIVE_LIMITS[objectiveId].maxTruePeakDb;
+      const ceilingLimit = Math.min(-0.1, maxTruePeakDb + 0.05);
       return [
         makeComparison({
           key: 'clippedSamples',
