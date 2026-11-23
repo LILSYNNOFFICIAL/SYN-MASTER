@@ -81,6 +81,29 @@ Four problems combined so that "FIX ALL & VERIFY" could say a track was mastered
 3. **No objective pass/fail gate.** "Done" leaned on a heuristic fit score (≥ 90) and QC. Now every pass's rendered audio is re-measured by `evaluateMasterTargets` (LUFS, dBTP, clipped samples, clicks, DC, phase, low-end phase, dynamics collapse, crest collapse, spectral balance vs reference). A gate-passing pass always beats a failing one, convergence requires the gate, plateaus no longer stop the loop while the gate fails, and the final report states plainly whether targets were met (`report.targetGate`). Clicks/pops were not measured at all before; they are now detected and fixed on the first pass.
 4. **What you heard was not what was verified.** "Mastered" playback ran an approximate realtime Web Audio graph, while verification and export used the offline renderer. Playback now uses the exact verified offline render (hot-swapped after each re-render).
 
+### Real-track findings: "Shadows" blind test (Nov 2026)
+The owner's real Suno track *Shadows* (opening click-repair version) was run blind through the headless Fix-All runner and cross-checked with ffmpeg.
+
+- **What was actually wrong with the source:** only low loudness, **-15.9 LUFS integrated / -4.4 dBTP**. No real clicks, no hiss, no clipping.
+- **What the app got wrong (all fixed, see commits `1504c44`, `0b1d690`, `d5128dd`, `bbeacd1`, `7d7fe95`, `163e462`):**
+  - 9 false "clicks" that were really drum hits -> click detector now uses a width + recovery test (real-track false positives 9 -> 0).
+  - A false -30 dBFS "noise floor" finding on quiet musical passages, which inserted an unneeded hiss gate -> noise floor now needs noise-like quiet frames (HF share); plan and QC share the test.
+  - True peak read up to 0.1 dB low on bright masters -> 16-tap Kaiser interpolator, now matches ffmpeg `ebur128`.
+  - Hard-limited drum onsets in the render were counted as *new* clicks, which blocked every pass at -9.5 LUFS -> `filterIntroducedClicks` ignores render clicks that are source transients sharpened by gain/limiting.
+- **Results after the fixes, measured independently by ffmpeg `ebur128=peak=true`:** Streaming objective **-14.05 LUFS / -0.99 dBTP**; Electronic objective **-9.82 LUFS / -0.79 dBTP**. Both pass the objective gate.
+
+**Reproduce / verify a master headlessly:**
+```bash
+npx tsx scripts/headless-master.ts input.wav streaming out_streaming.wav   # or electronic, pop, ...
+ffmpeg -hide_banner -nostats -i out_streaming.wav -af ebur128=peak=true -f null - 2>&1 | tail -12   # I: LUFS, True peak dBFS
+ffmpeg -hide_banner -i out_streaming.wav -af astats=metadata=0 -f null - 2>&1 | grep -E "Peak level|DC offset|Number of clips"
+```
+The runner prints a JSON summary (before/after LUFS, dBTP, LRA, crest, clicks with times, DC, gate verdict) and writes a 32-bit float WAV of the retained chain. It uses the deterministic engine only (no Gemini).
+
+**Known bugs (at the time of this test):** the post-analysis panel still listed a pre-existing "click" at 53.86 s on the loud master (it did not use the Fix-All introduced-click filter); shimmer thresholds were calibrated on synthetic audio only; when every pass is rejected the loop delivers the untouched source instead of the best safe candidate. See *Open items* for status.
+
+**Priorities:** (1) the three known bugs above, (2) bring-your-own AI provider switcher, (3) ear-test the live-preview approximations and the BYO providers inside AI Studio.
+
 ### Where the new work lives (map for the next dev)
 | Area | Files |
 | --- | --- |
