@@ -739,9 +739,9 @@ test('Explainable plan does not insert dynamic EQ for a coherent harmonic instru
   const analysis = analyzeAudioBuffer([left, right], SR);
   const plan = buildExplainableMasterPlan({ analysis, objectiveId: 'streaming' });
   assert.equal(
-    plan.chain.some((module) => module.type === 'dynamic-eq'),
+    plan.recommendations.some((recommendation) => recommendation.id === 'rec-dyn-eq'),
     false,
-    'Harmonic instrument partials alone must not trigger dynamic resonance cuts',
+    `Harmonic instrument partials alone must not trigger dynamic upper-mid resonance cuts. Remaining candidates: ${JSON.stringify(analysis.resonances)}`,
   );
 });
 
