@@ -2137,6 +2137,10 @@ export async function runAutonomousDirectorLoop(
       objective.preserveTransients &&
       post.dynamicRangeDb < objective.minDynamicRangeDb &&
       preAnalysis.dynamicRangeDb - post.dynamicRangeDb > 1.0;
+    const introducedTruePeakBreach =
+      post.truePeakDb > objective.maxTruePeakDb + 0.05 &&
+      (preAnalysis.truePeakDb <= objective.maxTruePeakDb + 0.05 ||
+        post.truePeakDb > preAnalysis.truePeakDb + 0.25);
     const introducedLoudnessOvershoot =
       post.integratedLufs > objective.targetLufs + objective.lufsTolerance + 1.5 &&
       preAnalysis.integratedLufs <= objective.targetLufs + objective.lufsTolerance + 1.0;
@@ -2145,6 +2149,7 @@ export async function runAutonomousDirectorLoop(
       ...introducedTechnicalFindings.map((finding) => finding.title),
       ...(bandPhaseRegressed ? ['new frequency-band phase cancellation'] : []),
       ...(processingDynamicsRegressed ? ['processing-induced dynamic-range collapse'] : []),
+      ...(introducedTruePeakBreach ? ['new objective true-peak ceiling breach'] : []),
       ...(introducedLoudnessOvershoot ? ['new loudness overshoot'] : []),
     ];
     const hardRegression = hardRegressionReasons.length > 0;
