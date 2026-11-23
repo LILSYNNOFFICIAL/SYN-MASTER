@@ -792,6 +792,17 @@ test('corrupted secondary telemetry is rejected before any finding can be resolv
       label: 'out-of-range phase correlation',
       analysis: { ...baseline, phaseCorrelation: 1.25 },
     },
+    {
+      label: 'missing spectral-zone object',
+      analysis: { ...baseline, zoneEnergyDb: null as unknown as typeof baseline.zoneEnergyDb },
+    },
+    {
+      label: 'null resonance entry',
+      analysis: {
+        ...baseline,
+        resonances: [null as unknown as typeof baseline.resonances[number]],
+      },
+    },
   ];
 
   for (const candidate of invalidAnalyses) {
