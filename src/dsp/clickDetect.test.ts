@@ -90,3 +90,65 @@ test('filterIntroducedClicks separates amplified source transients from clicks t
   assert.deepEqual(split.preexisting, [tOnset]);
   assert.deepEqual(split.introduced, [tNew]);
 });
+
+
+test('shared rendered-click analysis removes amplified source transients without mutating the render report', async () => {
+  const { filterSourceTransientClickAnalysis } = await import('./clickDetect');
+  const source = makeDrumMix(2);
+  const rendered = source.map((channel) => channel.map((sample) => sample * 2));
+  const sourceTransient = 0.25;
+  const introducedClick = 1.111;
+  const index = Math.round(introducedClick * SR);
+  rendered[0][index] += 0.5;
+  rendered[1][index] += 0.5;
+
+  const clickTimesSec = [sourceTransient, introducedClick];
+  const renderedAnalysis = {
+    durationSec: 2,
+    integratedLufs: -9,
+    clickCount: 2,
+    clickTimesSec,
+    clicksPerMinute: 60,
+    clickAtStart: false,
+    clickAtEnd: false,
+  } as unknown as import('../types/mastering').AudioAnalysis;
+  const sourceAnalysis = {
+    integratedLufs: -15,
+  } as unknown as import('../types/mastering').AudioAnalysis;
+
+  const filtered = filterSourceTransientClickAnalysis(
+    source, rendered, SR, sourceAnalysis, renderedAnalysis,
+  );
+
+  assert.equal(filtered.clickCount, 1);
+  assert.deepEqual(filtered.clickTimesSec, [introducedClick]);
+  assert.equal(filtered.clicksPerMinute, 30);
+  assert.deepEqual(renderedAnalysis.clickTimesSec, [sourceTransient, introducedClick]);
+});
+
+test('shared rendered-click analysis never forgives a file-edge click', async () => {
+  const { filterSourceTransientClickAnalysis } = await import('./clickDetect');
+  const source = makeDrumMix(2);
+  const rendered = source.map((channel) => new Float32Array(channel));
+  rendered[0][0] += 0.5;
+  const renderedAnalysis = {
+    durationSec: 2,
+    integratedLufs: -15,
+    clickCount: 1,
+    clickTimesSec: [0.001],
+    clicksPerMinute: 30,
+    clickAtStart: true,
+    clickAtEnd: false,
+  } as unknown as import('../types/mastering').AudioAnalysis;
+  const sourceAnalysis = {
+    integratedLufs: -15,
+  } as unknown as import('../types/mastering').AudioAnalysis;
+
+  const filtered = filterSourceTransientClickAnalysis(
+    source, rendered, SR, sourceAnalysis, renderedAnalysis,
+  );
+
+  assert.equal(filtered, renderedAnalysis);
+  assert.equal(filtered.clickCount, 1);
+  assert.equal(filtered.clickAtStart, true);
+});

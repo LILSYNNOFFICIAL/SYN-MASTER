@@ -1,5 +1,9 @@
 import { isNoiseLikeFloor } from '../dsp/analyzer';
-import { filterIntroducedClicks } from '../dsp/clickDetect';
+import { filterSourceTransientClickAnalysis } from '../dsp/clickDetect';
+import {
+  selectBestSafeFallbackCheckpoint,
+  type SafeFallbackCandidate,
+} from './safeCandidateFallback';
 
 /**
  * Identity of a chain for "already rendered" checks: module ids, names and UI state are
@@ -2227,6 +2231,7 @@ export async function runAutonomousDirectorLoop(
   const loopMax = opts.operatingMode === 'assisted' ? 1 : maxIterations;
 
   let bestCheckpoint: DirectorCheckpoint = baseCheckpoint;
+  const safeFallbackCandidates: SafeFallbackCandidate[] = [];
   let lastFit = baseEval.engineeringFitIndex;
   // Chains already rendered and measured. Re-rendering one of them cannot change the
   // result, so the loop stops instead of burning passes on an identical render.
@@ -2264,24 +2269,15 @@ export async function runAutonomousDirectorLoop(
         });
 
     emit('Measuring', pass, undefined, undefined, workingChain, 'Measuring');
-    let post = rendered.analysis;
-    // Clicks in the render that are just source transients made sharper by gain/limiting
-    // are not "introduced" by the master: drop them before the gate and regression guards.
-    if ((post.clickCount ?? 0) > 0 && post.clickTimesSec && post.clickTimesSec.length >= (post.clickCount ?? 0) && rendered.channels) {
-      const gainLin = Math.pow(10, (post.integratedLufs - preAnalysis.integratedLufs) / 20);
-      const split = filterIntroducedClicks(passSourceChannels, rendered.channels, opts.sampleRate, post.clickTimesSec, gainLin);
-      if (split.preexisting.length > 0) {
-        const minutes = post.durationSec / 60;
-        post = {
-          ...post,
-          clickCount: split.introduced.length,
-          clickTimesSec: split.introduced,
-          clicksPerMinute: minutes > 0 ? Number((split.introduced.length / minutes).toFixed(2)) : 0,
-          clickAtStart: split.introduced.some((t) => t < 0.004) ? post.clickAtStart : false,
-          clickAtEnd: split.introduced.some((t) => t > post.durationSec - 0.004) ? post.clickAtEnd : false,
-        };
-      }
-    }
+    const post = rendered.channels
+      ? filterSourceTransientClickAnalysis(
+          passSourceChannels,
+          rendered.channels,
+          opts.sampleRate,
+          preAnalysis,
+          rendered.analysis,
+        )
+      : rendered.analysis;
     const qcReport = runQualityControl(preAnalysis, post, qcProfile, opts.exportConfig);
     const multiObjective = evaluateMultiObjectiveMetrics(
       preAnalysis,
@@ -2440,6 +2436,10 @@ export async function runAutonomousDirectorLoop(
       },
     };
     checkpoints.push(cp);
+    safeFallbackCandidates.push({
+      checkpoint: cp,
+      hardRegressionReasons: [...hardRegressionReasons],
+    });
     renderedChainKeys.add(chainRenderKey(cp.chain));
     iterationsExecuted = pass;
 
@@ -2650,6 +2650,30 @@ export async function runAutonomousDirectorLoop(
     }
   }
 
+  let safeFallbackSelected = false;
+  if (bestCheckpoint.passNumber === 0) {
+    const safeFallback = selectBestSafeFallbackCheckpoint(
+      baseCheckpoint,
+      safeFallbackCandidates,
+    );
+    if (safeFallback) {
+      bestCheckpoint = safeFallback;
+      safeFallbackSelected = true;
+      rolledBack = true;
+      if (finalStatus === 'completed') finalStatus = 'rolled-back';
+      stopReason =
+        `The primary retention score rejected every pass. Safely retained Pass ${safeFallback.passNumber} because it reduced blocking objective/QC failures without a hard regression. Its measured objective gate remains ${safeFallback.targetGate?.passed ? 'PASS' : 'NOT PASSED'}.`;
+      emit(
+        'Validating',
+        safeFallback.passNumber,
+        makeActivity(safeFallback.passNumber, 'rollback', 'warning', stopReason),
+        undefined,
+        undefined,
+        'Validating',
+      );
+    }
+  }
+
   if (finalStatus === 'completed' && loopMax > 0 && iterationsExecuted >= loopMax) {
     const bestMeetsTargets =
       Math.abs(bestCheckpoint.analysis.integratedLufs - objective.targetLufs) <= 0.65 &&
@@ -2663,7 +2687,11 @@ export async function runAutonomousDirectorLoop(
 
   // Final rollback safeguard if final checkpoint wasn't the best
   const lastExecuted = checkpoints[checkpoints.length - 1];
-  if (lastExecuted && bestCheckpoint.passNumber !== lastExecuted.passNumber) {
+  if (
+    lastExecuted &&
+    bestCheckpoint.passNumber !== lastExecuted.passNumber &&
+    !safeFallbackSelected
+  ) {
     rolledBack = true;
     if (finalStatus === 'completed') finalStatus = 'rolled-back';
     stopReason = bestCheckpoint.passNumber === 0

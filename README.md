@@ -14,6 +14,19 @@ SYN MASTER is an AI-assisted mastering workstation (React + TypeScript + Vite fr
 - No new backend services. New DSP goes in the browser (Web Audio API / `OfflineAudioContext` / the existing `src/dsp/*` offline renderer).
 - Minimal checks before pushing: `npm run lint` (tsc) and `npm run build`.
 
+## Browser, Windows, and Android product requirements (owner confirmed Nov 23 2026)
+
+The browser workstation is the primary product surface. Desktop should behave like a focused mastering DAW rather than a generic dashboard: a persistent project/audio library on the left, a full-width transport and Fix-It timeline across the top of the work area, spectrum/EQ in the central lane, a visible processor chain on the right, and a bottom stereo meter bridge. Preserve the black-and-gold identity, mastering controls, and existing workspace navigation.
+
+Responsive behaviour is a product requirement:
+- Desktop/laptop: docked library, central timeline/spectrum, right processor rack, persistent stereo meters, keyboard and mouse operation.
+- Tablet/narrow browser: collapse rack below spectrum, preserve transport, allow independent panel scrolling.
+- Android browser: one-column layout, large touch targets, no horizontal page scroll, touch-friendly waveform/EQ/rack interactions, safe-area-aware floating windows, and no hover-only controls. Keep import, playback, Fix All, diagnostics, and export reachable.
+- Keep the hosted URL as the source of truth. A future Android wrapper can load that URL, in the same broad direction as SYN-SOUND, but it must not fork the product UI or move mastering authority into a WebView-only code path.
+- A complete Windows desktop EXE is a future packaging milestone. The existing Windows workflow builds native VST3 plugin host/scanner/worker executables; those are not the complete SYN-MASTER workstation. After the browser workflow and host integration are stable, compare Electron (reuse of the current Node/Express runtime, larger footprint) with Tauri (smaller shell, but requires an explicit strategy for the existing server process). Do not mark the full application EXE complete until the UI, local API lifecycle, audio-device/host bridge, installer, signing, and upgrade path are verified on Windows.
+- UI package decision: keep Tailwind CSS v4 + custom CSS and `lucide-react` for this pass. Do not add a heavyweight component library that would increase bundle cost and fight the purpose-built DAW controls. Evaluate a small headless primitive only when a real accessibility/interaction need appears.
+- Do not introduce another backend service. Gemini credentials remain server-side. The same product must continue to run in AI Studio and as a browser-hosted URL.
+
 ## Vision / Spec
 
 ### 1. Core bug: Fix & Master must actually verify the master
@@ -47,7 +60,7 @@ A channel/FX rack in a **floating window** you can drag and resize, with reorder
 The AI and the algorithm must be able to set every tool's parameters, since more tools means a better master.
 
 ### 8. Look and feel
-Keep the **black and gold** look, but with a completely new style/CSS and a rearranged layout that is easier to follow while still showing the technical details.
+Keep the **black and gold** look, with a docked DAW-style desktop layout and a touch-first responsive Android browser layout. Retain Tailwind v4, custom CSS, and Lucide icons for this phase. Reassess a headless primitive only when a specific accessibility/interaction need appears; do not replace the CSS system with a heavy dashboard kit.
 
 ## Roadmap
 
@@ -92,6 +105,8 @@ The owner's real Suno track *Shadows* (opening click-repair version) was run bli
   - Hard-limited drum onsets in the render were counted as *new* clicks, which blocked every pass at -9.5 LUFS -> `filterIntroducedClicks` ignores render clicks that are source transients sharpened by gain/limiting.
 - **Results after the fixes, measured independently by ffmpeg `ebur128=peak=true`:** Streaming objective **-14.05 LUFS / -0.99 dBTP**; Electronic objective **-9.82 LUFS / -0.79 dBTP**. Both pass the objective gate.
 
+**Current owner-supplied source input (Nov 23, 2026):** `Shadows_Opening_Click_Repair.wav` is a 5:59.56 stereo, 48 kHz PCM source premaster. FFmpeg baseline: **-15.9 LUFS integrated, -4.4 dBTP, 9.4 LU LRA**, with negligible channel DC offset (approximately +0.00004 / -0.00002). These are source measurements, not a mastered result or objective pass. The exact file still needs to be run through the current pipeline and the retained WAV independently re-measured and auditioned.
+
 **Reproduce / verify a master headlessly:**
 ```bash
 npx tsx scripts/headless-master.ts input.wav streaming out_streaming.wav   # or electronic, pop, ...
@@ -100,9 +115,9 @@ ffmpeg -hide_banner -i out_streaming.wav -af astats=metadata=0 -f null - 2>&1 | 
 ```
 The runner prints a JSON summary (before/after LUFS, dBTP, LRA, crest, clicks with times, DC, gate verdict) and writes a 32-bit float WAV of the retained chain. It uses the deterministic engine only (no Gemini).
 
-**Known bugs (at the time of this test):** the post-analysis panel still listed a pre-existing "click" at 53.86 s on the loud master (it did not use the Fix-All introduced-click filter); shimmer thresholds were calibrated on synthetic audio only; when every pass is rejected the loop delivers the untouched source instead of the best safe candidate. See *Open items* for status.
+**Historical findings and current status:** the original post-analysis panel did not use the Fix-All source-transient filter, and a run whose primary retention score rejected every pass always returned the untouched source. Both code paths are addressed in the current work below: a shared click-classification helper now feeds the Director and visible post-render analysis, and a constrained safe-candidate fallback can retain measurable progress without bypassing hard regression guards. The source-click residual allowance remains at 25% until broader real-music calibration supports changing it. Shimmer thresholds still need real Suno/stem calibration.
 
-**Priorities:** (1) the three known bugs above, (2) bring-your-own AI provider switcher, (3) ear-test the live-preview approximations and the BYO providers inside AI Studio.
+**Priorities:** run the exact owner-supplied source through the rendered pipeline; complete long-track memory and Android Chrome stability checks; calibrate shimmer and audition preview approximations on real music; verify configured AI providers and hosted AI Studio behaviour.
 
 ### Where the new work lives (map for the next dev)
 | Area | Files |
@@ -116,13 +131,17 @@ The runner prints a JSON summary (before/after LUFS, dBTP, LRA, crest, clicks wi
 | Styling | `src/index.css` (SYN2 section at the bottom) |
 
 ### Open items
-- [x] The realtime Web Audio graph (`src/engine/audioEngine.ts`) now approximates the three new processors: clipper = drive + WaveShaper with the same hard/soft-knee curve; transient shaper = slow-attack compressor blend `comp*A + (dry-comp)*S` with the dry path delayed 256 frames to match the compressor look-ahead; multiband maximizer = LR4 3-band split, per-band pre/compressor/post, brick-wall master at the ceiling. Not ear-tested in a browser yet (only `tsc` + `vite build`). "Mastered" playback still uses the exact verified offline render once it lands.
-- [x] AI-shimmer detection is now measured (`src/dsp/shimmerDetect.ts`, `analysis.shimmer`): side/mid energy at 9-16 kHz, how independently the side HF level flickers from the mid HF level, and HF tonality; `confidence` also needs enough HF to judge and all cues agreeing. The deterministic engine enables SYN-Restore `deShimmer` (30-80%) at confidence ≥ 0.6 (`SHIMMER_AUTO_CONFIDENCE`), and the gate reports an advisory `shimmer` check (side HF ≥ 1 dB lower). `reduceShimmer` was rebuilt on an LR4 split: the old version subtracted a phase-shifted high-pass and did not actually attenuate 10-16 kHz. Thresholds are calibrated on synthetic material only; tune with real Suno stems.
-- The loop keeps refining open low-mid "mud" findings after the gate passes (by design of the existing mud refinement), so a run can take several passes and end with "rolled back to best pass N" even when it passed. Consider stopping as soon as the gate passes if the owner prefers speed.
+- [x] The realtime Web Audio graph (`src/engine/audioEngine.ts`) includes approximations for clipper, transient shaper, and multiband maximizer. Mastered playback uses the exact retained offline render; the realtime graph remains a low-latency preview path. Ear-test the preview against offline renders in desktop Chrome and Android Chrome before closing the verification gate.
+- [x] AI-shimmer detection is measured (`src/dsp/shimmerDetect.ts`, `analysis.shimmer`): side/mid energy at 9-16 kHz, independent side-HF flicker, and HF tonality; confidence requires enough HF and cue agreement. The deterministic engine enables SYN-Restore `deShimmer` at confidence ≥ 0.6 and the gate reports an advisory check. Thresholds are synthetic-calibrated; real Suno vocals, cymbals, synths, and stems are still required before changing them.
+- [x] The Director stops on the first retained pass whose re-measured render meets every blocking objective target. An open low-mid "mud" note is advisory and no longer forces extra passes after an objective pass.
 - [x] Mouse-wheel Q on EQ nodes uses a native non-passive `wheel` listener on the EQ SVG (`preventDefault`), so the page no longer scrolls while adjusting Q; nodes carry `data-band-id`.
-- [x] Fades now run AFTER the effects chain (`processChainOffline(..., postFades)`), in preview, Fix-All, battle, checkpoint audition, WASAPI audition and export, so the limiter sees the unfaded signal.
-- Only the director, post-fix verification, inventory and DSP unit tests were re-run for these changes, plus `tsc` and `vite build`. Run `npm test` before the next release and test inside AI Studio after syncing.
-- [x] The click detector covers the first and last ~3 ms (`findEdgeClick` in `src/dsp/clickDetect.ts`: audio outside the file counts as silence, so a non-zero first/last sample or a spike at 0:00 is a click; background is measured 3-13 ms inside). De-click repairs edge clicks with a mute + 2 ms raised-cosine micro-fade (`repairEdgeClicksChannel`). Analysis exposes `clickAtStart`, `clickAtEnd`, `edgeStartStep`, `edgeEndStep`; an edge click always fails the gate.
+- [x] Fades run AFTER the effects chain (`processChainOffline(..., postFades)`), in preview, Fix-All, battle, checkpoint audition, WASAPI audition and export, so the limiter sees the unfaded signal.
+- [ ] Ear-test the realtime preview processors against the retained offline render with headphones/monitors; inspect transient shape, distortion, stereo/phase, and latency.
+- [x] The click detector covers the first and last ~3 ms (`findEdgeClick` in `src/dsp/clickDetect.ts`); edge clicks are never forgiven by source-transient classification, and the objective gate rejects either edge.
+- [x] Rendered click interpretation is shared between the Director and visible post-render analysis by `filterSourceTransientClickAnalysis`; detector thresholds and the 25% source-click allowance are unchanged. Broader click-policy calibration remains open.
+- [ ] Run `npm test`, TypeScript, production build, and Node 22 startup smoke test on this commit; inspect CI before marking automated verification complete.
+- [ ] Sync the pushed code into Google AI Studio and inspect the live hosted app, AI provider connections, server-only Gemini configuration, and deployment access boundary.
+- [ ] Android Chrome: test import, timeline seek/touch, EQ editing, FX-window scrolling/resizing, playback, Fix All and cancellation, export/download, background/resume, and a near-six-minute render without tab eviction or OOM.
 
 ---
 
@@ -135,13 +154,19 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **P0-1: Unify sub-bass excess reporting, correction, and objective verification.** The source finding trigger (> +2 dB) and delivered-render target (≤ 0 dB) share one measured Sub (20-60 Hz) minus Bass (60-250 Hz) gate. The director selects a 1/3-octave-smoothed correction centre from the measured 20-60 Hz spectrum and applies a bounded bell cut there, rather than relying on a fixed 45 Hz shelf that can hit its gain limit without reaching the gate. Positive Bass Enhancer sub gain is removed and every pass is re-measured. Regression coverage, unit tests, TypeScript, production build, and Node 22 startup smoke test passed CI run 45283310903. An owner-provided source track independently reproduced the reported +5.3 dB baseline; the rendered output and Android/browser listening check remain pending.
 - [ ] **P0-2: Bound offline-render memory and CPU on long tracks/mobile browsers.** Implemented: worker-owned transferred audio buffers are rendered in place (removing a second full-track stereo copy); one reusable wet/dry scratch pair serves all sequential modules including the limiter; chunked 8192-sample multiband scratch; streaming analyzer K-weight/LR correlation with bounded 400 ms energy ring; and in-place lookahead limiting that removes the full-track driven stereo copies. True-peak interpolation applies drive scaling with Float32-equivalent rounding and maintains a nine-sample minimum source guard so the in-place cursor never corrupts future interpolation windows. The ownership/scratch regression tests passed with the full suite (194/194), TypeScript, production build, and Node 22 startup smoke test in CI run 45283973497. Remaining: profile complete worker/session peak memory on a long track and verify Android Chrome stability before marking complete.
 - [x] **P1-1: Align objective and QC loudness tolerances.** The final gate now uses the same `objective.lufsTolerance` carried by each objective instead of a fixed 0.65 LU tolerance. Boundary regression tests passed CI run 45279307130.
-- [ ] **P1-2: Review click acceptance policy.** The current relative allowance can retain 25% of source clicks. Do not impose a new absolute cap until calibrated against real tracks and the existing source-transient false-positive protections.
+- [ ] **P1-2: Calibrate the residual click acceptance policy on a broader real-music set.** Keep the current allowance of 25% of source clicks until vocals, drum-heavy material, quiet intros/outros, and deliberately damaged audio establish a defensible target. Do not weaken source-transient false-positive protection.
+- [x] **P1-8: Unify source-transient click classification across rendered-analysis surfaces.** `filterSourceTransientClickAnalysis` is shared by the Director and visible App post-render analysis. Regression coverage protects source drum attacks, newly introduced clicks, and edge-click enforcement. Detector thresholds and the 25% source-click allowance are unchanged. CI pending for this commit.
+- [x] **P1-9: Retain a safe fallback candidate when primary ranking rejects every pass.** Requires no hard-regression reasons, fit within 1.5 points of baseline, no increase in QC failures, no new objective-gate failure, and measurable reduction in objective failures or QC failures. Ranks eligible candidates by gate progress, QC, fit, and click count. The selected render retains its own gate and is NOT PASSED unless that gate passes. Source remains fallback when no candidate qualifies. CI pending.
+- [x] **P1-10: Dock the Studio into a responsive mastering-DAW layout.** Desktop gets a persistent library rail, full-width Fix-It/timeline surface, centre spectrum, right processor rack, and bottom meter bridge. Tablet stacks the spectrum and rack; Android uses a touch-first one-column layout and safe-area-aware floating rack. Existing Tailwind v4/custom CSS and Lucide retained; no new UI package added. CI and real-device visual verification pending.
 - [x] **P1-3: Harden codec export resource handling.** Streamed input/output, 512 MiB ceiling, two-job global cap, same-origin browser guard, existing per-client rate limiter, and temp cleanup are implemented. Integration tests cover same-origin export, cross-origin rejection, declared oversize rejection, and two-active-job concurrency. CI run 45281206214 passed unit tests, TypeScript, and production build.
 - [x] **P1-4: Make FFmpeg-dependent tests portable.** The export integration test probes FFmpeg and ffprobe once and skips with an explicit reason only when either is absent. CI continues installing both tools and exercising the integration test. CI run 45280105660 passed.
 - [x] **P1-5: Discover tests automatically.** `npm test` now passes recursive `src/**/*.test.ts` and `src/**/*.test.mjs` patterns to the Node test runner instead of maintaining a manual file list. CI run 45280105660 passed.
 - [x] **P1-6: Enable TypeScript strictness incrementally.** Stage 1: `strict: true` enabled without `noUncheckedIndexedAccess`. Node 22 CI run 45281813691 passed unit tests, TypeScript, and production build with no type corrections or suppressions required. Keep `noUncheckedIndexedAccess` as a separate later stage.
 - [x] **P1-7: Verify the `npm start` runtime path.** The production smoke test starts the built app through the exact `npm start` command on Node 22.23.5, then verifies `/api/health` and the production root page. CI run 45282058467 passed unit tests, TypeScript, production build, and startup smoke test. No change to the startup command was needed; `npm run dev` remains `tsx server.ts`.
-- [ ] **P2: Defer broad App/director refactors, lint/format toolchain additions, native cross-platform work, and cosmetic repository cleanup** until mastering correctness and mobile resource use have regression coverage.
+- [ ] **P1-11: Complete real-track and device acceptance.** Run the exact owner-supplied 5:59.56 premaster through `scripts/headless-master.ts`, independently compare the retained output with FFmpeg, audition A/B, and profile browser/worker peak memory. Repeat on Android Chrome and a Windows desktop browser before closing P0-1/P0-2 device gates.
+- [ ] **P1-12: Calibrate shimmer and audition realtime preview.** Validate real vocals, cymbals, synths, layered highs, legitimate stereo air, clicks, drum attacks, transients, limiter peaks, distortion, phase, and preview latency. Do not change synthetic-calibrated thresholds or preview DSP by assumption.
+- [ ] **P2: Package the full Windows workstation and plan the Android URL wrapper.** Build/test a complete EXE only after deciding how the current Node server/API and native host run together; separately evaluate a URL-backed Android wrapper without creating a second source of truth.
+- [ ] **P2: Defer broad App/director refactors, lint/format toolchain additions, native cross-platform work, `noUncheckedIndexedAccess`, and cosmetic repository cleanup** until mastering correctness and mobile resource use have regression coverage.
 
 ### Commit policy and implementation ledger
 
@@ -149,6 +174,7 @@ This section is the active implementation queue and progress ledger. Update it i
 - Each commit must update this README with its subject, scope, and verification status. Small conventional commits only.
 - Re-read the current `main` head immediately before writing. Use a fast-forward update with an expected-head check; if the head moved, stop and reconcile rather than overwrite.
 - A passing TypeScript check or desktop CI is not evidence of Android Chrome stability or subjective mastering quality. Record those separately.
+- Browser-first delivery is the target. The full Windows workstation EXE and Android URL wrapper are separate packaging milestones; the existing VST3 companion executables are not the full product.
 - [x] **docs: establish prioritized engineering worklist** — [\`9d49cada\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/9d49cadafeeb56ab8b4b9acf802d0c41e1692101); prioritized worklist and commit-ledger policy.
 - [x] **fix: gate and repair measured sub-bass excess** — [\`d5160309\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/d5160309ad809103c171b7dbaeac0d62840d8af4); empty/no-file-change commit created during the first write attempt, superseded by the implementation commit below.
 - [x] **fix: gate and repair measured sub-bass excess** — [\`4768096b\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/4768096b2ec6a93d54ff55a137c55c229ebdc457); shared blocking <= 0 dB Sub/Bass gate, one diagnostic status source, iterative low-shelf / Bass Enhancer repair, and regression tests. CI passed (unit tests, TypeScript, production build); real-track and Android verification pending.
@@ -180,6 +206,8 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **perf: render transferred worker buffers in place** — [`25960d71`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/25960d71e8fc00f5748a997f1c9ed8d6a8cb92c6); avoid the renderer's second full-track stereo copy and share one wet/dry scratch pair across sequential modules. Regression tests passed CI run 45283973497 (194/194 tests, TypeScript, production build, startup smoke test). Android profiling remains open.
 - [x] **docs: clarify transferred-buffer ownership contract** — [`a0a105cc`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/a0a105ccf2eea2d62310b25aeee5b87393eb12ec); document the default copy-safe path versus explicit worker ownership and clarify the worker-client lifecycle comment. CI run 45283973497 passed.
 - [x] **docs: record worker ownership memory verification** — this commit; record 194/194 tests, strict TypeScript, production build, and Node 22 startup smoke test while retaining Android profiling as open.
+- [x] **fix: unify rendered-click classification and add safe fallback selection** — this commit; share source-transient click interpretation between Director and post-render UI, protect file-edge clicks, and retain a candidate only when objective/QC progress is measurable and all hard safeguards hold. CI pending.
+- [x] **feat: dock responsive mastering DAW layout** — this commit; docked desktop workspace, tablet stack, Android touch-first layout, safe-area-aware floating rack, and documented Windows/Android packaging requirements. Existing Tailwind v4/custom CSS and Lucide retained; no new UI package or backend added. CI and device visual checks pending.
 
 
 # Reference: existing capabilities and setup

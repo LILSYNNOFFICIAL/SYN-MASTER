@@ -48,6 +48,7 @@ import {
 } from './dsp/mixedChainRenderer';
 import { type ProcessorMeterTelemetry } from './dsp/offlineDsp';
 import { renderAndAnalyzeOffThread } from './dsp/workerClient';
+import { filterSourceTransientClickAnalysis } from './dsp/clickDetect';
 import { MASTERING_PRESETS } from './dsp/presets';
 import { QC_TARGET_PROFILES, runQualityControl } from './dsp/qc';
 import {
@@ -403,11 +404,18 @@ export default function App() {
             postFades: getPostFades(),
           });
           if (cancelled || offlineRenderSeqRef.current !== seq) return;
+          const displayedAnalysis = filterSourceTransientClickAnalysis(
+            src,
+            result.channels,
+            track.sampleRate,
+            track.analysis,
+            result.analysis,
+          );
           postChannelsRef.current = result.channels;
           setPostPeaksHi(extractWaveformPeaks(result.channels, 1600));
           setStageTelemetry(result.telemetry);
           setPostPeaks(result.peaks ?? null);
-          setPostAnalysis(result.analysis);
+          setPostAnalysis(displayedAnalysis);
           setPostAnalysisState({
             status: 'ready',
             analysisId: `post-${seq}-${Date.now()}`,
@@ -2276,7 +2284,7 @@ export default function App() {
       </div>
 
       {/* Main 3-Column Workstation Body */}
-      <div className="flex-1 lg:min-h-0 flex flex-col lg:flex-row lg:overflow-hidden">
+      <div className={`syn-daw-body flex-1 lg:min-h-0 flex flex-col lg:flex-row lg:overflow-hidden${fullscreenWorkspace ? ' is-fullscreen' : ''}`}>
         {!fullscreenWorkspace && (
           <LeftLibraryPanel
             activeTrack={activeTrack}
@@ -2298,7 +2306,7 @@ export default function App() {
         )}
 
         {/* Center Mastering Stage */}
-        <main className="lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">
+        <main className={`lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none${activeTab === 'studio' && activeTrack ? ' syn-daw-main' : ''}`}>
           {activeTrack && activeTab !== 'studio' && (
             <section data-testid="mastering-control-desk" aria-label="Mastering Control Desk"
               className="rounded-xl border border-[#D4AF37]/65 bg-gradient-to-br from-[#151006] via-[#0D0B06] to-[#070604] p-3.5 shadow-[0_12px_32px_rgba(0,0,0,.35)]">
@@ -2336,7 +2344,9 @@ export default function App() {
               </div>
             </section>
           )}
-          <WorkspaceNavigation activeTab={activeTab} onSelect={setActiveTab} />
+          <div className="syn-daw-global-tabs">
+            <WorkspaceNavigation activeTab={activeTab} onSelect={setActiveTab} />
+          </div>
 
           {activeTab === 'studio' && activeTrack && diagnosticLog && (
             <FixItStage
@@ -2662,7 +2672,8 @@ export default function App() {
             }
           >
           {activeTab === 'studio' && activeTrack && (
-            <section className="p-3.5 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
+            <section data-testid="central-spectrum" aria-label="Master spectrum and EQ"
+              className="syn-daw-spectrum p-3.5 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">

@@ -1,3 +1,5 @@
+import type { AudioAnalysis } from '../types/mastering';
+
 /**
  * Objective click / pop detector.
  *
@@ -220,4 +222,62 @@ export function filterIntroducedClicks(
     else introduced.push(t);
   }
   return { introduced, preexisting };
+}
+
+
+/**
+ * Apply the Director's source-transient policy to rendered analysis before it is
+ * displayed or used for post-fix reporting. This prevents the live preview, Director
+ * gate, and post-fix panel from disagreeing about drum attacks sharpened by limiting.
+ *
+ * Detector thresholds, edge-click rules, and the source-click allowance are unchanged.
+ * If the detector cannot provide a complete event-time list, preserve its measurement.
+ */
+export function filterSourceTransientClickAnalysis(
+  sourceChannels: Float32Array[],
+  renderedChannels: Float32Array[],
+  sampleRate: number,
+  sourceAnalysis: AudioAnalysis,
+  renderedAnalysis: AudioAnalysis,
+): AudioAnalysis {
+  const clickCount = renderedAnalysis.clickCount ?? 0;
+  const clickTimes = renderedAnalysis.clickTimesSec;
+  if (
+    clickCount <= 0 ||
+    !clickTimes ||
+    clickTimes.length < clickCount ||
+    !sourceChannels[0] ||
+    !renderedChannels[0] ||
+    sampleRate <= 0
+  ) {
+    return renderedAnalysis;
+  }
+
+  const gainLinear = Math.pow(
+    10,
+    (renderedAnalysis.integratedLufs - sourceAnalysis.integratedLufs) / 20,
+  );
+  const split = filterIntroducedClicks(
+    sourceChannels,
+    renderedChannels,
+    sampleRate,
+    clickTimes,
+    gainLinear,
+  );
+  if (split.preexisting.length === 0) return renderedAnalysis;
+
+  const minutes = renderedAnalysis.durationSec / 60;
+  const introducedAtStart = split.introduced.some((time) => time < 0.004);
+  const introducedAtEnd = split.introduced.some(
+    (time) => time > renderedAnalysis.durationSec - 0.004,
+  );
+  return {
+    ...renderedAnalysis,
+    clickCount: split.introduced.length,
+    clickTimesSec: split.introduced,
+    clicksPerMinute:
+      minutes > 0 ? Number((split.introduced.length / minutes).toFixed(2)) : 0,
+    clickAtStart: introducedAtStart ? renderedAnalysis.clickAtStart : false,
+    clickAtEnd: introducedAtEnd ? renderedAnalysis.clickAtEnd : false,
+  };
 }
