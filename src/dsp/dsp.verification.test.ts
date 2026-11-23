@@ -301,3 +301,30 @@ test('Stereo spectral analysis preserves channel energy when L/R polarity is inv
   });
   assert.ok(nearOneKhz.some((db) => db > -55), 'The spectrum must retain the 1 kHz signal despite L/R cancellation in mono');
 });
+
+
+test('Analyzer does not label a coherent musical harmonic series as isolated resonances', () => {
+  const n = SR * 2;
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    let sample = 0;
+    for (let harmonic = 1; harmonic <= 10; harmonic++) {
+      sample += (0.22 / Math.pow(harmonic, 1.15)) *
+        Math.sin(2 * Math.PI * 220 * harmonic * t);
+    }
+    // A quiet broadband bed makes this resemble a pitched instrument in a mix.
+    const bed = 0.008 * Math.sin(2 * Math.PI * 913 * t) +
+      0.006 * Math.sin(2 * Math.PI * 1733 * t);
+    left[i] = sample + bed;
+    right[i] = sample * 0.97 + bed;
+  }
+
+  const analysis = analyzeAudioBuffer([left, right], SR);
+  assert.equal(
+    analysis.resonances.length,
+    0,
+    'A coherent harmonic series should not be treated as isolated narrow resonances requiring dynamic cuts',
+  );
+});
