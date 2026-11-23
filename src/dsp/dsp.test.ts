@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { computeMagnitudeSpectrumDb } from './fft';
-import { analyzeAudioBuffer, dbToLinear, linearToDb, maxInterSampleAbsAt } from './analyzer';
+import { analyzeAudioBuffer, dbToLinear, linearToDb, maxInterSampleAbsAt, measureIntegratedLufs } from './analyzer';
 import { createProcessorModule, validateChain } from './chainValidation';
 import { processChainOffline } from './offlineDsp';
 import { QC_TARGET_PROFILES, runQualityControl } from './qc';
@@ -398,4 +398,36 @@ test('stereo analyzer bounds full-track Float32 scratch allocations', () => {
     `Scratch reuse changed calibrated LUFS: ${analysis.integratedLufs}`,
   );
   assert.ok(Math.abs(analysis.phaseCorrelation - 1) < 0.01);
+});
+
+
+test('standalone integrated loudness measurement bounds full-track Float32 scratch allocations', () => {
+  const sr = 48000;
+  const length = sr;
+  const [left, right] = makeSineStereo(1000, dbToLinear(-18), 1, sr);
+  const OriginalFloat32Array = globalThis.Float32Array;
+  let fullTrackAllocations = 0;
+
+  globalThis.Float32Array = new Proxy(OriginalFloat32Array, {
+    construct(target, args, newTarget) {
+      if (args[0] === length) fullTrackAllocations++;
+      return Reflect.construct(target, args, newTarget);
+    },
+  });
+
+  let integratedLufs: number;
+  try {
+    integratedLufs = measureIntegratedLufs([left, right], sr);
+  } finally {
+    globalThis.Float32Array = OriginalFloat32Array;
+  }
+
+  assert.ok(
+    fullTrackAllocations <= 2,
+    `Expected at most two full-track Float32 scratch buffers, allocated ${fullTrackAllocations}`,
+  );
+  assert.ok(
+    integratedLufs > -20.5 && integratedLufs < -16.5,
+    `Scratch reuse changed calibrated integrated LUFS: ${integratedLufs}`,
+  );
 });
