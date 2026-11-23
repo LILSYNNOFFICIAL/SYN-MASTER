@@ -116,7 +116,7 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
 }
 
 /** Standard JSON Schema for the strategy object (OpenAI json_schema, Anthropic tool input, Gemini REST). */
-const PROCESSOR_JSON_SCHEMA = {
+export const PROCESSOR_JSON_SCHEMA = {
   type: 'object',
   properties: {
     type: {
