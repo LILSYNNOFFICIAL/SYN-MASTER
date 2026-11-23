@@ -388,15 +388,23 @@ interface LimiterScratchBuffers {
   drivenR: Float32Array;
 }
 
+const MULTIBAND_SCRATCH_CHUNK_SIZE = 8192;
+
 function createMultibandScratchBuffers(length: number): MultibandScratchBuffers {
+  const capacity = Math.min(length, MULTIBAND_SCRATCH_CHUNK_SIZE);
   return {
-    lowL: new Float32Array(length),
-    lowR: new Float32Array(length),
-    midL: new Float32Array(length),
-    midR: new Float32Array(length),
-    highL: new Float32Array(length),
-    highR: new Float32Array(length),
+    lowL: new Float32Array(capacity),
+    lowR: new Float32Array(capacity),
+    midL: new Float32Array(capacity),
+    midR: new Float32Array(capacity),
+    highL: new Float32Array(capacity),
+    highR: new Float32Array(capacity),
   };
+}
+
+interface BandCompressionState {
+  envDb: number;
+  maxGr: number;
 }
 
 function compressMonoBand(
@@ -405,15 +413,17 @@ function compressMonoBand(
   band: MultibandBandParams,
   sampleRate: number,
   intensityScale: number,
+  state: BandCompressionState,
+  sampleCount: number,
 ): number {
-  if (band.bypass) return 0;
-  const n = bufL.length;
+  if (band.bypass) return state.maxGr;
+  const n = Math.min(sampleCount, bufL.length, bufR.length);
   const att = Math.exp(-1 / Math.max(1, (band.attackMs / 1000) * sampleRate));
   const rel = Math.exp(-1 / Math.max(1, (band.releaseMs / 1000) * sampleRate));
   const effRatio = 1 + (band.ratio - 1) * intensityScale;
   const makeup = dbToLinear(band.gainDb * intensityScale);
-  let envDb = -90;
-  let maxGr = 0;
+  let envDb = state.envDb;
+  let maxGr = state.maxGr;
 
   for (let i = 0; i < n; i++) {
     const p = Math.max(Math.abs(bufL[i]), Math.abs(bufR[i]));
@@ -430,6 +440,8 @@ function compressMonoBand(
     bufL[i] *= g;
     bufR[i] *= g;
   }
+  state.envDb = envDb;
+  state.maxGr = maxGr;
   return maxGr;
 }
 
@@ -448,48 +460,52 @@ function applyMultibandCompressor(
   const lpHigh = designLowPass(params.highCrossHz, bwQ, sampleRate);
   const hpHigh = designHighPass(params.highCrossHz, bwQ, sampleRate);
   const apHigh = designAllPass(params.highCrossHz, bwQ, sampleRate);
-
   const { lowL, lowR, midL, midR, highL, highR } = scratch;
-
   const s = Array.from({ length: 18 }, () => createBiquadState());
+  const lowState: BandCompressionState = { envDb: -90, maxGr: 0 };
+  const midState: BandCompressionState = { envDb: -90, maxGr: 0 };
+  const highState: BandCompressionState = { envDb: -90, maxGr: 0 };
+  const chunkSize = lowL.length;
 
-  for (let i = 0; i < n; i++) {
-    const l = left[i];
-    const r = right[i];
+  for (let offset = 0; offset < n; offset += chunkSize) {
+    const count = Math.min(chunkSize, n - offset);
+    for (let local = 0; local < count; local++) {
+      const i = offset + local;
+      const l = left[i];
+      const r = right[i];
 
-    // True 4th-order Linkwitz-Riley (LR4) 3-band crossover with LR2 allpass phase-alignment on low band
-    const lLowRaw = processBiquadSample(processBiquadSample(l, lpLow, s[0]), lpLow, s[1]);
-    const rLowRaw = processBiquadSample(processBiquadSample(r, lpLow, s[2]), lpLow, s[3]);
-    const l1 = processBiquadSample(lLowRaw, apHigh, s[12]);
-    const r1 = processBiquadSample(rLowRaw, apHigh, s[13]);
+      // True LR4 3-band crossover with LR2 allpass phase alignment on the low band.
+      const lLowRaw = processBiquadSample(processBiquadSample(l, lpLow, s[0]), lpLow, s[1]);
+      const rLowRaw = processBiquadSample(processBiquadSample(r, lpLow, s[2]), lpLow, s[3]);
+      const l1 = processBiquadSample(lLowRaw, apHigh, s[12]);
+      const r1 = processBiquadSample(rLowRaw, apHigh, s[13]);
+      const restL = processBiquadSample(processBiquadSample(l, hpLow, s[4]), hpLow, s[5]);
+      const restR = processBiquadSample(processBiquadSample(r, hpLow, s[6]), hpLow, s[7]);
+      const mL = processBiquadSample(processBiquadSample(restL, lpHigh, s[8]), lpHigh, s[9]);
+      const mR = processBiquadSample(processBiquadSample(restR, lpHigh, s[10]), lpHigh, s[11]);
+      const hL = processBiquadSample(processBiquadSample(restL, hpHigh, s[14]), hpHigh, s[15]);
+      const hR = processBiquadSample(processBiquadSample(restR, hpHigh, s[16]), hpHigh, s[17]);
 
-    const restL = processBiquadSample(processBiquadSample(l, hpLow, s[4]), hpLow, s[5]);
-    const restR = processBiquadSample(processBiquadSample(r, hpLow, s[6]), hpLow, s[7]);
+      lowL[local] = l1;
+      lowR[local] = r1;
+      midL[local] = mL;
+      midR[local] = mR;
+      highL[local] = hL;
+      highR[local] = hR;
+    }
 
-    const mL = processBiquadSample(processBiquadSample(restL, lpHigh, s[8]), lpHigh, s[9]);
-    const mR = processBiquadSample(processBiquadSample(restR, lpHigh, s[10]), lpHigh, s[11]);
+    compressMonoBand(lowL, lowR, params.low, sampleRate, intensityScale, lowState, count);
+    compressMonoBand(midL, midR, params.mid, sampleRate, intensityScale, midState, count);
+    compressMonoBand(highL, highR, params.high, sampleRate, intensityScale, highState, count);
 
-    const hL = processBiquadSample(processBiquadSample(restL, hpHigh, s[14]), hpHigh, s[15]);
-    const hR = processBiquadSample(processBiquadSample(restR, hpHigh, s[16]), hpHigh, s[17]);
-
-    lowL[i] = l1;
-    lowR[i] = r1;
-    midL[i] = mL;
-    midR[i] = mR;
-    highL[i] = hL;
-    highR[i] = hR;
+    for (let local = 0; local < count; local++) {
+      const i = offset + local;
+      left[i] = lowL[local] + midL[local] + highL[local];
+      right[i] = lowR[local] + midR[local] + highR[local];
+    }
   }
 
-  const gr1 = compressMonoBand(lowL, lowR, params.low, sampleRate, intensityScale);
-  const gr2 = compressMonoBand(midL, midR, params.mid, sampleRate, intensityScale);
-  const gr3 = compressMonoBand(highL, highR, params.high, sampleRate, intensityScale);
-
-  for (let i = 0; i < n; i++) {
-    left[i] = lowL[i] + midL[i] + highL[i];
-    right[i] = lowR[i] + midR[i] + highR[i];
-  }
-
-  return Number(Math.max(gr1, gr2, gr3).toFixed(2));
+  return Number(Math.max(lowState.maxGr, midState.maxGr, highState.maxGr).toFixed(2));
 }
 
 function shapeSample(x: number, driveAmt: number, flavor: SaturationParams['flavor'], harmonics: SaturationParams['harmonics']): number {
@@ -1171,49 +1187,71 @@ function applyMultibandMaximizer(
   const apHigh = designAllPass(params.highCrossHz, bwQ, sampleRate);
   const bandsL = [scratch.lowL, scratch.midL, scratch.highL];
   const bandsR = [scratch.lowR, scratch.midR, scratch.highR];
-  const s = Array.from({ length: 18 }, () => createBiquadState());
-  for (let i = 0; i < n; i++) {
-    const l = left[i];
-    const r = right[i];
-    const lLow = processBiquadSample(processBiquadSample(processBiquadSample(l, lpLow, s[0]), lpLow, s[1]), apHigh, s[12]);
-    const rLow = processBiquadSample(processBiquadSample(processBiquadSample(r, lpLow, s[2]), lpLow, s[3]), apHigh, s[13]);
-    const restL = processBiquadSample(processBiquadSample(l, hpLow, s[4]), hpLow, s[5]);
-    const restR = processBiquadSample(processBiquadSample(r, hpLow, s[6]), hpLow, s[7]);
-    bandsL[0][i] = lLow;
-    bandsR[0][i] = rLow;
-    bandsL[1][i] = processBiquadSample(processBiquadSample(restL, lpHigh, s[8]), lpHigh, s[9]);
-    bandsR[1][i] = processBiquadSample(processBiquadSample(restR, lpHigh, s[10]), lpHigh, s[11]);
-    bandsL[2][i] = processBiquadSample(processBiquadSample(restL, hpHigh, s[14]), hpHigh, s[15]);
-    bandsR[2][i] = processBiquadSample(processBiquadSample(restR, hpHigh, s[16]), hpHigh, s[17]);
-  }
-  let maxGr = 0;
   const cfg = [params.low, params.mid, params.high];
-  for (let b = 0; b < 3; b++) {
-    const band = cfg[b];
-    if (band.bypass) continue;
-    const pre = dbToLinear(band.preGainDb * intensityScale);
-    const L = bandsL[b];
-    const R = bandsR[b];
-    for (let i = 0; i < n; i++) {
-      L[i] *= pre;
-      R[i] *= pre;
+  const compressionBands: MultibandBandParams[] = cfg.map((band) => ({
+    thresholdDb: band.thresholdDb,
+    ratio: band.ratio,
+    attackMs: band.attackMs,
+    releaseMs: band.releaseMs,
+    gainDb: band.postGainDb,
+    bypass: false,
+  }));
+  const preGains = cfg.map((band) => dbToLinear(band.preGainDb * intensityScale));
+  const states: BandCompressionState[] = cfg.map(() => ({ envDb: -90, maxGr: 0 }));
+  const s = Array.from({ length: 18 }, () => createBiquadState());
+  const chunkSize = scratch.lowL.length;
+
+  for (let offset = 0; offset < n; offset += chunkSize) {
+    const count = Math.min(chunkSize, n - offset);
+    for (let local = 0; local < count; local++) {
+      const i = offset + local;
+      const l = left[i];
+      const r = right[i];
+      const lLow = processBiquadSample(processBiquadSample(processBiquadSample(l, lpLow, s[0]), lpLow, s[1]), apHigh, s[12]);
+      const rLow = processBiquadSample(processBiquadSample(processBiquadSample(r, lpLow, s[2]), lpLow, s[3]), apHigh, s[13]);
+      const restL = processBiquadSample(processBiquadSample(l, hpLow, s[4]), hpLow, s[5]);
+      const restR = processBiquadSample(processBiquadSample(r, hpLow, s[6]), hpLow, s[7]);
+      bandsL[0][local] = lLow;
+      bandsR[0][local] = rLow;
+      bandsL[1][local] = processBiquadSample(processBiquadSample(restL, lpHigh, s[8]), lpHigh, s[9]);
+      bandsR[1][local] = processBiquadSample(processBiquadSample(restR, lpHigh, s[10]), lpHigh, s[11]);
+      bandsL[2][local] = processBiquadSample(processBiquadSample(restL, hpHigh, s[14]), hpHigh, s[15]);
+      bandsR[2][local] = processBiquadSample(processBiquadSample(restR, hpHigh, s[16]), hpHigh, s[17]);
     }
-    const gr = compressMonoBand(L, R, {
-      thresholdDb: band.thresholdDb,
-      ratio: band.ratio,
-      attackMs: band.attackMs,
-      releaseMs: band.releaseMs,
-      gainDb: band.postGainDb,
-      bypass: false,
-    }, sampleRate, intensityScale);
-    if (gr > maxGr) maxGr = gr;
+
+    let maxGr = 0;
+    for (let b = 0; b < 3; b++) {
+      const band = cfg[b];
+      if (band.bypass) continue;
+      const L = bandsL[b];
+      const R = bandsR[b];
+      const pre = preGains[b];
+      for (let local = 0; local < count; local++) {
+        L[local] *= pre;
+        R[local] *= pre;
+      }
+      const gr = compressMonoBand(
+        L,
+        R,
+        compressionBands[b],
+        sampleRate,
+        intensityScale,
+        states[b],
+        count,
+      );
+      if (gr > maxGr) maxGr = gr;
+    }
+
+    for (let local = 0; local < count; local++) {
+      const i = offset + local;
+      left[i] = bandsL[0][local] + bandsL[1][local] + bandsL[2][local];
+      right[i] = bandsR[0][local] + bandsR[1][local] + bandsR[2][local];
+    }
   }
-  for (let i = 0; i < n; i++) {
-    left[i] = bandsL[0][i] + bandsL[1][i] + bandsL[2][i];
-    right[i] = bandsR[0][i] + bandsR[1][i] + bandsR[2][i];
-  }
+
+  const maxBandGr = Math.max(states[0].maxGr, states[1].maxGr, states[2].maxGr);
   const limGr = applyLookaheadLimiter(left, right, params.ceilingDb, 0, params.releaseMs, 3, sampleRate, 1, true, 4, limiterScratch);
-  return Number(Math.max(maxGr, limGr).toFixed(2));
+  return Number(Math.max(maxBandGr, limGr).toFixed(2));
 }
 
 /**

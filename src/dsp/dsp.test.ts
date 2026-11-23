@@ -536,3 +536,39 @@ test('Zero-wet multiband and limiter modules still receive their required reusab
   assert.doesNotThrow(() => processChainOffline([left, right], sr, [zeroWetMultibandMax]));
   assert.doesNotThrow(() => processChainOffline([left, right], sr, [zeroWetLimiter]));
 });
+
+test('Multiband compressor and maximizer process multiple bounded chunks without boundary artifacts', () => {
+  const sr = 48000;
+  const [left, right] = makeSineStereo(330, 0.42, 1.25, sr);
+  for (let i = 0; i < left.length; i++) {
+    const t = i / sr;
+    const bass = 0.12 * Math.sin(2 * Math.PI * 72 * t);
+    const air = 0.07 * Math.sin(2 * Math.PI * 5400 * t);
+    left[i] += bass + air;
+    right[i] += bass * 0.96 + air * 0.91;
+  }
+
+  for (const module of [
+    createProcessorModule('multiband-comp'),
+    createProcessorModule('multiband-maximizer'),
+  ]) {
+    const first = processChainOffline([left, right], sr, [module]).channels;
+    const second = processChainOffline([left, right], sr, [module]).channels;
+    assert.equal(first[0].length, left.length);
+    assert.equal(first[1].length, right.length);
+
+    for (let i = 0; i < left.length; i++) {
+      assert.ok(Number.isFinite(first[0][i]) && Number.isFinite(first[1][i]), 'Output samples must remain finite');
+      assert.equal(first[0][i], second[0][i], 'Repeated left-channel renders must be deterministic');
+      assert.equal(first[1][i], second[1][i], 'Repeated right-channel renders must be deterministic');
+    }
+
+    for (let boundary = 8192; boundary < left.length; boundary += 8192) {
+      const leftStep = Math.abs(first[0][boundary] - first[0][boundary - 1]);
+      const rightStep = Math.abs(first[1][boundary] - first[1][boundary - 1]);
+      assert.ok(leftStep < 0.5, `Unexpected left discontinuity at chunk boundary ${boundary}: ${leftStep}`);
+      assert.ok(rightStep < 0.5, `Unexpected right discontinuity at chunk boundary ${boundary}: ${rightStep}`);
+    }
+  }
+});
+
