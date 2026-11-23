@@ -292,7 +292,12 @@ export function analyzeTrackIntelligence(
   }
 
   // 3. Elevated Broadband Noise Floor (Technical problem when quiet frames separate >=12 dB from program RMS)
-  if (nf > thresholds.noiseFloorMax && analysis.rmsDb > -40 && analysis.rmsDb - nf >= 12) {
+  // The quietest frames of a dense song are usually quiet MUSIC (bass, pads), not hiss.
+  // Only call it a noise floor when those frames carry a noise-like HF share
+  // (noiseFloorHfRatio: ~2 white noise, ~0.02 quiet bass-heavy music). Found on a real
+  // Suno track whose -30 dBFS "noise floor" was its quietest bass passage.
+  const quietFramesNoiseLike = analysis.noiseFloorHfRatio === undefined || analysis.noiseFloorHfRatio >= 0.05;
+  if (nf > thresholds.noiseFloorMax && analysis.rmsDb > -40 && analysis.rmsDb - nf >= 12 && quietFramesNoiseLike) {
     findings.push({
       id: 'diag-noise',
       kind: 'technical-problem',
@@ -300,6 +305,7 @@ export function analyzeTrackIntelligence(
       title: 'Elevated Quiet-Passage Noise Floor',
       severity: nf > -38 ? 'high' : 'moderate',
       evidence: [
+        ...(analysis.noiseFloorHfRatio !== undefined ? [`Quiet-frame HF share: ${analysis.noiseFloorHfRatio.toFixed(3)} (noise-like ≥ 0.05)`] : []),
         `Estimated Noise Floor (5th pct 50ms RMS): ${nf.toFixed(1)} dBFS`,
         `Program RMS: ${analysis.rmsDb.toFixed(1)} dBFS`,
       ],

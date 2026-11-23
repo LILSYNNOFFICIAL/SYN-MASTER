@@ -757,15 +757,27 @@ export function analyzeAudioBuffer(
   // 6. Noise Floor estimation from 50ms RMS windows (5th percentile of active/quiet frames)
   const noiseWinSamples = Math.max(64, Math.round(sampleRate * 0.05));
   const frameRmsDb: number[] = [];
+  // Per-frame high-frequency share: E[(x[n]-x[n-1])^2] / E[x^2]. White noise gives ~2,
+  // hiss (HF-tilted) well above 0.3, while quiet MUSIC (bass, pads, vocals) is far below.
+  // Used to tell a real noise floor from the quietest passages of a dense song.
+  const frameHf: Array<{ db: number; hf: number }> = [];
   for (let start = 0; start + noiseWinSamples <= length; start += noiseWinSamples) {
     let e = 0;
+    let de = 0;
     for (let i = 0; i < noiseWinSamples; i++) {
       const lVal = left[start + i];
       const rVal = right[start + i];
       e += 0.5 * (lVal * lVal + rVal * rVal);
+      if (start + i > 0) {
+        const dl = lVal - left[start + i - 1];
+        const dr = rVal - right[start + i - 1];
+        de += 0.5 * (dl * dl + dr * dr);
+      }
     }
     const rmsWin = Math.sqrt(e / noiseWinSamples);
-    frameRmsDb.push(linearToDb(rmsWin, -96));
+    const db = linearToDb(rmsWin, -96);
+    frameRmsDb.push(db);
+    frameHf.push({ db, hf: e > 1e-14 ? de / e : 0 });
   }
   if (frameRmsDb.length === 0 && length > 0) {
     frameRmsDb.push(Math.max(-96, rmsDb));
@@ -780,6 +792,11 @@ export function analyzeAudioBuffer(
   const noiseFloorDb = Number(
     Math.max(-96, Math.min(0, noiseSource[noisePercentileIdx] ?? -96)).toFixed(2),
   );
+  // Median HF share of the quietest 5% of non-silent frames (the frames that set the noise floor).
+  const quietFrames = frameHf.filter((f) => f.db > -95.5).sort((a, b) => a.db - b.db);
+  const quietSlice = quietFrames.slice(0, Math.max(1, Math.ceil(quietFrames.length * 0.05)));
+  const quietHfSorted = quietSlice.map((f) => f.hf).sort((a, b) => a - b);
+  const noiseFloorHfRatio = Number((quietHfSorted[Math.floor(quietHfSorted.length / 2)] ?? 0).toFixed(4));
 
   return {
     durationSec: Number(durationSec.toFixed(3)),
@@ -813,6 +830,7 @@ export function analyzeAudioBuffer(
     interSamplePeaks,
     thdEstimatePercent,
     noiseFloorDb,
+    noiseFloorHfRatio,
     dcOffset: Number(dcOffset.toFixed(5)),
     loudnessHistoryLufs,
     clickCount: clicks.clickCount,

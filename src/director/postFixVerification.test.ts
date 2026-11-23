@@ -899,6 +899,7 @@ test('Noise cleanup cannot be marked resolved by uniform attenuation that leaves
   const baseline = {
     ...measured,
     noiseFloorDb: -40,
+    noiseFloorHfRatio: 1.5, // the quiet frames are hiss, not quiet music
     rmsDb: -12,
   };
   const baselineDiagnosis = analyzeTrackIntelligence(baseline, 'streaming');
@@ -927,6 +928,7 @@ test('Noise cleanup reports collateral transient and air loss instead of claimin
   const baseline = {
     ...measured,
     noiseFloorDb: -40,
+    noiseFloorHfRatio: 1.5, // the quiet frames are hiss, not quiet music
     rmsDb: -12,
     transientDensity: 0.4,
     crestFactorDb: 10,

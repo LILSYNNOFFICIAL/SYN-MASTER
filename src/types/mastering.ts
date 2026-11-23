@@ -308,6 +308,8 @@ export interface AudioAnalysis {
   clickCount?: number;
   clicksPerMinute?: number;
   clickTimesSec?: number[];
+  /** HF share of the quietest frames (≈2 white noise, >0.3 hiss, <0.1 quiet music). */
+  noiseFloorHfRatio?: number;
   /** Click in the first / last ~3 ms of the file (clickDetect edge test). */
   clickAtStart?: boolean;
   clickAtEnd?: boolean;
