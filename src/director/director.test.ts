@@ -959,8 +959,14 @@ test('Explainable plan still targets a genuinely isolated upper-mid resonance', 
     'Fixture must produce an isolated high-mid spectral prominence',
   );
   const plan = buildExplainableMasterPlan({ analysis, objectiveId: 'streaming' });
+  const dynamicEq = plan.chain.find((module) => module.type === 'dynamic-eq');
   assert.ok(
-    plan.chain.some((module) => module.type === 'dynamic-eq'),
+    dynamicEq,
     'A measured isolated resonance should still trigger a targeted dynamic EQ recommendation',
+  );
+  const bands = (dynamicEq.params as { bands?: Array<{ freq: number }> }).bands ?? [];
+  assert.ok(
+    bands.some((band) => band.freq >= 2500 && band.freq <= 3700),
+    'The dynamic EQ target should remain near the measured isolated resonance',
   );
 });
