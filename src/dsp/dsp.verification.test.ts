@@ -314,9 +314,9 @@ test('Analyzer does not label a coherent musical harmonic series as isolated res
       sample += (0.22 / Math.pow(harmonic, 1.15)) *
         Math.sin(2 * Math.PI * 220 * harmonic * t);
     }
-    // A quiet broadband bed makes this resemble a pitched instrument in a mix.
-    const bed = 0.008 * Math.sin(2 * Math.PI * 913 * t) +
-      0.006 * Math.sin(2 * Math.PI * 1733 * t);
+    // Deterministic low-level broadband bed makes this resemble a pitched instrument in a mix.
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const bed = ((seed / 4294967296) * 2 - 1) * 0.004;
     left[i] = sample + bed;
     right[i] = sample * 0.97 + bed;
   }
