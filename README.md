@@ -1,8 +1,85 @@
 # SYN MASTER
 
-**Precision Engineering. Intelligent Mastering. Exceptional Sound.**
+**Precision Engineering. Intelligent Mastering. Exceptional Sound.** The goal: *Ozone on steroids.*
 
-SYN MASTER is an AI-assisted mastering workstation built around a browser-based React application, a server-side Gemini integration, a native DSP engine, and a Windows VST3 companion host. Its mastering workflow combines audio analysis, explainable processing plans, iterative DSP refinement, and post-processing verification.
+SYN MASTER is an AI-assisted mastering workstation (React + TypeScript + Vite front end, an Express server that holds the Gemini key, offline Web Audio / SYN-DSP rendering, and an optional Windows VST3 companion host). It was created in **Google AI Studio** (published at https://syn-master.ai.studio/), edited with ChatGPT, and synced back into AI Studio through this GitHub repo.
+
+> **Handoff note for ChatGPT / the next developer.** This README is the single source of truth for what the owner (LIL SYNN / LILSYNNOFFICIAL) wants. Read the *Vision / Spec* section, then pick up the first unticked item in the *Roadmap*. Tick items (`- [x]`) as you finish them and commit straight to `main` (the owner wants every commit pushed directly to `main`: no branches, no PRs). Commit small and often.
+
+## AI Studio compatibility rules (do not break)
+
+- Keep the entry files: `index.html` -> `src/main.tsx` -> `src/App.tsx`, `src/index.css`, `vite.config.ts`, `server.ts`, `metadata.json`.
+- Keep the build setup: `npm run dev` (`tsx server.ts`), `npm run build` (`vite build`), Tailwind v4 via `@tailwindcss/vite`.
+- The Gemini API key is read **only on the server** from `process.env.GEMINI_API_KEY` (see `server.ts` / `src/server/aiMastering.ts`). Never move it into client code or a `VITE_` variable.
+- No new backend services. New DSP goes in the browser (Web Audio API / `OfflineAudioContext` / the existing `src/dsp/*` offline renderer).
+- Minimal checks before pushing: `npm run lint` (tsc) and `npm run build`.
+
+## Vision / Spec
+
+### 1. Core bug: Fix & Master must actually verify the master
+The AI "fix and master" flow did not properly verify that the track was mastered correctly. The code and logic must be audited and fixed so that "passed" means the **rendered output** was re-measured and met its targets (see Roadmap for the root cause and fix status).
+
+### 2. Mastering loop (analyze -> log -> fix -> render -> re-analyze -> repeat)
+1. Analyze the track.
+2. Write a **diagnostic log** (temp/log panel, downloadable as JSON and text) of everything wrong with it: clipping, true-peak overs, LUFS off target, clicks/pops, AI artifacts, harshness, mud, sibilance, stereo/phase problems, DC offset, low-end issues, etc., plus the **exact settings every tool needs** to fix each one.
+3. Apply those settings (AI + algorithm), render, **re-analyze the rendered audio**, and repeat until the master passes its targets, with a **max-iteration cap**.
+4. Goal: right on the first press, so a later analysis does not find new flaws.
+5. Pass/fail uses **objective measured checks**, not AI opinion: integrated LUFS, true peak (dBTP), LRA, crest factor, clip count, click detection, spectral balance against a reference curve, phase correlation, DC offset.
+
+### 3. AI-generated audio repair (Suno etc.)
+De-click, de-crackle, transient spike repair, and AI-shimmer / metallic artifact reduction.
+
+### 4. New UX
+- First screen: **"Import your track"** (drag-and-drop upload).
+- After import: the waveform with a time grid and a big **"FIX IT ALL WITH AI"** button in the center.
+- Pressing it reveals the technical data/details and runs the full auto-master with one button.
+
+### 5. Manual mode: a mini DAW built only for mastering
+- Parametric EQ that looks and works like FL Studio's **Fruity Parametric EQ 2** (live spectrum, draggable band nodes, band types).
+- **Fade-in / fade-out lines** you click and drag on the waveform (FL Studio style).
+- Compression, multiband compression, limiter/maximizer, high-pass and low-pass filters, frequency splitters/crossovers, a **Maximus-style multiband maximizer**, stereo imager, saturation/exciter, de-esser, dynamic EQ, transient shaper, clipper, dither, loudness targets (Spotify / Apple Music / YouTube presets), **A/B compare**, and new innovative tools.
+- Knobs, dials, and sliders.
+
+### 6. Chainable FX rack
+A channel/FX rack in a **floating window** you can drag and resize, with reorder, bypass, and add/remove modules through a nice dropdown menu.
+
+### 7. AI controls every tool
+The AI and the algorithm must be able to set every tool's parameters, since more tools means a better master.
+
+### 8. Look and feel
+Keep the **black and gold** look, but with a completely new style/CSS and a rearranged layout that is easier to follow while still showing the technical details.
+
+## Roadmap
+
+Priority order. Tick as done; note open problems inline.
+
+- [ ] Rewrite README with Vision / Spec + Roadmap (handoff note)
+- [ ] Audit + fix the Fix-All verify / re-analyze loop (root cause documented below)
+- [ ] New first screen: "Import your track" drag-and-drop
+- [ ] Waveform with time grid + big centered "FIX IT ALL WITH AI" button that runs the full auto-master and reveals technical details
+- [ ] Diagnostic log panel (every issue + exact per-tool settings), downloadable as JSON and text
+- [ ] Iterative fix/verify engine on objective metrics (LUFS, dBTP, LRA, crest, clips, clicks, spectral balance vs reference curve, phase correlation, DC) with max-iteration cap
+- [ ] De-click / de-crackle / transient spike repair
+- [ ] AI-shimmer / metallic artifact reduction
+- [ ] New black + gold layout and CSS
+- [ ] Floating draggable/resizable FX rack window with reorder, bypass and add/remove dropdown
+- [ ] FL-style parametric EQ (spectrum, draggable nodes, band types)
+- [ ] Dynamics modules with knobs (compressor, multiband, limiter/maximizer, clipper, transient shaper, de-esser, dynamic EQ)
+- [ ] Draggable fade-in / fade-out lines on the waveform
+- [ ] Maximus-style multiband maximizer
+- [ ] Loudness target presets (Spotify / Apple / YouTube)
+- [ ] A/B compare
+- [ ] Remaining tools (HPF/LPF, crossovers, imager, saturation/exciter, dither) exposed in manual mode and controllable by the AI
+
+### Verification bug: root cause
+_To be filled in when the fix lands._
+
+### Open items
+_None yet._
+
+---
+
+# Reference: existing capabilities and setup
 
 ## Core capabilities
 
