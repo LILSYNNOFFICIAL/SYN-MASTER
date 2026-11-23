@@ -777,7 +777,7 @@ function applyRestore(
     };
     const harmonicFamily = new Set<number>();
     for (let i = 0; i < peaks.length; i++) {
-      let relatedPartials = 0;
+      const relatedIndices: number[] = [];
       for (let j = 0; j < peaks.length; j++) {
         if (i === j) continue;
         const candidate = peaks[i];
@@ -786,12 +786,14 @@ function applyRestore(
           Math.abs(avgDb[candidate.bin] - avgDb[related.bin]) <= 24 &&
           isHarmonicRelated(candidate.freq, related.freq)
         ) {
-          relatedPartials++;
+          relatedIndices.push(j);
         }
       }
-      // Require a family of at least three measured partials. A lone octave relationship
-      // is not enough evidence to suppress a genuine narrow resonance.
-      if (relatedPartials >= 2) harmonicFamily.add(i);
+      // Protect every member once a fundamental has at least two matching partials.
+      if (relatedIndices.length >= 2) {
+        harmonicFamily.add(i);
+        for (const relatedIndex of relatedIndices) harmonicFamily.add(relatedIndex);
+      }
     }
     const resonancePeaks = peaks.filter((_peak, index) => !harmonicFamily.has(index));
     const chosen: Array<{ freq: number; cutDb: number }> = [];
