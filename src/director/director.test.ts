@@ -509,6 +509,7 @@ test('Manual Director mode reports stem chains without executing them', async ()
   assert.deepEqual(report.stemIntelligence?.processingChains['vocal-bus'], ['parametric-eq']);
 });
 
+
 test('Reference EQ matching removes overall loudness bias and responds only to relative tonal differences', () => {
   const source = makeBalancedStereo(1.2, 0.18);
   // Add repeatable high-air content so both the bass and air bands remain measurable.
@@ -519,23 +520,14 @@ test('Reference EQ matching removes overall loudness bias and responds only to r
   }
 
   const sourceAnalysis = analyzeAudioBuffer(source, SR);
-  const louderReferenceChannels = source.map((channel) =>
-    Float32Array.from(channel, (sample) => sample * 2),
+  const louderReference = analyzeAudioBuffer(
+    source.map((channel) => Float32Array.from(channel, (sample) => sample * 2)),
+    SR,
   );
-  const louderReference = analyzeAudioBuffer(louderReferenceChannels, SR);
 
-  assert.ok(
-    louderReference.integratedLufs - sourceAnalysis.integratedLufs > 5.5,
-    'Reference fixture must be materially louder than the source',
-  );
-  assert.ok(
-    louderReference.zoneEnergyDb.bass - sourceAnalysis.zoneEnergyDb.bass > 5.5,
-    'Reference bass band must carry the same overall level offset',
-  );
-  assert.ok(
-    louderReference.zoneEnergyDb.air - sourceAnalysis.zoneEnergyDb.air > 5.5,
-    'Reference air band must carry the same overall level offset',
-  );
+  assert.ok(louderReference.integratedLufs - sourceAnalysis.integratedLufs > 5.5);
+  assert.ok(louderReference.zoneEnergyDb.bass - sourceAnalysis.zoneEnergyDb.bass > 5.5);
+  assert.ok(louderReference.zoneEnergyDb.air - sourceAnalysis.zoneEnergyDb.air > 5.5);
 
   const levelOnlyPlan = buildExplainableMasterPlan({
     analysis: sourceAnalysis,
@@ -548,20 +540,6 @@ test('Reference EQ matching removes overall loudness bias and responds only to r
     levelOnlyBands.some((band) => band.id === 'b2' || band.id === 'b4'),
     false,
     'A level-only reference difference must not create bass or air EQ boosts/cuts',
-  );
-  const levelOnlyComparison = compareReferenceIntelligent(
-    sourceAnalysis,
-    sourceAnalysis,
-    louderReference,
-  );
-  assert.ok(
-    levelOnlyComparison.zoneDeltasDb.bass > 5.5,
-    'Raw band-level telemetry should remain available to explain the loudness difference',
-  );
-  assert.equal(
-    levelOnlyComparison.suggestedActions.some((action) => /low-shelf|high-shelf/i.test(action)),
-    false,
-    'A level-only reference difference must not generate tonal EQ recommendations',
   );
 
   const shapedReference = {
@@ -586,8 +564,37 @@ test('Reference EQ matching removes overall loudness bias and responds only to r
   assert.ok(airMatch, 'A genuine -1.5 dB relative air difference should produce a restrained highshelf adjustment');
   assert.ok(Math.abs(bassMatch.gain - 0.9) <= 0.11, 'Expected +0.9 dB relative bass trim, got ' + bassMatch.gain + ' dB');
   assert.ok(Math.abs(airMatch.gain + 0.6) <= 0.11, 'Expected -0.6 dB relative air trim, got ' + airMatch.gain + ' dB');
+});
 
-  const comparisonReference = {
+test('Reference comparison preserves raw band deltas but bases EQ guidance on level-matched tonal balance', () => {
+  const source = makeBalancedStereo(1.2, 0.18);
+  for (let i = 0; i < source[0].length; i++) {
+    const air = 0.025 * Math.sin((2 * Math.PI * 14000 * i) / SR);
+    source[0][i] += air;
+    source[1][i] += air;
+  }
+  const sourceAnalysis = analyzeAudioBuffer(source, SR);
+  const louderReference = analyzeAudioBuffer(
+    source.map((channel) => Float32Array.from(channel, (sample) => sample * 2)),
+    SR,
+  );
+
+  const levelOnlyComparison = compareReferenceIntelligent(
+    sourceAnalysis,
+    sourceAnalysis,
+    louderReference,
+  );
+  assert.ok(
+    levelOnlyComparison.zoneDeltasDb.bass > 5.5,
+    'Raw band-level telemetry should remain available to explain the loudness difference',
+  );
+  assert.equal(
+    levelOnlyComparison.suggestedActions.some((action) => /low-shelf|high-shelf/i.test(action)),
+    false,
+    'A level-only reference difference must not generate tonal EQ recommendations',
+  );
+
+  const shapedReference = {
     ...louderReference,
     zoneEnergyDb: {
       ...louderReference.zoneEnergyDb,
@@ -598,11 +605,11 @@ test('Reference EQ matching removes overall loudness bias and responds only to r
   const shapedComparison = compareReferenceIntelligent(
     sourceAnalysis,
     sourceAnalysis,
-    comparisonReference,
+    shapedReference,
   );
   assert.ok(
     shapedComparison.suggestedActions.some((action) => /warmer bass weight/.test(action) && /\+2\.0 dB/.test(action)),
-    'Genuine relative bass difference should still produce a restrained bass recommendation',
+    'Genuine relative bass difference should produce a restrained bass recommendation',
   );
   assert.ok(
     shapedComparison.suggestedActions.some((action) => /darker in the top octave by 3\.0 dB/.test(action)),
