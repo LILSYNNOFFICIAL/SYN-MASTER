@@ -323,10 +323,6 @@ export function analyzeAudioBuffer(
   }
   const lpDenom = Math.sqrt(lpSqL * lpSqR);
   const lowEndCorrelation = lpDenom > 1e-12 ? Math.max(-1, Math.min(1, lpProd / lpDenom)) : 1;
-  const monoCompatibilityScore = Math.round(
-    Math.max(0, Math.min(100, ((phaseCorrelation + 1) * 0.5) * 70 + ((lowEndCorrelation + 1) * 0.5) * 30)),
-  );
-
   // Frequency-localized correlation catches cancellation hidden by whole-program averages.
   // Boundaries match the default Stereo Imager crossovers so a flagged band maps to
   // the processor control that can actually correct it.
@@ -368,6 +364,14 @@ export function analyzeAudioBuffer(
     mid: Number(measureCorrelation(midL, midR).toFixed(3)),
     high: Number(measureCorrelation(highL, highR).toFixed(3)),
   };
+
+  // Fold-down compatibility includes localized bands, not just the full-program average.
+  const monoCompatibilityScore = Math.round(Math.max(0, Math.min(100,
+    ((phaseCorrelation + 1) * 0.5) * 20 +
+    ((stereoBandCorrelation.low + 1) * 0.5) * 30 +
+    ((stereoBandCorrelation.mid + 1) * 0.5) * 25 +
+    ((stereoBandCorrelation.high + 1) * 0.5) * 25,
+  )));
 
   // 3. ITU-R BS.1770-4 K-Weighted LUFS
   const { shelf, rlb } = designKWeightingFilters(sampleRate);
