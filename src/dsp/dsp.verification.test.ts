@@ -307,6 +307,7 @@ test('Analyzer does not label a coherent musical harmonic series as isolated res
   const n = SR * 2;
   const left = new Float32Array(n);
   const right = new Float32Array(n);
+  let seed = 71;
   for (let i = 0; i < n; i++) {
     const t = i / SR;
     let sample = 0;
