@@ -576,7 +576,7 @@ test('Multiband compressor and maximizer process multiple bounded chunks without
 test('Limiter wet/dry blending keeps a separate dry snapshot while reusing its limiter scratch pair', () => {
   const sr = 48000;
   const [left, right] = makeSineStereo(440, 0.92, 0.35, sr);
-  const params = { ceilingDb: -1.5, thresholdDb: -7, releaseMs: 70, lookaheadMs: 3, truePeak: false, oversampling: 1 };
+  const params = { ceilingDb: -1.5, thresholdDb: -7, releaseMs: 70, lookaheadMs: 3, truePeak: false, oversampling: 1 as const };
   const wet = processChainOffline([left, right], sr, [
     createProcessorModule('limiter', { params, wetDry: 100 }),
   ]).channels;
