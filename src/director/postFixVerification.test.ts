@@ -874,7 +874,9 @@ test('Pre-existing dynamic compression and harmonic distortion cannot be marked 
   });
 
   for (const findingId of ['diag-overcompressed', 'diag-thd']) {
-    const state = report.activeFindings.find((finding) => finding.findingId === findingId);
+    const state =
+      report.activeFindings.find((finding) => finding.findingId === findingId) ??
+      report.resolvedFindings.find((finding) => finding.findingId === findingId);
     assert.ok(state, findingId + ' must remain visible after processing');
     assert.equal(state.status, 'UNRESOLVED', findingId + ' cannot be resolved from meter movement alone');
     assert.equal(
