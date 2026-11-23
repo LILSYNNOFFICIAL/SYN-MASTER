@@ -91,6 +91,7 @@ export function separateWithDemucs(
   channels: [Float32Array, Float32Array],
   signal: AbortSignal,
   onProgress: (progress: StemSeparationProgress) => void,
+  options: { highQuality?: boolean } = {},
 ): Promise<SeparatedAudioStem[]> {
   if (signal.aborted) return Promise.reject(new DOMException('Separation cancelled.', 'AbortError'));
   if (channels[0].length < 1 || channels[0].length !== channels[1].length) {
@@ -145,6 +146,9 @@ export function separateWithDemucs(
       finish(() => reject(new DOMException('Separation cancelled.', 'AbortError')));
       return;
     }
-    worker.postMessage({ type: 'start', jobId, channels }, [channels[0].buffer, channels[1].buffer]);
+    worker.postMessage(
+      { type: 'start', jobId, channels, shifts: options.highQuality ? 2 : 1 },
+      [channels[0].buffer, channels[1].buffer],
+    );
   });
 }

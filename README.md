@@ -31,6 +31,12 @@ The bass-vs-mid refinement path uses a proportional adjustment rather than apply
 
 **Verification is not a promise of perfect sound.** A passing metric does not replace critical listening, and a partially resolved finding means the remaining deviation is still reported. Always audition the rendered result and check it on appropriate monitoring systems.
 
+### AI stem separation
+
+- HT-Demucs (ONNX) runs in the browser and splits a mix into Drums, Bass, Other and Vocals.
+- **High Quality mode** runs each chunk twice, the second time shifted by 0.5 s, and averages the realigned results (the Demucs `--shifts` technique). About 2x slower.
+- **Mixture consistency:** after the stems are resampled to the session rate, the leftover difference between the original mix and the sum of the stems is shared out to the stems by their local energy, so the four stems always sum back to the original, including content above the model's 44.1 kHz band.
+
 ### Low-mid masking, limiter and delivery checks
 
 - **One band map** (`src/dsp/bandMap.ts`) defines the analyzer zones and the 150–400 Hz mud region used by diagnosis, the Director and verification.

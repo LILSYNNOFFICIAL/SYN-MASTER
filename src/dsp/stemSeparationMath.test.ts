@@ -8,6 +8,9 @@ import {
   normalizeDemucsOutput,
   normalizeDemucsRange,
   shiftDemucsAccumulator,
+  applyMixtureConsistency,
+  averageShiftedDemucsOutput,
+  buildShiftedDemucsInput,
 } from './stemSeparationMath.ts';
 
 test('Demucs chunk count covers short, exact, and multi-segment audio', () => {
@@ -107,4 +110,46 @@ test('chunk accumulation rejects out-of-range buffers', () => {
   assert.throws(() => accumulateDemucsWeights(
     new Float32Array(4), 2, 4, new Float32Array(4),
   ), RangeError);
+});
+
+test('Mixture consistency makes stems sum back to the mix without frame steps', () => {
+  const n = 20_000;
+  const mix: [Float32Array, Float32Array] = [new Float32Array(n), new Float32Array(n)];
+  const a: [Float32Array, Float32Array] = [new Float32Array(n), new Float32Array(n)];
+  const b: [Float32Array, Float32Array] = [new Float32Array(n), new Float32Array(n)];
+  for (let i = 0; i < n; i += 1) {
+    const va = 0.5 * Math.sin(i * 0.01);
+    const vb = 0.3 * Math.sin(i * 0.13);
+    const air = 0.02 * Math.sin(i * 2.9); // content the "model" missed
+    mix[0][i] = va + vb + air; mix[1][i] = 0.9 * (va + vb + air);
+    a[0][i] = va * 0.97; a[1][i] = 0.9 * va * 0.97;
+    b[0][i] = vb; b[1][i] = 0.9 * vb;
+  }
+  const report = applyMixtureConsistency(mix, [a, b], 512);
+  assert.ok(report.residualDbBefore > -40 && report.residualDbBefore < -10);
+  assert.ok(report.residualDbAfter < -100, `residual after ${report.residualDbAfter}`);
+  let maxStep = 0;
+  for (let i = 1; i < n; i += 1) {
+    const d = Math.abs((a[0][i] - 0.5 * 0.97 * Math.sin(i * 0.01)) - (a[0][i - 1] - 0.5 * 0.97 * Math.sin((i - 1) * 0.01)));
+    maxStep = Math.max(maxStep, d);
+  }
+  assert.ok(maxStep < 0.05, `correction must be smooth, step ${maxStep}`);
+});
+
+test('Shift augmentation realigns and averages the shifted pass', () => {
+  const seg = 100;
+  const shift = 10;
+  const input = new Float32Array(2 * seg).map((_, i) => i % seg);
+  const shifted = buildShiftedDemucsInput(input, seg, shift);
+  assert.equal(shifted[shift], 0);
+  assert.equal(shifted[shift + 5], 5);
+  assert.equal(shifted[seg + shift + 7], 7);
+  // Identity "model": output = input for one stem.
+  const avg = averageShiftedDemucsOutput(input, shifted, 1, seg, shift);
+  for (let i = 0; i < seg; i += 1) assert.equal(avg[i], i);
+  const plain = new Float32Array(2 * seg).fill(1);
+  const other = new Float32Array(2 * seg).fill(3);
+  const mixed = averageShiftedDemucsOutput(plain, other, 1, seg, shift);
+  assert.equal(mixed[0], 2);
+  assert.equal(mixed[seg - 1], 1, 'uncovered tail keeps the plain estimate');
 });

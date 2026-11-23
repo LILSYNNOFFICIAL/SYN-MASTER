@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, AudioLines, FileAudio, Layers3, Loader2, Plus, ScanSearch, Sparkles, Trash2, X } from 'lucide-react';
 import { resampleStereoChannels, separateWithDemucs, type StemSeparationProgress } from '../services/stemSeparation';
 import { createProcessorModule } from '../dsp/chainValidation';
+import { applyMixtureConsistency } from '../dsp/stemSeparationMath';
 import { renderStemBusMix, type StemBusMixResult } from '../dsp/stemBusRenderer';
 import { analyzeAudioBuffer } from '../dsp/analyzer';
 import type { ProcessorModule, ProcessorType, ParametricEQParams, CompressorParams, MasterFinalReport, DirectorOperatingMode, MasteringObjectiveId, AudioAnalysis } from '../types/mastering';
@@ -67,6 +68,8 @@ export const StemIntelligencePanel: React.FC = () => {
   const [referenceTrack, setReferenceTrack] = useState<{ name: string; analysis: AudioAnalysis } | null>(null);
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [separating, setSeparating] = useState(false);
+  const [separationHighQuality, setSeparationHighQuality] = useState(false);
+  const [separationReport, setSeparationReport] = useState<string | null>(null);
   const [separationProgress, setSeparationProgress] = useState<StemSeparationProgress | null>(null);
   const separationAbortRef = useRef<AbortController | null>(null);
   const directorStopRef = useRef(false);
@@ -125,6 +128,7 @@ export const StemIntelligencePanel: React.FC = () => {
     setSeparating(true);
     setSeparationProgress({ stage: 'loading-model', progress: 0 });
     setError(null);
+    setSeparationReport(null);
 
     try {
       if (file.size > 512 * 1024 * 1024) {
@@ -177,6 +181,7 @@ export const StemIntelligencePanel: React.FC = () => {
         [resampled.getChannelData(0).slice(), resampled.getChannelData(1).slice()],
         controller.signal,
         setSeparationProgress,
+        { highQuality: separationHighQuality },
       );
       const baseName = file.name.replace(/\.[^.]+$/, '');
       const imported: LoadedStem[] = [];
@@ -203,6 +208,24 @@ export const StemIntelligencePanel: React.FC = () => {
           offsetSamples: 0,
         });
       }
+      // Mixture consistency at the session rate: the four stems must sum back to the
+      // original mix, including content the 44.1 kHz model never saw (above ~20 kHz).
+      const originalAtSession: [Float32Array, Float32Array] = decoded.sampleRate === sessionSampleRate
+        ? [decoded.getChannelData(0).slice(), (decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : decoded.getChannelData(0)).slice()]
+        : await resampleStereoChannels(
+            [decoded.getChannelData(0).slice(), (decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : decoded.getChannelData(0)).slice()],
+            decoded.sampleRate,
+            sessionSampleRate,
+          );
+      const alignedLength = Math.min(originalAtSession[0].length, ...imported.map((stem) => stem.channels[0].length));
+      const trim = (pair: [Float32Array, Float32Array]): [Float32Array, Float32Array] =>
+        pair[0].length === alignedLength ? pair : [pair[0].slice(0, alignedLength), pair[1].slice(0, alignedLength)];
+      for (const stem of imported) stem.channels = trim(stem.channels as [Float32Array, Float32Array]);
+      const consistency = applyMixtureConsistency(trim(originalAtSession), imported.map((stem) => stem.channels as [Float32Array, Float32Array]));
+      setSeparationReport(
+        `${separationHighQuality ? 'High Quality (2 passes)' : 'Standard'} separation. Stems now sum back to the original mix; ` +
+        `the model left a ${consistency.residualDbBefore.toFixed(1)} dB residual, shared out by each stem's local energy.`,
+      );
       setAnalysis(null);
       setProcessedMix(null);
       setDirectorReport(null);
@@ -469,6 +492,14 @@ export const StemIntelligencePanel: React.FC = () => {
             />
           </label>
         </div>
+        <label className="mt-3 flex items-center gap-2 text-xs text-[#E8D9AF]">
+          <input type="checkbox" checked={separationHighQuality} disabled={separating}
+            onChange={(e) => setSeparationHighQuality(e.target.checked)} className="accent-[#D4AF37]" />
+          High Quality: two passes with a 0.5 s shift, averaged (cleaner stems, about 2x slower)
+        </label>
+        {separationReport && !separating && (
+          <p className="mt-2 rounded border border-[#5A4519] bg-[#100D06] p-2 text-[11px] text-[#E8D9AF]">{separationReport}</p>
+        )}
         <p className="mt-3 text-[11px] leading-relaxed text-[#A1A1AA]">
           HT-Demucs ONNX single-model · Drums, Bass, Other, Vocals · 44.1 kHz model audio, resampled to the current session rate. Inference runs locally in this browser tab. Chunk overlap and completed stem data are streamed to temporary OPFS disk files instead of allocating four full-length worker output buffers. The four stems are then loaded into Stem Studio for editing, so final working RAM still depends on device capacity. Temporary files are removed after import. The model downloads from Hugging Face on first use (about 166 MB) and is cached locally when browser storage permits. This is the standard single-model variant, not the larger HT-Demucs FT ensemble. Your audio is not uploaded.
         </p>

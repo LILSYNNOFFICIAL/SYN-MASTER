@@ -3,6 +3,9 @@ import * as ort from 'onnxruntime-web/webgpu';
 import { fixOnnxFloat64 } from '../dsp/onnxFloat64Fix';
 import {
   accumulateDemucsChunk,
+  averageShiftedDemucsOutput,
+  buildShiftedDemucsInput,
+  DEMUCS_SHIFT_SAMPLES,
   accumulateDemucsWeights,
   createDemucsChunkWindow,
   DEMUCS_OVERLAP_SAMPLES,
@@ -17,7 +20,7 @@ import {
 const MODEL_URL = 'https://huggingface.co/StemSplitio/htdemucs-onnx/resolve/d54ed9eb60e258ea82131c6ee14578628816456a/htdemucs_fp16weights.onnx';
 const MODEL_SHA256 = 'd05c269d0178d2a72ad484b10b11dd370193fc923201c3b27a99f848745db70a';
 
-type StartMessage = { type: 'start'; jobId: string; channels: [Float32Array, Float32Array] };
+type StartMessage = { type: 'start'; jobId: string; channels: [Float32Array, Float32Array]; shifts?: 1 | 2 };
 type CancelMessage = { type: 'cancel'; jobId: string };
 type WorkerRequest = StartMessage | CancelMessage;
 type WorkerResponse =
@@ -157,6 +160,7 @@ async function runChunks(
   channels: [Float32Array, Float32Array],
   jobId: string,
   provider: string,
+  shifts: 1 | 2 = 1,
 ): Promise<{ directoryName: string; stems: Array<{ id: string; label: string; length: number; leftFile: string; rightFile: string }> }> {
   const totalSamples = channels[0].length;
   const chunkCount = getDemucsChunkCount(totalSamples);
@@ -212,6 +216,10 @@ async function runChunks(
       if (cancelledJobs.has(jobId)) throw new DOMException('Separation cancelled.', 'AbortError');
 
       const tensor = result[outputName];
+      const validTensor = (t: ort.Tensor | undefined): t is ort.Tensor & { data: Float32Array } => Boolean(
+        t && t.dims.length === 4 && t.dims[0] === 1 && t.dims[1] === DEMUCS_STEM_ROWS.length &&
+        t.dims[2] === 2 && t.dims[3] === DEMUCS_SEGMENT_SAMPLES && t.data instanceof Float32Array,
+      );
       if (!tensor || tensor.dims.length !== 4 ||
           tensor.dims[0] !== 1 || tensor.dims[1] !== DEMUCS_STEM_ROWS.length ||
           tensor.dims[2] !== 2 || tensor.dims[3] !== DEMUCS_SEGMENT_SAMPLES ||
@@ -231,7 +239,17 @@ async function runChunks(
         windowCache.set(windowKey, window);
       }
 
-      const data = tensor.data;
+      let data = tensor.data as Float32Array;
+      if (shifts === 2) {
+        // High Quality: second inference on the chunk delayed by 0.5 s, realigned and averaged.
+        const shiftedResult = await session.run({
+          [inputName]: new ort.Tensor('float32', buildShiftedDemucsInput(input, DEMUCS_SEGMENT_SAMPLES, DEMUCS_SHIFT_SAMPLES), [1, 2, DEMUCS_SEGMENT_SAMPLES]),
+        });
+        if (cancelledJobs.has(jobId)) throw new DOMException('Separation cancelled.', 'AbortError');
+        const shiftedTensor = shiftedResult[outputName];
+        if (!validTensor(shiftedTensor)) throw new Error('The Demucs model returned an unsupported tensor layout on the shifted pass.');
+        data = averageShiftedDemucsOutput(data, shiftedTensor.data, DEMUCS_STEM_ROWS.length, DEMUCS_SEGMENT_SAMPLES, DEMUCS_SHIFT_SAMPLES);
+      }
       const rowSize = 2 * DEMUCS_SEGMENT_SAMPLES;
       for (let stemIndex = 0; stemIndex < DEMUCS_STEM_ROWS.length; stemIndex += 1) {
         const rowOffset = stemIndex * rowSize;
@@ -292,6 +310,7 @@ async function runChunks(
 
 async function separate(job: StartMessage): Promise<void> {
   const { jobId, channels } = job;
+  const shifts: 1 | 2 = job.shifts === 2 ? 2 : 1;
   let session: ort.InferenceSession | null = null;
   const fetchController = new AbortController();
   modelFetchControllers.set(jobId, fetchController);
@@ -316,7 +335,7 @@ async function separate(job: StartMessage): Promise<void> {
 
     let stems;
     try {
-      stems = await runChunks(session, channels, jobId, created.provider);
+      stems = await runChunks(session, channels, jobId, created.provider, shifts);
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
       if (created.provider === 'WASM') throw cause;
@@ -326,7 +345,7 @@ async function separate(job: StartMessage): Promise<void> {
       post({ type: 'progress', jobId, stage: 'initializing', progress: 0 });
       created = await createSession(modelBytes, false);
       session = created.session;
-      stems = await runChunks(session, channels, jobId, created.provider);
+      stems = await runChunks(session, channels, jobId, created.provider, shifts);
     }
 
     if (cancelledJobs.has(jobId)) {
