@@ -2158,7 +2158,9 @@ export async function runAutonomousDirectorLoop(
       (finding) => finding.kind === 'technical-problem',
     );
     const baselineTechnicalIds = new Set(baselineTechnicalFindings.map((finding) => finding.id));
-    const baselineTechnicalById = new Map(baselineTechnicalFindings.map((finding) => [finding.id, finding]));
+    const baselineTechnicalById = new Map<string, (typeof baselineTechnicalFindings)[number]>(
+      baselineTechnicalFindings.map((finding) => [finding.id, finding] as const),
+    );
     const introducedTechnicalFindings = postDiagnosis.findings.filter(
       (finding) => finding.kind === 'technical-problem' && !baselineTechnicalIds.has(finding.id),
     );
