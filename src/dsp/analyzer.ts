@@ -296,7 +296,12 @@ export function analyzeAudioBuffer(
 
   // 2. Stereo Correlation & Width
   const denom = Math.sqrt(sumSqL * sumSqR);
-  const phaseCorrelation = denom > 1e-12 ? Math.max(-1, Math.min(1, sumProd / denom)) : 1;
+  const phaseCorrelation =
+    sumSqL < 1e-12 && sumSqR < 1e-12
+      ? 1
+      : sumSqL < 1e-12 || sumSqR < 1e-12
+        ? 0
+        : Math.max(-1, Math.min(1, sumProd / denom));
   const midRms = Math.sqrt(sumMidSq / Math.max(1, length));
   const sideRms = Math.sqrt(sumSideSq / Math.max(1, length));
   const midSideRatioDb = linearToDb(midRms) - linearToDb(Math.max(sideRms, 1e-7));
@@ -322,7 +327,12 @@ export function analyzeAudioBuffer(
     lpProd += lVal * rVal;
   }
   const lpDenom = Math.sqrt(lpSqL * lpSqR);
-  const lowEndCorrelation = lpDenom > 1e-12 ? Math.max(-1, Math.min(1, lpProd / lpDenom)) : 1;
+  const lowEndCorrelation =
+    lpSqL < 1e-12 && lpSqR < 1e-12
+      ? 1
+      : lpSqL < 1e-12 || lpSqR < 1e-12
+        ? 0
+        : Math.max(-1, Math.min(1, lpProd / lpDenom));
   // Frequency-localized correlation catches cancellation hidden by whole-program averages.
   // Boundaries match the default Stereo Imager crossovers so a flagged band maps to
   // the processor control that can actually correct it.
