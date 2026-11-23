@@ -1440,7 +1440,7 @@ export function deriveRefinementCommands(
         monoBassBelowHz: number;
         lrBalanceDb: number;
       };
-      const imagerIntensityScale = Math.max(0.15, Math.min(1, imgMod.wetDry));
+      const imagerIntensityScale = Math.max(0.15, Math.min(1, imgMod.intensity / 100));
       const correctedLrBalance = Math.max(
         -6,
         Math.min(6, ip.lrBalanceDb - (post.lrBalanceDb * 0.9) / imagerIntensityScale),
