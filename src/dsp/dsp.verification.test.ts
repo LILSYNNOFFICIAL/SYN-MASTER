@@ -418,13 +418,6 @@ test('Dynamic EQ attack and release controls shape transient response and recove
   const slowAttack = processChainOffline([left, right], SR, [makeDynamicEq(80, 20)]);
   const fastRelease = processChainOffline([left, right], SR, [makeDynamicEq(2, 20)]);
   const slowRelease = processChainOffline([left, right], SR, [makeDynamicEq(2, 400)]);
-  const peak = (samples: Float32Array, start: number, end: number) => {
-    let value = 0;
-    for (let i = Math.floor(start * SR); i < Math.floor(end * SR); i++) {
-      value = Math.max(value, Math.abs(samples[i]));
-    }
-    return value;
-  };
   const rmsWindow = (samples: Float32Array, start: number, end: number) => {
     let sum = 0;
     const first = Math.floor(start * SR);
