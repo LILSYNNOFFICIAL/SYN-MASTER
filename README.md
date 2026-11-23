@@ -132,7 +132,7 @@ This section is the active implementation queue and progress ledger. Update it i
 
 ### Execution order
 
-- [ ] **P0-1: Unify sub-bass excess reporting, correction, and objective verification.** The source finding trigger (> +2 dB) and delivered-render target (≤ 0 dB) share one measured Sub (20-60 Hz) minus Bass (60-250 Hz) gate. The director now selects a 1/3-octave-smoothed correction centre from the measured 20-60 Hz spectrum and applies a bounded bell cut there, rather than relying on a fixed 45 Hz shelf that can hit its gain limit without reaching the gate. Positive Bass Enhancer sub gain is still removed and every pass is re-measured. Regression coverage and CI are pending; owner-track rendered-output and Android/browser verification remain separate gates.
+- [x] **P0-1: Unify sub-bass excess reporting, correction, and objective verification.** The source finding trigger (> +2 dB) and delivered-render target (≤ 0 dB) share one measured Sub (20-60 Hz) minus Bass (60-250 Hz) gate. The director selects a 1/3-octave-smoothed correction centre from the measured 20-60 Hz spectrum and applies a bounded bell cut there, rather than relying on a fixed 45 Hz shelf that can hit its gain limit without reaching the gate. Positive Bass Enhancer sub gain is removed and every pass is re-measured. Regression coverage, unit tests, TypeScript, production build, and Node 22 startup smoke test passed CI run 45283310903. An owner-provided source track independently reproduced the reported +5.3 dB baseline; the rendered output and Android/browser listening check remain pending.
 - [ ] **P0-2: Bound offline-render memory and CPU on long tracks/mobile browsers.** Implemented: reusable wet/dry snapshots; chunked 8192-sample multiband scratch; streaming analyzer K-weight/LR correlation with bounded 400 ms energy ring; and in-place lookahead limiting that removes the full-track driven stereo copies. True-peak interpolation applies drive scaling with Float32-equivalent rounding and maintains a nine-sample minimum source guard so the in-place cursor never corrupts future interpolation windows. Regression tests for these paths passed CI run 45281206214. Remaining: profile complete worker/session peak memory on a long track and verify Android Chrome stability before marking complete.
 - [x] **P1-1: Align objective and QC loudness tolerances.** The final gate now uses the same `objective.lufsTolerance` carried by each objective instead of a fixed 0.65 LU tolerance. Boundary regression tests passed CI run 45279307130.
 - [ ] **P1-2: Review click acceptance policy.** The current relative allowance can retain 25% of source clicks. Do not impose a new absolute cap until calibrated against real tracks and the existing source-transient false-positive protections.
@@ -173,8 +173,8 @@ This section is the active implementation queue and progress ledger. Update it i
 
 - [x] **test: verify production npm start on Node 22** — [`902735de`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/902735defd60a76ef0e9d2595fe46bb70ac412c4); Node 22.23.5 production startup, `/api/health`, and root-page smoke test passed in CI run 45282058467.
 
-- [ ] **fix: target the measured sub-bass peak** — [`0b872bf1`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/0b872bf10d91a0d4184bf495401f9d8034a4964f); replace the fixed 45 Hz shelf with a spectrum-centered bell; regression coverage and CI pending.
-- [ ] **fix: tighten sub-bass repair regression coverage** — [`ead907fe`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/ead907feb08a152b59f9a7cb5b34c4cbfe3f2c7d); preserve the `deriveRefinementCommands` documentation placement, align the EQ rationale with the actual adaptive band, and assert migration of legacy shelf controls to the measured bell. CI pending.
+- [x] **fix: target the measured sub-bass peak** — [`0b872bf1`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/0b872bf10d91a0d4184bf495401f9d8034a4964f); replace the fixed 45 Hz shelf with a spectrum-centered bell; final regression coverage and CI verified in the follow-up commit below.
+- [x] **fix: tighten sub-bass repair regression coverage** — [`ead907fe`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/ead907feb08a152b59f9a7cb5b34c4cbfe3f2c7d); preserve `deriveRefinementCommands` documentation placement, align the EQ rationale with the adaptive band, and assert migration of legacy shelf controls to the measured bell. CI run 45283310903 passed unit tests, TypeScript, production build, and startup smoke test.
 
 # Reference: existing capabilities and setup
 
@@ -343,3 +343,5 @@ The live `/api/health` response only verifies configuration presence, not full A
 - A shared rate limiter is still needed if the service is later scaled across multiple server instances.
 - Avoid logging request bodies, audio, or credentials.
 
+
+- [ ] **docs: record sub-bass repair CI pass** — this commit; close P0-1 implementation evidence and retain owner-output / Android verification as pending.
