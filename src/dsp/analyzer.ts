@@ -356,8 +356,10 @@ export function analyzeAudioBuffer(
       bb += b[i] * b[i];
       ab += a[i] * b[i];
     }
+    if (aa < 1e-12 && bb < 1e-12) return 1;
+    if (aa < 1e-12 || bb < 1e-12) return 0;
     const d = Math.sqrt(aa * bb);
-    return d > 1e-12 ? Math.max(-1, Math.min(1, ab / d)) : 1;
+    return d > 1e-12 ? Math.max(-1, Math.min(1, ab / d)) : 0;
   };
   const stereoBandCorrelation = {
     low: Number(measureCorrelation(lowBandL, lowBandR).toFixed(3)),
