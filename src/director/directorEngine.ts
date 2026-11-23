@@ -1483,16 +1483,29 @@ export function deriveRefinementCommands(
   // 5. Distortion Control
   const distCheck = qcReport.checks.find((c) => c.id === 'qc-distortion');
   if (distCheck && distCheck.status !== 'pass' && satMod && !satMod.bypassed) {
-    const sp = satMod.params as { drive: number };
-    const nextDrive = Math.max(4, Math.round(sp.drive * 0.55));
-    commands.push({
-      op: 'configure',
-      targetId: satMod.id,
-      processorType: 'saturation',
-      paramsPatch: { drive: nextDrive },
-      rationale: `Back off Saturation drive (${sp.drive}% -> ${nextDrive}%) to reduce THD (${post.thdEstimatePercent.toFixed(2)}%).`,
-    });
-    reasons.push(`Reduce saturation drive to ${nextDrive}%`);
+    const maxAllowedThd =
+      objective.saturationAllowance === 'rich' ? 2.5 :
+      objective.saturationAllowance === 'moderate' ? 1.8 : 1.0;
+    if (post.thdEstimatePercent > maxAllowedThd + 0.5) {
+      commands.push({
+        op: 'remove',
+        targetId: satMod.id,
+        processorType: 'saturation',
+        rationale: `Remove optional saturation stage because rendered THD (${post.thdEstimatePercent.toFixed(2)}%) exceeds the ${maxAllowedThd.toFixed(1)}% objective allowance; retain independent corrective stages.`,
+      });
+      reasons.push('Remove optional saturation stage that exceeds the objective distortion allowance');
+    } else {
+      const sp = satMod.params as { drive: number };
+      const nextDrive = Math.max(4, Math.round(sp.drive * 0.55));
+      commands.push({
+        op: 'configure',
+        targetId: satMod.id,
+        processorType: 'saturation',
+        paramsPatch: { drive: nextDrive },
+        rationale: `Back off Saturation drive (${sp.drive}% -> ${nextDrive}%) to reduce THD (${post.thdEstimatePercent.toFixed(2)}%).`,
+      });
+      reasons.push(`Reduce saturation drive to ${nextDrive}%`);
+    }
   }
 
   // 6. Noise Floor / DC Remediation
