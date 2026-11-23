@@ -140,7 +140,7 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **P1-4: Make FFmpeg-dependent tests portable.** The export integration test probes FFmpeg and ffprobe once and skips with an explicit reason only when either is absent. CI continues installing both tools and exercising the integration test. CI run 45280105660 passed.
 - [x] **P1-5: Discover tests automatically.** `npm test` now passes recursive `src/**/*.test.ts` and `src/**/*.test.mjs` patterns to the Node test runner instead of maintaining a manual file list. CI run 45280105660 passed.
 - [x] **P1-6: Enable TypeScript strictness incrementally.** Stage 1: `strict: true` enabled without `noUncheckedIndexedAccess`. Node 22 CI run 45281813691 passed unit tests, TypeScript, and production build with no type corrections or suppressions required. Keep `noUncheckedIndexedAccess` as a separate later stage.
-- [ ] **P1-7: Verify the `npm start` runtime path.** The web CI now runs the production build, starts the app through the exact `npm start` command on Node 22, and checks both `/api/health` and the production root page. Keep open until this new smoke test passes; `npm run dev` remains `tsx server.ts`.
+- [x] **P1-7: Verify the `npm start` runtime path.** The production smoke test starts the built app through the exact `npm start` command on Node 22.23.5, then verifies `/api/health` and the production root page. CI run 45282058467 passed unit tests, TypeScript, production build, and startup smoke test. No change to the startup command was needed; `npm run dev` remains `tsx server.ts`.
 - [ ] **P2: Defer broad App/director refactors, lint/format toolchain additions, native cross-platform work, and cosmetic repository cleanup** until mastering correctness and mobile resource use have regression coverage.
 
 ### Commit policy and implementation ledger
@@ -171,7 +171,7 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **build: enable TypeScript strict mode** — [`17a6f21d`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/17a6f21dfd4c4a89122f7ca42f0e1325a8846b3d); enabled `strict: true` only. Node 22 CI run 45281813691 passed unit tests, TypeScript, and production build.
 - [x] **docs: record strict TypeScript CI evidence** — [`e8807b6f`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/e8807b6f7e7ddc9f4796d1844daa62d6c56d23a7); P1-6 updated with Node 22 CI run 45281813691.
 
-- [ ] **test: verify production npm start on Node 22** — this commit; CI smoke test pending.
+- [x] **test: verify production npm start on Node 22** — [`902735de`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/902735defd60a76ef0e9d2595fe46bb70ac412c4); Node 22.23.5 production startup, `/api/health`, and root-page smoke test passed in CI run 45282058467.
 
 # Reference: existing capabilities and setup
 
