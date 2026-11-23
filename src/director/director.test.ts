@@ -713,3 +713,31 @@ test('Reference alignment score is invariant to uniform reference gain while lou
     'Reference loudness must not change the objective loudness compliance score',
   );
 });
+
+
+test('Explainable plan does not insert dynamic EQ for a coherent harmonic instrument series', () => {
+  const n = Math.floor(SR * 2);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  let seed = 19;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    let pitched = 0;
+    for (let harmonic = 1; harmonic <= 9; harmonic++) {
+      pitched += (0.20 / Math.pow(harmonic, 1.1)) *
+        Math.sin(2 * Math.PI * 196 * harmonic * t);
+    }
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const noise = ((seed / 4294967296) * 2 - 1) * 0.004;
+    left[i] = pitched + noise;
+    right[i] = pitched * 0.98 + noise;
+  }
+
+  const analysis = analyzeAudioBuffer([left, right], SR);
+  const plan = buildExplainableMasterPlan({ analysis, objectiveId: 'streaming' });
+  assert.equal(
+    plan.chain.some((module) => module.type === 'dynamic-eq'),
+    false,
+    'Harmonic instrument partials alone must not trigger dynamic resonance cuts',
+  );
+});
