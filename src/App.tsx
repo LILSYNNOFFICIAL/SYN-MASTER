@@ -116,6 +116,7 @@ import { ExportModal, SettingsModal } from './components/Modals';
 import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 import { ImportScreen } from './components/studio/ImportScreen';
 import { FixItStage } from './components/studio/FixItStage';
+import { FxRackWindow } from './components/studio/FxRackWindow';
 import { applyFades, hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
 import { buildDiagnosticLog } from './director/diagnosticLog';
@@ -2913,6 +2914,22 @@ export default function App() {
       />
 
       {/* Export & Settings Modals */}
+      <FxRackWindow
+        open={rackWindowOpen && Boolean(activeTrack)}
+        onClose={() => setRackWindowOpen(false)}
+        chain={chain}
+        chainBypassed={chainBypassed}
+        telemetry={stageTelemetry}
+        onChangeChain={(next) => {
+          updateChainWithHistory(next);
+          recordCorrection('FX Rack Edit', next, { coalesceManual: true });
+        }}
+        onToggleChainBypass={handleToggleChainBypass}
+        onAiSetAll={() => { setOperatingMode('autonomous'); void handleRunMasterDirector(true); }}
+        aiRunning={directorRunning}
+        sampleRate={activeTrack?.sampleRate ?? 48000}
+        spectrum={postAnalysisState.status === 'ready' ? postAnalysis : activeTrack?.analysis ?? null}
+      />
       <ExportModal
         open={exportModalOpen}
         config={exportConfig}

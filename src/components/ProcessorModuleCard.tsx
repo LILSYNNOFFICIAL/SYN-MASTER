@@ -1085,6 +1085,50 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                     onChange={(v) => setParam<RestoreParams>({ resonanceSuppress: v })}
                   />
                 </div>
+                <div className="p-2.5 rounded bg-[#10131B] border border-[#222634] flex flex-col gap-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#F2CA52]">AI-Audio Repair</div>
+                  <ToggleSwitch
+                    label="Transient Spike Repair"
+                    compact
+                    checked={Boolean(p.spikeRepair)}
+                    onChange={(checked) => setParam<RestoreParams>({ spikeRepair: checked })}
+                  />
+                  <div className="grid grid-cols-3 gap-x-2 gap-y-3">
+                    <RotaryKnob
+                      label="De-Click"
+                      value={p.declick ?? 0}
+                      min={0}
+                      max={100}
+                      step={1}
+                      defaultValue={0}
+                      unit="%"
+                      size="sm"
+                      onChange={(v) => setParam<RestoreParams>({ declick: v })}
+                    />
+                    <RotaryKnob
+                      label="De-Crackle"
+                      value={p.decrackle ?? 0}
+                      min={0}
+                      max={100}
+                      step={1}
+                      defaultValue={0}
+                      unit="%"
+                      size="sm"
+                      onChange={(v) => setParam<RestoreParams>({ decrackle: v })}
+                    />
+                    <RotaryKnob
+                      label="De-Shimmer"
+                      value={p.deShimmer ?? 0}
+                      min={0}
+                      max={100}
+                      step={1}
+                      defaultValue={0}
+                      unit="%"
+                      size="sm"
+                      onChange={(v) => setParam<RestoreParams>({ deShimmer: v })}
+                    />
+                  </div>
+                </div>
               </div>
             );
           })()}

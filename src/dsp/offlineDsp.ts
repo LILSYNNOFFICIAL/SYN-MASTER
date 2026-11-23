@@ -61,7 +61,7 @@ function measurePeakDb(l: Float32Array, r: Float32Array): number {
   return Number(linearToDb(max).toFixed(2));
 }
 
-function designEQBand(band: EQBand, sampleRate: number, intensityScale: number): BiquadCoeffs {
+export function designEQBand(band: EQBand, sampleRate: number, intensityScale: number): BiquadCoeffs {
   const scaledGain = band.gain * intensityScale;
   switch (band.shape) {
     case 'highpass':

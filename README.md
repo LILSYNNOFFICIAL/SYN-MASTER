@@ -62,8 +62,8 @@ Priority order. Tick as done; note open problems inline.
 - [x] De-click / de-crackle / transient spike repair (`src/dsp/repair.ts`, detector `src/dsp/clickDetect.ts`, exposed as SYN-Restore params `declick`, `decrackle`, `spikeRepair`)
 - [x] AI-shimmer / metallic artifact reduction (SYN-Restore `deShimmer`, dynamic 9 kHz+ band reduction weighted to the side channel)
 - [ ] New black + gold layout and CSS
-- [ ] Floating draggable/resizable FX rack window with reorder, bypass and add/remove dropdown
-- [ ] FL-style parametric EQ (spectrum, draggable nodes, band types)
+- [x] Floating draggable/resizable FX rack window with reorder (drag or arrows), bypass, duplicate, remove and a categorized "Add module" dropdown (`FxRackWindow.tsx`, `FloatingWindow.tsx`, `moduleCatalog.ts`)
+- [x] FL-style parametric EQ (spectrum, coloured draggable nodes, wheel = Q, 6 band types, up to 8 bands) in `ParametricEQ2.tsx`, shown when an EQ slot is expanded in the FX rack
 - [ ] Dynamics modules with knobs (compressor, multiband, limiter/maximizer, clipper, transient shaper, de-esser, dynamic EQ)
 - [x] Draggable fade-in / fade-out lines on the waveform (gold corner handles; S-curve/linear/exponential; applied to every render and the export via `src/dsp/fades.ts`)
 - [ ] Maximus-style multiband maximizer

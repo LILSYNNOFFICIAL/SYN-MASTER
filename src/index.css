@@ -284,3 +284,66 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 .syn2-raw { max-height: 360px; overflow:auto; margin:0; padding:10px; border-radius:8px; background:#070604; border:1px solid var(--s2-line); font: 500 10.5px/1.5 var(--syn-font-mono); color:#D7C7A0; white-space: pre-wrap; }
 .syn2-panel-foot { display:flex; align-items:center; gap:6px; font-size:10.5px; color: var(--s2-dim); }
 @media (prefers-reduced-motion: reduce) { .syn2-fix-btn { animation: none; } }
+
+/* ---------- Floating windows ---------- */
+.syn2-float { position: fixed; z-index: 120; display:flex; flex-direction:column; border-radius: 14px; overflow:hidden;
+  background: linear-gradient(180deg, #16120A, #0A0805); border:1px solid var(--s2-line-strong);
+  box-shadow: 0 30px 90px rgba(0,0,0,.75), 0 0 0 1px rgba(255,224,138,.05) inset; }
+.syn2-float-head { display:flex; align-items:center; gap:8px; padding:8px 10px; cursor: move; user-select:none; touch-action:none;
+  background: linear-gradient(180deg, #2A210C, #17120A); border-bottom:1px solid var(--s2-line-strong); }
+.syn2-float-grip { color: var(--s2-gold-lo); font-size: 12px; letter-spacing: -2px; }
+.syn2-float-title { flex:1; min-width:0; font: 800 12px var(--syn-font-display); letter-spacing:.12em; text-transform:uppercase; color: var(--s2-gold-hi); }
+.syn2-float-sub { margin-left: 8px; font: 600 10px var(--syn-font-mono); letter-spacing:.04em; text-transform:none; color: var(--s2-dim); font-style: normal; }
+.syn2-float-head button { width:26px; height:26px; display:grid; place-items:center; border-radius:7px; border:1px solid var(--s2-line); background:#100D07; color: var(--s2-gold); }
+.syn2-float-head button:hover { border-color: var(--s2-gold); color: var(--s2-gold-hi); }
+.syn2-float-body { flex:1; min-height:0; overflow:auto; padding:10px; display:flex; flex-direction:column; gap:10px; }
+.syn2-float-resize { position:absolute; right:0; bottom:0; width:18px; height:18px; cursor: nwse-resize; touch-action:none;
+  background: linear-gradient(135deg, transparent 50%, var(--s2-gold) 50%, var(--s2-gold) 60%, transparent 60%, transparent 70%, var(--s2-gold) 70%, var(--s2-gold) 80%, transparent 80%); }
+.syn2-float-edge-r { position:absolute; top:40px; right:0; bottom:18px; width:6px; cursor: ew-resize; touch-action:none; }
+.syn2-float-edge-b { position:absolute; left:0; right:18px; bottom:0; height:6px; cursor: ns-resize; touch-action:none; }
+
+/* ---------- FX rack ---------- */
+.syn2-rack-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.syn2-btn-ghost.is-warn { border-color: #E8A33A; color: #FFCE7A; }
+.syn2-rack-empty { padding: 18px; text-align:center; color: var(--s2-dim); font-size:12px; border:1px dashed var(--s2-line-strong); border-radius:10px; }
+.syn2-rack-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.syn2-slot { border-radius:10px; border:1px solid var(--s2-line); background: linear-gradient(180deg, #14100A, #0C0A06); transition: border-color .12s ease, transform .12s ease; }
+.syn2-slot.is-off { opacity:.62; }
+.syn2-slot.is-over { border-color: var(--s2-gold); transform: translateY(2px); box-shadow: 0 -2px 0 var(--s2-gold) inset; }
+.syn2-slot-row { display:flex; align-items:center; gap:8px; padding:6px 8px; }
+.syn2-slot-grip { cursor: grab; color: var(--s2-gold-lo); display:grid; place-items:center; }
+.syn2-slot-num { width:18px; text-align:center; font: 700 10px var(--syn-font-mono); color: var(--s2-dim); }
+.syn2-slot-badge { min-width:38px; text-align:center; padding:2px 5px; border-radius:6px; font: 800 9px var(--syn-font-mono); letter-spacing:.1em; color:#0A0804; background: var(--s2-grad); }
+.syn2-slot.is-off .syn2-slot-badge { background:#3A2F17; color: var(--s2-dim); }
+.syn2-slot-name { flex:1; min-width:0; display:flex; align-items:center; gap:4px; border:0; background:transparent; color: var(--s2-text); font: 700 12.5px var(--syn-font-display); text-align:left; }
+.syn2-slot-meter { font: 600 10px var(--syn-font-mono); color: #FFB37A; min-width: 52px; text-align:right; }
+.syn2-slot-actions { display:flex; gap:3px; }
+.syn2-slot-actions button { width:24px; height:24px; display:grid; place-items:center; border-radius:6px; border:1px solid var(--s2-line); background:#0E0B06; color: var(--s2-dim); font-size:9px; }
+.syn2-slot-actions button:hover:not(:disabled) { color: var(--s2-gold-hi); border-color: var(--s2-gold); }
+.syn2-slot-actions button:disabled { opacity:.3; }
+.syn2-slot-power.is-on { color:#0A0804 !important; background: var(--s2-grad) !important; border-color: transparent !important; }
+.syn2-slot-body { padding: 0 8px 8px; display:flex; flex-direction:column; gap:8px; }
+.syn2-addmenu { position:relative; }
+.syn2-addmenu-pop { position:absolute; z-index: 5; top: calc(100% + 6px); left:0; width: 340px; max-height: 420px; overflow:auto; padding:6px; border-radius:12px;
+  background:#0F0C07; border:1px solid var(--s2-line-strong); box-shadow: 0 24px 60px rgba(0,0,0,.7); }
+.syn2-addmenu-cat { padding: 8px 8px 4px; font: 800 9px var(--syn-font-mono); letter-spacing:.18em; text-transform:uppercase; color: var(--s2-gold); }
+.syn2-addmenu-item { width:100%; display:flex; align-items:flex-start; gap:10px; padding:7px 8px; border:0; border-radius:8px; background:transparent; text-align:left; color: var(--s2-text); }
+.syn2-addmenu-item:hover, .syn2-addmenu-item:focus-visible { background:#221A0A; outline:none; }
+.syn2-addmenu-badge { flex:none; min-width:38px; margin-top:1px; text-align:center; padding:2px 4px; border-radius:6px; font: 800 9px var(--syn-font-mono); color:#0A0804; background: var(--s2-grad); }
+.syn2-addmenu-label { display:block; font: 700 12.5px var(--syn-font-display); }
+.syn2-addmenu-desc { display:block; font-size: 10.5px; color: var(--s2-dim); margin-top: 1px; }
+
+/* ---------- Parametric EQ 2 ---------- */
+.syn2-peq { display:flex; flex-direction:column; gap:6px; padding:8px; border-radius:10px; background:#080604; border:1px solid var(--s2-line); }
+.syn2-peq-svg { width:100%; height: 220px; display:block; border-radius:8px; touch-action:none; cursor: crosshair; }
+.syn2-peq-strip { display:flex; flex-wrap:wrap; gap:4px; }
+.syn2-peq-tab { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:7px; border:1px solid var(--s2-line); background:#0E0B06; color: var(--s2-text); font: 700 11px var(--syn-font-mono); }
+.syn2-peq-tab span { width:8px; height:8px; border-radius:50%; }
+.syn2-peq-tab.is-sel { background:#221A0A; }
+.syn2-peq-tab.is-off { opacity:.45; }
+.syn2-peq-edit { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px; }
+.syn2-peq-field { display:flex; flex-direction:column; gap:2px; font: 700 9px var(--syn-font-mono); letter-spacing:.12em; text-transform:uppercase; color: var(--s2-gold); }
+.syn2-peq-field input[type=number] { width: 84px; } .syn2-peq-field select { width: 118px; } .syn2-peq-field input[type=number], .syn2-peq-field select { background:#14100A; border:1px solid var(--s2-line); color: var(--s2-text); border-radius:6px; padding:.3rem .4rem; font: 600 12px var(--syn-font-mono); text-transform:none; letter-spacing:0; }
+.syn2-peq-del { width:30px; height:30px; display:grid; place-items:center; border-radius:7px; border:1px solid var(--s2-line); background:#0E0B06; color: var(--s2-dim); }
+.syn2-peq-del:hover { color: var(--s2-bad); border-color: var(--s2-bad); }
+.syn2-peq-help { font-size: 10px; color: var(--s2-dim); }
