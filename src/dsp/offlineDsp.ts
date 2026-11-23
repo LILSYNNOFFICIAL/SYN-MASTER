@@ -1273,15 +1273,22 @@ export function processChainOffline(
     (mod.type === 'multiband-comp' || mod.type === 'multiband-maximizer'),
   );
   const multibandScratch = needsMultibandScratch ? createMultibandScratchBuffers(length) : null;
+  const isLimiterModule = (type: ProcessorModule['type']): boolean =>
+    type === 'limiter' || type === 'maximizer' || type === 'multiband-maximizer';
   const needsLimiterScratch = chain.some((mod) =>
-    mod.enabled && !mod.bypassed &&
-    (mod.type === 'limiter' || mod.type === 'maximizer' || mod.type === 'multiband-maximizer'),
+    mod.enabled && !mod.bypassed && isLimiterModule(mod.type),
   );
-  const limiterScratch = needsLimiterScratch
+  // One pair is shared between wet/dry snapshots and limiter input snapshots because
+  // those lifetimes do not overlap. Wet/dry limiter modules need a separate dry pair.
+  const needsSharedScratch = chain.some((mod) =>
+    mod.enabled && !mod.bypassed && (isLimiterModule(mod.type) || mod.wetDry < 99.5),
+  );
+  const sharedScratch = needsSharedScratch
     ? { drivenL: new Float32Array(length), drivenR: new Float32Array(length) }
     : null;
-  let dryScratchL: Float32Array | null = null;
-  let dryScratchR: Float32Array | null = null;
+  const limiterScratch = needsLimiterScratch ? sharedScratch : null;
+  let limiterDryScratchL: Float32Array | null = null;
+  let limiterDryScratchR: Float32Array | null = null;
 
   const telemetry: ProcessorMeterTelemetry[] = [];
 
@@ -1293,11 +1300,23 @@ export function processChainOffline(
     }
 
     const useWetDry = mod.wetDry < 99.5;
+    const moduleUsesLimiterScratch = isLimiterModule(mod.type);
+    let dryL: Float32Array | null = null;
+    let dryR: Float32Array | null = null;
     if (useWetDry) {
-      dryScratchL ??= new Float32Array(length);
-      dryScratchR ??= new Float32Array(length);
-      dryScratchL.set(left);
-      dryScratchR.set(right);
+      if (moduleUsesLimiterScratch) {
+        limiterDryScratchL ??= new Float32Array(length);
+        limiterDryScratchR ??= new Float32Array(length);
+        limiterDryScratchL.set(left);
+        limiterDryScratchR.set(right);
+        dryL = limiterDryScratchL;
+        dryR = limiterDryScratchR;
+      } else if (sharedScratch) {
+        sharedScratch.drivenL.set(left);
+        sharedScratch.drivenR.set(right);
+        dryL = sharedScratch.drivenL;
+        dryR = sharedScratch.drivenR;
+      }
     }
 
     // Input gain stage
@@ -1373,12 +1392,12 @@ export function processChainOffline(
     }
 
     // Wet/Dry parallel blend
-    if (useWetDry && dryScratchL && dryScratchR) {
+    if (useWetDry && dryL && dryR) {
       const wet = Math.max(0, Math.min(1, mod.wetDry / 100));
       const dry = 1 - wet;
       for (let i = 0; i < length; i++) {
-        left[i] = dryScratchL[i] * dry + left[i] * wet;
-        right[i] = dryScratchR[i] * dry + right[i] * wet;
+        left[i] = dryL[i] * dry + left[i] * wet;
+        right[i] = dryR[i] * dry + right[i] * wet;
       }
     }
 
