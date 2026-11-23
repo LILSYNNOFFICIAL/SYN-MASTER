@@ -1231,12 +1231,12 @@ export function processChainOffline(
   const left = new Float32Array(sourceChannels[0]);
   const right = new Float32Array(numCh > 1 ? sourceChannels[1] : sourceChannels[0]);
   const needsMultibandScratch = chain.some((mod) =>
-    mod.enabled && !mod.bypassed && mod.wetDry > 0 && mod.intensity > 0 &&
+    mod.enabled && !mod.bypassed &&
     (mod.type === 'multiband-comp' || mod.type === 'multiband-maximizer'),
   );
   const multibandScratch = needsMultibandScratch ? createMultibandScratchBuffers(length) : null;
   const needsLimiterScratch = chain.some((mod) =>
-    mod.enabled && !mod.bypassed && mod.wetDry > 0 && mod.intensity > 0 &&
+    mod.enabled && !mod.bypassed &&
     (mod.type === 'limiter' || mod.type === 'maximizer' || mod.type === 'multiband-maximizer'),
   );
   const limiterScratch = needsLimiterScratch

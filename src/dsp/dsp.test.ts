@@ -524,3 +524,15 @@ test('Lookahead limiter bounded-window deque matches the previous sample-peak re
   assert.ok(maxDiff <= 1e-7, `Bounded lookahead implementation diverged from reference by ${maxDiff}`);
 });
 
+
+test('Zero-wet multiband and limiter modules still receive their required reusable scratch buffers', () => {
+  const sr = 44100;
+  const [left, right] = makeSineStereo(220, 0.55, 0.15, sr);
+  const zeroWetMultiband = createProcessorModule('multiband-comp', { wetDry: 0 });
+  const zeroWetMultibandMax = createProcessorModule('multiband-maximizer', { wetDry: 0 });
+  const zeroWetLimiter = createProcessorModule('limiter', { wetDry: 0 });
+
+  assert.doesNotThrow(() => processChainOffline([left, right], sr, [zeroWetMultiband]));
+  assert.doesNotThrow(() => processChainOffline([left, right], sr, [zeroWetMultibandMax]));
+  assert.doesNotThrow(() => processChainOffline([left, right], sr, [zeroWetLimiter]));
+});

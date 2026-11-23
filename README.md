@@ -153,7 +153,8 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **fix: gate and repair measured sub-bass excess** — [\`d5160309\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/d5160309ad809103c171b7dbaeac0d62840d8af4); empty/no-file-change commit created during the first write attempt, superseded by the implementation commit below.
 - [x] **fix: gate and repair measured sub-bass excess** — [\`4768096b\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/4768096b2ec6a93d54ff55a137c55c229ebdc457); shared blocking <= 0 dB Sub/Bass gate, one diagnostic status source, iterative low-shelf / Bass Enhancer repair, and regression tests. CI passed (unit tests, TypeScript, production build); real-track and Android verification pending.
 - [x] **docs: record sub-bass verification evidence** — [\`5f7ef415\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/5f7ef415686ad61c052f551a67e71eed4d218e80); CI run 45277463221 passed.
-- [ ] **fix: bound offline DSP scratch memory** — this commit; reuse wet/dry, multiband, and limiter scratch storage; replace full-track limiter analysis arrays with a bounded lookahead deque/ring. Reference-equivalence test added; CI pending.
+- [ ] **fix: bound offline DSP scratch memory** — [\`228eeea4\`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/228eeea486d616c267b971891a4e0a2e9a593db7); reuse wet/dry, multiband, and limiter scratch storage; replace full-track limiter analysis arrays with a bounded lookahead deque/ring. Reference-equivalence test added; CI pending.
+- [ ] **fix: allocate DSP scratch for zero-wet modules** — this commit; allocate required scratch based on enabled module type, not wet/dry or intensity, because the offline chain still executes zero-wet modules before blending their result away. Adds regression coverage.
 
 # Reference: existing capabilities and setup
 
