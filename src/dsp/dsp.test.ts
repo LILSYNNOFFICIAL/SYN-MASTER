@@ -455,3 +455,72 @@ test('Click detector covers the first and last ~3 ms; de-click repairs edge clic
   assert.equal(after.endClick, false);
   assert.equal(after.clickCount, 0);
 });
+test('Lookahead limiter bounded-window deque matches the previous sample-peak reference render', () => {
+  const sr = 48000;
+  const [sourceL, sourceR] = makeSineStereo(440, 0.72, 0.4, sr);
+  for (let i = 0; i < sourceL.length; i++) {
+    const transient = i % 4096 < 18 ? 0.22 : 0;
+    sourceL[i] += transient;
+    sourceR[i] -= transient * 0.83;
+  }
+  const ceilingDb = -1.5;
+  const thresholdDb = -6;
+  const releaseMs = 65;
+  const lookaheadMs = 2.5;
+  const ceilingLin = dbToLinear(ceilingDb);
+  const driveLin = dbToLinear(-thresholdDb);
+  const n = sourceL.length;
+  const drivenL = new Float32Array(n);
+  const drivenR = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    drivenL[i] = sourceL[i] * driveLin;
+    drivenR[i] = sourceR[i] * driveLin;
+  }
+  const required = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const peak = Math.max(Math.abs(drivenL[i]), Math.abs(drivenR[i]));
+    required[i] = peak > ceilingLin ? ceilingLin / peak : 1;
+  }
+  const lookSamples = Math.max(1, Math.min(512, Math.round((lookaheadMs / 1000) * sr)));
+  const held = new Float64Array(n);
+  const deque = new Int32Array(n + lookSamples);
+  let head = 0;
+  let tail = 0;
+  for (let j = 0; j < n + lookSamples - 1; j++) {
+    if (j < n) {
+      while (tail > head && required[deque[tail - 1]] >= required[j]) tail--;
+      deque[tail++] = j;
+    }
+    const i = j - lookSamples + 1;
+    if (i >= 0 && i < n) {
+      while (deque[head] < i) head++;
+      held[i] = required[deque[head]];
+    }
+  }
+  const expectedL = new Float32Array(n);
+  const expectedR = new Float32Array(n);
+  const relCoeff = Math.exp(-1 / Math.max(1, (releaseMs / 1000) * sr));
+  let runSum = 0;
+  let gain = 1;
+  for (let i = 0; i < n; i++) {
+    runSum += held[i];
+    if (i >= lookSamples) runSum -= held[i - lookSamples];
+    const count = Math.min(i + 1, lookSamples);
+    const attackGain = (runSum + (lookSamples - count) * held[0]) / lookSamples;
+    const target = attackGain;
+    gain = target < gain ? target : Math.min(target, gain * relCoeff + target * (1 - relCoeff));
+    expectedL[i] = Math.max(-ceilingLin, Math.min(ceilingLin, drivenL[i] * gain));
+    expectedR[i] = Math.max(-ceilingLin, Math.min(ceilingLin, drivenR[i] * gain));
+  }
+
+  const limiter = createProcessorModule('limiter', {
+    params: { ceilingDb, thresholdDb, releaseMs, lookaheadMs, truePeak: false, oversampling: 1 },
+  });
+  const actual = processChainOffline([sourceL, sourceR], sr, [limiter]).channels;
+  let maxDiff = 0;
+  for (let i = 0; i < n; i++) {
+    maxDiff = Math.max(maxDiff, Math.abs(actual[0][i] - expectedL[i]), Math.abs(actual[1][i] - expectedR[i]));
+  }
+  assert.ok(maxDiff <= 1e-7, `Bounded lookahead implementation diverged from reference by ${maxDiff}`);
+});
+

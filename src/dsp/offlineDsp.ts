@@ -374,6 +374,31 @@ function applyCompressor(
   return Number(maxGr.toFixed(2));
 }
 
+interface MultibandScratchBuffers {
+  lowL: Float32Array;
+  lowR: Float32Array;
+  midL: Float32Array;
+  midR: Float32Array;
+  highL: Float32Array;
+  highR: Float32Array;
+}
+
+interface LimiterScratchBuffers {
+  drivenL: Float32Array;
+  drivenR: Float32Array;
+}
+
+function createMultibandScratchBuffers(length: number): MultibandScratchBuffers {
+  return {
+    lowL: new Float32Array(length),
+    lowR: new Float32Array(length),
+    midL: new Float32Array(length),
+    midR: new Float32Array(length),
+    highL: new Float32Array(length),
+    highR: new Float32Array(length),
+  };
+}
+
 function compressMonoBand(
   bufL: Float32Array,
   bufR: Float32Array,
@@ -414,6 +439,7 @@ function applyMultibandCompressor(
   params: MultibandCompParams,
   sampleRate: number,
   intensityScale: number,
+  scratch: MultibandScratchBuffers,
 ): number {
   const n = left.length;
   const bwQ = Math.SQRT1_2;
@@ -423,12 +449,7 @@ function applyMultibandCompressor(
   const hpHigh = designHighPass(params.highCrossHz, bwQ, sampleRate);
   const apHigh = designAllPass(params.highCrossHz, bwQ, sampleRate);
 
-  const lowL = new Float32Array(n);
-  const lowR = new Float32Array(n);
-  const midL = new Float32Array(n);
-  const midR = new Float32Array(n);
-  const highL = new Float32Array(n);
-  const highR = new Float32Array(n);
+  const { lowL, lowR, midL, midR, highL, highR } = scratch;
 
   const s = Array.from({ length: 18 }, () => createBiquadState());
 
@@ -951,6 +972,7 @@ function applyLookaheadLimiter(
   intensityScale: number,
   truePeak = true,
   oversampling: 1 | 2 | 4 = 4,
+  scratch?: LimiterScratchBuffers,
 ): number {
   const n = left.length;
   if (n === 0) return 0;
@@ -961,65 +983,63 @@ function applyLookaheadLimiter(
   const lookSamples = Math.max(1, Math.min(512, Math.round((lookaheadMs / 1000) * sampleRate)));
   const relCoeff = Math.exp(-1 / Math.max(1, (releaseMs / 1000) * sampleRate));
 
-  const drivenL = new Float32Array(n);
-  const drivenR = new Float32Array(n);
+  const drivenL = scratch?.drivenL ?? new Float32Array(n);
+  const drivenR = scratch?.drivenR ?? new Float32Array(n);
   for (let i = 0; i < n; i++) {
     drivenL[i] = left[i] * driveLin;
     drivenR[i] = right[i] * driveLin;
   }
 
-  // Precompute sample-by-sample True Peak envelope at requested oversampling (1x/2x/4x)
-  const tpEnv = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    if (truePeak && oversampling > 1 && i + 1 < n) {
-      const tpL = maxInterSampleAbsAt(drivenL, i, n, oversampling);
-      const tpR = maxInterSampleAbsAt(drivenR, i, n, oversampling);
-      tpEnv[i] = Math.max(tpL, tpR);
-    } else {
-      tpEnv[i] = Math.max(Math.abs(drivenL[i]), Math.abs(drivenR[i]));
-    }
-  }
-
-  // 1. Required gain per sample so that sample's (true) peak lands on the ceiling.
-  const required = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    const pk = tpEnv[i];
-    required[i] = pk > ceilingLin ? ceilingLin / pk : 1.0;
-  }
-
-  // 2. Lookahead hold: minimum required gain over [i, i + L - 1] (monotonic deque, O(n)).
+  // A sliding monotonic deque computes the minimum required gain over each lookahead
+  // window. Only L+1 entries are needed; the previous implementation retained four
+  // additional full-track arrays (true-peak envelope, required gain, held gain, deque).
   const L = lookSamples;
-  const held = new Float64Array(n);
-  const dq = new Int32Array(n + L);
+  const dequeCapacity = L + 1;
+  const dequeIndices = new Int32Array(dequeCapacity);
+  const dequeValues = new Float64Array(dequeCapacity);
   let head = 0;
   let tail = 0;
-  for (let j = 0; j < n + L - 1; j++) {
-    if (j < n) {
-      while (tail > head && required[dq[tail - 1]] >= required[j]) tail--;
-      dq[tail++] = j;
-    }
-    const i = j - L + 1;
-    if (i >= 0 && i < n) {
-      while (dq[head] < i) head++;
-      held[i] = required[dq[head]];
-    }
-  }
 
-  // 3. Attack ramp: average the held gain over the previous L samples. Because every
-  // held value in [p - L + 1, p] is <= required[p], the ramp reaches the needed
-  // reduction exactly when the peak arrives, with no instantaneous gain step.
-  // 4. Release: recover smoothly toward the ramped target; never rise above it.
+  const requiredGainAt = (i: number): number => {
+    const peak = truePeak && oversampling > 1 && i + 1 < n
+      ? Math.max(
+          maxInterSampleAbsAt(drivenL, i, n, oversampling),
+          maxInterSampleAbsAt(drivenR, i, n, oversampling),
+        )
+      : Math.max(Math.abs(drivenL[i]), Math.abs(drivenR[i]));
+    return peak > ceilingLin ? ceilingLin / peak : 1.0;
+  };
+
+  const pushRequired = (index: number): void => {
+    const value = requiredGainAt(index);
+    while (tail > head && dequeValues[(tail - 1) % dequeCapacity] >= value) tail--;
+    dequeIndices[tail % dequeCapacity] = index;
+    dequeValues[tail % dequeCapacity] = value;
+    tail++;
+  };
+
+  for (let j = 0; j < Math.min(n, L); j++) pushRequired(j);
+  const held0 = dequeValues[head % dequeCapacity];
+
+  // The attack ramp only needs the previous L held gains, so retain a small ring.
+  const heldRing = new Float64Array(L);
   let runSum = 0;
   let gain = 1.0;
   let maxGr = 0;
   let clampCount = 0;
+
   for (let i = 0; i < n; i++) {
-    runSum += held[i];
-    if (i >= L) runSum -= held[i - L];
+    while (head < tail && dequeIndices[head % dequeCapacity] < i) head++;
+    const held = dequeValues[head % dequeCapacity];
+
+    runSum += held;
+    if (i >= L) runSum -= heldRing[i % L];
+    heldRing[i % L] = held;
+
     const count = Math.min(i + 1, L);
-    // Before the first L samples, pad the window with held[0] (the minimum required gain
-    // over the opening lookahead), so the opening peak is never under-limited.
-    const attackGain = (runSum + (L - count) * held[0]) / L;
+    // Before the first L samples, pad with the minimum required gain in the opening
+    // lookahead window, matching the original attack-ramp behavior.
+    const attackGain = (runSum + (L - count) * held0) / L;
     const target = attackGain;
     gain = target < gain ? target : Math.min(target, gain * relCoeff + target * (1 - relCoeff));
 
@@ -1028,10 +1048,12 @@ function applyLookaheadLimiter(
 
     const outL = drivenL[i] * gain;
     const outR = drivenR[i] * gain;
-    // Final safety clamp only; with the ramp above it should almost never engage.
     if (Math.abs(outL) > ceilingLin * 1.000001 || Math.abs(outR) > ceilingLin * 1.000001) clampCount++;
     left[i] = Math.max(-ceilingLin, Math.min(ceilingLin, outL));
     right[i] = Math.max(-ceilingLin, Math.min(ceilingLin, outR));
+
+    const nextIndex = i + L;
+    if (nextIndex < n) pushRequired(nextIndex);
   }
   lastLimiterClampCount = clampCount;
 
@@ -1044,6 +1066,7 @@ function applyMaximizer(
   params: MaximizerParams,
   sampleRate: number,
   intensityScale: number,
+  limiterScratch: LimiterScratchBuffers,
 ): number {
   if (left.length === 0 || intensityScale <= 1e-4) return 0;
 
@@ -1097,6 +1120,7 @@ function applyMaximizer(
     1.0,
     params.truePeak,
     4,
+    limiterScratch,
   );
 
   // One adaptive correction pass compensates for gain reduction at the ceiling.
@@ -1116,6 +1140,7 @@ function applyMaximizer(
         1.0,
         params.truePeak,
         4,
+        limiterScratch,
       );
       gr = Math.max(gr, trimGr);
     }
@@ -1134,6 +1159,8 @@ function applyMultibandMaximizer(
   params: MultibandMaximizerParams,
   sampleRate: number,
   intensityScale: number,
+  scratch: MultibandScratchBuffers,
+  limiterScratch: LimiterScratchBuffers,
 ): number {
   const n = left.length;
   const bwQ = Math.SQRT1_2;
@@ -1142,8 +1169,8 @@ function applyMultibandMaximizer(
   const lpHigh = designLowPass(params.highCrossHz, bwQ, sampleRate);
   const hpHigh = designHighPass(params.highCrossHz, bwQ, sampleRate);
   const apHigh = designAllPass(params.highCrossHz, bwQ, sampleRate);
-  const bandsL = [new Float32Array(n), new Float32Array(n), new Float32Array(n)];
-  const bandsR = [new Float32Array(n), new Float32Array(n), new Float32Array(n)];
+  const bandsL = [scratch.lowL, scratch.midL, scratch.highL];
+  const bandsR = [scratch.lowR, scratch.midR, scratch.highR];
   const s = Array.from({ length: 18 }, () => createBiquadState());
   for (let i = 0; i < n; i++) {
     const l = left[i];
@@ -1185,7 +1212,7 @@ function applyMultibandMaximizer(
     left[i] = bandsL[0][i] + bandsL[1][i] + bandsL[2][i];
     right[i] = bandsR[0][i] + bandsR[1][i] + bandsR[2][i];
   }
-  const limGr = applyLookaheadLimiter(left, right, params.ceilingDb, 0, params.releaseMs, 3, sampleRate, 1, true, 4);
+  const limGr = applyLookaheadLimiter(left, right, params.ceilingDb, 0, params.releaseMs, 3, sampleRate, 1, true, 4, limiterScratch);
   return Number(Math.max(maxGr, limGr).toFixed(2));
 }
 
@@ -1203,6 +1230,20 @@ export function processChainOffline(
   const length = sourceChannels[0].length;
   const left = new Float32Array(sourceChannels[0]);
   const right = new Float32Array(numCh > 1 ? sourceChannels[1] : sourceChannels[0]);
+  const needsMultibandScratch = chain.some((mod) =>
+    mod.enabled && !mod.bypassed && mod.wetDry > 0 && mod.intensity > 0 &&
+    (mod.type === 'multiband-comp' || mod.type === 'multiband-maximizer'),
+  );
+  const multibandScratch = needsMultibandScratch ? createMultibandScratchBuffers(length) : null;
+  const needsLimiterScratch = chain.some((mod) =>
+    mod.enabled && !mod.bypassed && mod.wetDry > 0 && mod.intensity > 0 &&
+    (mod.type === 'limiter' || mod.type === 'maximizer' || mod.type === 'multiband-maximizer'),
+  );
+  const limiterScratch = needsLimiterScratch
+    ? { drivenL: new Float32Array(length), drivenR: new Float32Array(length) }
+    : null;
+  let dryScratchL: Float32Array | null = null;
+  let dryScratchR: Float32Array | null = null;
 
   const telemetry: ProcessorMeterTelemetry[] = [];
 
@@ -1213,8 +1254,13 @@ export function processChainOffline(
       continue;
     }
 
-    const dryL = mod.wetDry < 99.5 ? new Float32Array(left) : null;
-    const dryR = mod.wetDry < 99.5 ? new Float32Array(right) : null;
+    const useWetDry = mod.wetDry < 99.5;
+    if (useWetDry) {
+      dryScratchL ??= new Float32Array(length);
+      dryScratchR ??= new Float32Array(length);
+      dryScratchL.set(left);
+      dryScratchR.set(right);
+    }
 
     // Input gain stage
     const inGain = dbToLinear(mod.inputGainDb);
@@ -1239,7 +1285,7 @@ export function processChainOffline(
         grDb = applyCompressor(left, right, mod.params as CompressorParams, sampleRate, intensityScale);
         break;
       case 'multiband-comp':
-        grDb = applyMultibandCompressor(left, right, mod.params as MultibandCompParams, sampleRate, intensityScale);
+        grDb = applyMultibandCompressor(left, right, mod.params as MultibandCompParams, sampleRate, intensityScale, multibandScratch!);
         break;
       case 'saturation':
         applySaturation(left, right, mod.params as SaturationParams, sampleRate, intensityScale);
@@ -1266,11 +1312,12 @@ export function processChainOffline(
           intensityScale,
           lp.truePeak,
           lp.oversampling,
+          limiterScratch!,
         );
         break;
       }
       case 'maximizer':
-        grDb = applyMaximizer(left, right, mod.params as MaximizerParams, sampleRate, intensityScale);
+        grDb = applyMaximizer(left, right, mod.params as MaximizerParams, sampleRate, intensityScale, limiterScratch!);
         break;
       case 'transient-shaper':
         grDb = applyTransientShaper(left, right, mod.params as TransientShaperParams, sampleRate, intensityScale);
@@ -1279,7 +1326,7 @@ export function processChainOffline(
         grDb = applyClipper(left, right, mod.params as ClipperParams, sampleRate, intensityScale);
         break;
       case 'multiband-maximizer':
-        grDb = applyMultibandMaximizer(left, right, mod.params as MultibandMaximizerParams, sampleRate, intensityScale);
+        grDb = applyMultibandMaximizer(left, right, mod.params as MultibandMaximizerParams, sampleRate, intensityScale, multibandScratch!, limiterScratch!);
         break;
       case 'dither':
         // Telemetry: no gain reduction; the dither level is not a GR value.
@@ -1288,12 +1335,12 @@ export function processChainOffline(
     }
 
     // Wet/Dry parallel blend
-    if (dryL && dryR) {
+    if (useWetDry && dryScratchL && dryScratchR) {
       const wet = Math.max(0, Math.min(1, mod.wetDry / 100));
       const dry = 1 - wet;
       for (let i = 0; i < length; i++) {
-        left[i] = dryL[i] * dry + left[i] * wet;
-        right[i] = dryR[i] * dry + right[i] * wet;
+        left[i] = dryScratchL[i] * dry + left[i] * wet;
+        right[i] = dryScratchR[i] * dry + right[i] * wet;
       }
     }
 
