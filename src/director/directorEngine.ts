@@ -1027,6 +1027,7 @@ export function evaluateMultiObjectiveMetrics(
   const nfHasMargin = post.rmsDb - nf >= 12;
   const noiseFloorAtTargetLufs = nf + (objective.targetLufs - post.integratedLufs);
   const preNoiseFloorAtTargetLufs = preNf + (objective.targetLufs - pre.integratedLufs);
+  const levelMatchedNoiseReductionDb = preNoiseFloorAtTargetLufs - noiseFloorAtTargetLufs;
   const snrGainDb = (post.rmsDb - nf) - (pre.rmsDb - preNf);
   const noiseScore = !nfHasMargin || noiseFloorAtTargetLufs <= -58
     ? 100
@@ -1041,7 +1042,7 @@ export function evaluateMultiObjectiveMetrics(
         : 'attention',
     score: noiseScore,
     measuredSummary: nfHasMargin
-      ? `${nf.toFixed(1)} dBFS raw · ${noiseFloorAtTargetLufs.toFixed(1)} dBFS at target loudness · SNR Δ ${snrGainDb >= 0 ? '+' : ''}${snrGainDb.toFixed(1)} dB`
+      ? `${nf.toFixed(1)} dBFS raw · ${noiseFloorAtTargetLufs.toFixed(1)} dBFS at target loudness · NF Δ ${levelMatchedNoiseReductionDb >= 0 ? '+' : ''}${levelMatchedNoiseReductionDb.toFixed(1)} dB · SNR Δ ${snrGainDb >= 0 ? '+' : ''}${snrGainDb.toFixed(1)} dB`
       : 'Continuous program · no reliable quiet-passage noise margin',
     targetSummary: '<= -52.0 dBFS normalized to delivery LUFS',
     note: !nfHasMargin
