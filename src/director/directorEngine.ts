@@ -2241,7 +2241,10 @@ export async function runAutonomousDirectorLoop(
       ),
     ];
     const hardRegression = hardRegressionReasons.length > 0;
-    const isFirstValid = bestCheckpoint.passNumber === 0 && !hardRegression;
+    const isFirstValid =
+      bestCheckpoint.passNumber === 0 &&
+      !hardRegression &&
+      multiObjective.engineeringFitIndex >= bestCheckpoint.multiObjective.engineeringFitIndex - 1.0;
     // Mud progress counts as improvement even when the Fit Index does not move, as long
     // as the overall fit holds; otherwise every low-mid refinement pass is rolled back.
     const mudVsMid = (a: AudioAnalysis) => {
@@ -2307,7 +2310,7 @@ export async function runAutonomousDirectorLoop(
 
     if (improved) {
       bestCheckpoint = cp;
-    } else if (hardRegression || pass > 1) {
+    } else if (hardRegression || pass > 1 || (bestCheckpoint.passNumber === 0 && !isFirstValid)) {
       const rejectionDetail = hardRegressionReasons.length > 0
         ? 'Regression guard rejected: ' + hardRegressionReasons.join('; ')
         : `Fit ${multiObjective.engineeringFitIndex.toFixed(1)} did not improve over ${bestCheckpoint.multiObjective.engineeringFitIndex.toFixed(1)}`;
