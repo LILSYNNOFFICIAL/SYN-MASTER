@@ -875,6 +875,7 @@ export function verifyPostFixAnalysis(input: VerifyPostFixInput): PostFixVerific
         null,
         thresholds,
         objectiveTarget,
+        input.objectiveId,
       );
       return {
         findingId: finding.id,

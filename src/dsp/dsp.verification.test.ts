@@ -484,7 +484,7 @@ test('Analyzer does not treat a silent channel in one frequency band as perfect 
   }
   const analysis = analyzeAudioBuffer([left, right], SR);
   assert.equal(
-    analysis.stereoBandCorrelation.high,
+    analysis.stereoBandCorrelation?.high,
     0,
     'A one-sided high-frequency band has no measurable inter-channel phase correlation',
   );

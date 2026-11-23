@@ -280,7 +280,7 @@ test('CHAIN WITH AI repairs out-of-phase sub-bass using Stereo Imager mono-bass 
 
   assert.ok(
     report.finalChain.some((m) => m.type === 'stereo-imager'),
-    `Expected targeted stereo correction to survive closed-loop validation. Status=${report.status}; stop=${report.stopReason}; checkpoints=${JSON.stringify(report.checkpoints.map((checkpoint) => ({ pass: checkpoint.passNumber, outcome: checkpoint.iterationSummary.outcome, issue: checkpoint.iterationSummary.detectedIssue, fit: checkpoint.multiObjective.engineeringFitIndex, phase: checkpoint.analysis.phaseCorrelation, low: checkpoint.analysis.lowEndCorrelation, lr: checkpoint.analysis.lrBalanceDb, thd: checkpoint.analysis.thdEstimatePercent, dr: checkpoint.analysis.dynamicRangeDb })))}; activity=${JSON.stringify(report.activityLog.map((entry) => entry.message))}`,
+    `Expected targeted stereo correction to survive closed-loop validation. Status=${report.status}; stop=${report.stopReason}; checkpoints=${JSON.stringify(report.checkpoints.map((checkpoint) => ({ pass: checkpoint.passNumber, outcome: checkpoint.iterationSummary?.outcome ?? 'not-recorded', issue: checkpoint.iterationSummary?.detectedIssue ?? 'not-recorded', fit: checkpoint.multiObjective.engineeringFitIndex, phase: checkpoint.analysis.phaseCorrelation, low: checkpoint.analysis.lowEndCorrelation, lr: checkpoint.analysis.lrBalanceDb, thd: checkpoint.analysis.thdEstimatePercent, dr: checkpoint.analysis.dynamicRangeDb })))}; activity=${JSON.stringify(report.activityLog.map((entry) => entry.message))}`,
   );
   assert.ok(
     report.postAnalysis.lowEndCorrelation > report.preAnalysis.lowEndCorrelation + 0.35,
@@ -370,7 +370,7 @@ test('Bass-vs-mid residual drives a targeted, proportionate low-shelf refinement
   const eq = createProcessorModule('parametric-eq');
 
   const refinement = deriveRefinementCommands(pre, post, [eq], objective, qc, evaluation);
-  const eqCommand = refinement.commands.find((command) => command.op === 'configure' && command.processorType === 'parametric-eq');
+  const eqCommand = refinement.commands.find((command) => command.op === 'configure' && command.op !== 'reorder' && command.processorType === 'parametric-eq');
   assert.ok(eqCommand && eqCommand.op === 'configure', 'Bass excess must produce an EQ refinement command');
   const bands = (eqCommand.paramsPatch as { bands?: Array<{ shape: string; freq: number; gain: number }> }).bands;
   assert.ok(bands?.some((band) => band.shape === 'lowshelf' && band.freq >= 70 && band.freq <= 140 && band.gain < 0),
@@ -385,7 +385,7 @@ test('Bass-vs-mid residual drives a targeted, proportionate low-shelf refinement
   assert.ok((appliedEq.params as { bands: Array<{ shape: string; gain: number }> }).bands.some((band) => band.shape === 'lowshelf' && band.gain === bassCut.gain));
 
   const withoutEq = deriveRefinementCommands(pre, post, [], objective, qc, evaluation);
-  assert.ok(withoutEq.commands.some((command) => command.op === 'add' && command.processorType === 'parametric-eq'),
+  assert.ok(withoutEq.commands.some((command) => command.op === 'add' && command.op !== 'reorder' && command.processorType === 'parametric-eq'),
     'The Director must add a bass-targeted EQ when no parametric EQ exists');
 });
 test('Anti-oscillation step damping reduces LUFS step magnitude when sign reverses', () => {
@@ -774,7 +774,7 @@ test('Director narrows only the frequency band with localized anti-phase correla
     evaluation,
   );
   const correction = result.commands.find((command) =>
-    command.processorType === 'stereo-imager' && command.op === 'configure',
+    command.op !== 'reorder' && command.processorType === 'stereo-imager' && command.op === 'configure',
   );
   assert.ok(correction && correction.op === 'configure');
   const current = imager.params as { lowWidth: number; midWidth: number; highWidth: number; monoBassBelowHz: number };
@@ -802,7 +802,7 @@ test('Loudness refinement does not drive an already compressed premaster harder'
   const result = deriveRefinementCommands(pre, post, [maximizer], objective, qc, evaluation);
   assert.equal(
     result.commands.some((command) =>
-      command.processorType === 'maximizer' && command.op === 'configure' &&
+      command.op !== 'reorder' && command.processorType === 'maximizer' && command.op === 'configure' &&
       Object.prototype.hasOwnProperty.call(command.paramsPatch, 'targetLufs') &&
       Number((command.paramsPatch as { targetLufs: number }).targetLufs) > -14,
     ),
@@ -811,7 +811,7 @@ test('Loudness refinement does not drive an already compressed premaster harder'
   );
   assert.equal(
     result.commands.some((command) =>
-      command.processorType === 'maximizer' && command.op === 'configure' &&
+      command.op !== 'reorder' && command.processorType === 'maximizer' && command.op === 'configure' &&
       Object.prototype.hasOwnProperty.call(command.paramsPatch, 'transientEmphasis'),
     ),
     false,
@@ -834,10 +834,10 @@ test('Loudness refinement backs off processing-induced dynamic-range collapse', 
   });
   const result = deriveRefinementCommands(pre, post, [maximizer, compressor], objective, qc, evaluation);
   const maxCommand = result.commands.find((command) =>
-    command.processorType === 'maximizer' && command.op === 'configure',
+    command.op !== 'reorder' && command.processorType === 'maximizer' && command.op === 'configure',
   );
   const compCommand = result.commands.find((command) =>
-    command.processorType === 'compressor' && command.op === 'configure',
+    command.op !== 'reorder' && command.processorType === 'compressor' && command.op === 'configure',
   );
   assert.ok(maxCommand && maxCommand.op === 'configure');
   assert.ok(compCommand && compCommand.op === 'configure');
@@ -882,7 +882,7 @@ test('Autonomous loop rejects a first-pass chain that introduces new harmonic di
   );
   assert.equal(report.postAnalysis.thdEstimatePercent, baseline.thdEstimatePercent);
   assert.equal(
-    report.checkpoints.find((checkpoint) => checkpoint.passNumber === 1)?.iterationSummary.outcome,
+    report.checkpoints.find((checkpoint) => checkpoint.passNumber === 1)?.iterationSummary?.outcome,
     'regressed',
   );
 });

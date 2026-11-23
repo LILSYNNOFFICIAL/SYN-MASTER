@@ -457,7 +457,7 @@ test('10. Autonomous Director Loop integrates evidence-based PostFixVerification
   assert.equal(
     pfv.analysisFresh,
     true,
-    `Expected a verified processed pass. Status=${report.status}; rolledBack=${report.rolledBack}; stop=${report.stopReason}; passes=${report.iterationsExecuted}; checkpoints=${JSON.stringify(report.checkpoints.map((checkpoint) => ({ pass: checkpoint.passNumber, outcome: checkpoint.iterationSummary.outcome, issue: checkpoint.iterationSummary.detectedIssue, fit: checkpoint.multiObjective.engineeringFitIndex })))}`,
+    `Expected a verified processed pass. Status=${report.status}; rolledBack=${report.rolledBack}; stop=${report.stopReason}; passes=${report.iterationsExecuted}; checkpoints=${JSON.stringify(report.checkpoints.map((checkpoint) => ({ pass: checkpoint.passNumber, outcome: checkpoint.iterationSummary?.outcome ?? 'not-recorded', issue: checkpoint.iterationSummary?.detectedIssue ?? 'not-recorded', fit: checkpoint.multiObjective.engineeringFitIndex })))}`,
   );
   assert.ok(Number.isFinite(pfv.affectedMetricsSummary.integratedLufsAfter!));
   assert.ok(Number.isFinite(pfv.affectedMetricsSummary.shortTermLufsMaxAfter!));

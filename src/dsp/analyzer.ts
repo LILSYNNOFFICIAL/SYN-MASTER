@@ -701,7 +701,7 @@ export function analyzeAudioBuffer(
     .map((candidate) => ({
       freqHz: candidate.freqHz,
       excessDb: candidate.excessDb,
-      severity: candidate.excessDb > 8 ? 'high' : candidate.excessDb > 6 ? 'moderate' : 'low',
+      severity: candidate.excessDb > 8 ? ('high' as const) : candidate.excessDb > 6 ? ('moderate' as const) : ('low' as const),
     }))
     .sort((a, b) => b.excessDb - a.excessDb);
 
