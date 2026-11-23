@@ -175,6 +175,8 @@ This section is the active implementation queue and progress ledger. Update it i
 
 - [x] **fix: target the measured sub-bass peak** — [`0b872bf1`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/0b872bf10d91a0d4184bf495401f9d8034a4964f); replace the fixed 45 Hz shelf with a spectrum-centered bell; final regression coverage and CI verified in the follow-up commit below.
 - [x] **fix: tighten sub-bass repair regression coverage** — [`ead907fe`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/ead907feb08a152b59f9a7cb5b34c4cbfe3f2c7d); preserve `deriveRefinementCommands` documentation placement, align the EQ rationale with the adaptive band, and assert migration of legacy shelf controls to the measured bell. CI run 45283310903 passed unit tests, TypeScript, production build, and startup smoke test.
+- [x] **docs: record sub-bass repair commits** — [`bb192e40`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/bb192e40525b781e2744f805772113771f87c4ad); recorded both adaptive Sub/Bass repair commits and their verification state.
+- [x] **docs: record sub-bass repair CI pass** — this commit; marked P0-1 implementation and CI evidence complete while keeping owner-output and Android verification pending.
 
 # Reference: existing capabilities and setup
 
@@ -343,5 +345,3 @@ The live `/api/health` response only verifies configuration presence, not full A
 - A shared rate limiter is still needed if the service is later scaled across multiple server instances.
 - Avoid logging request bodies, audio, or credentials.
 
-
-- [ ] **docs: record sub-bass repair CI pass** — this commit; close P0-1 implementation evidence and retain owner-output / Android verification as pending.
