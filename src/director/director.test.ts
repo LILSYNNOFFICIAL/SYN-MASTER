@@ -586,7 +586,8 @@ test('Reference EQ matching removes overall loudness bias and responds only to r
   assert.ok(airMatch, 'A genuine -1.5 dB relative air difference should produce a restrained highshelf adjustment');
   assert.ok(Math.abs(bassMatch.gain - 0.9) <= 0.11, 'Expected +0.9 dB relative bass trim, got ' + bassMatch.gain + ' dB');
   assert.ok(Math.abs(airMatch.gain + 0.6) <= 0.11, 'Expected -0.6 dB relative air trim, got ' + airMatch.gain + ' dB');
-}  const comparisonReference = {
+
+  const comparisonReference = {
     ...louderReference,
     zoneEnergyDb: {
       ...louderReference.zoneEnergyDb,
