@@ -1,15 +1,18 @@
 import type {
   BassEnhancerParams,
+  ClipperParams,
   CompressorParams,
   DynamicEQParams,
   LimiterParams,
   MaximizerParams,
   MultibandCompParams,
+  MultibandMaximizerParams,
   ParametricEQParams,
   ProcessorModule,
   RestoreParams,
   SaturationParams,
   StereoImagerParams,
+  TransientShaperParams,
 } from '../types/mastering';
 import { dbToLinear, linearToDb } from '../dsp/analyzer';
 
@@ -613,10 +616,107 @@ export class SynAudioEngine {
         ceilGain.connect(wetGain);
         this.compressorMonitors.push(lim);
         trackNodes([driveGain, lim, ceilGain]);
+      } else if (mod.type === 'clipper') {
+        // Live approximation of the offline peak clipper: drive -> wave shaper whose curve
+        // is the same hard/soft-knee clip at the ceiling (inputs beyond ±1 hold the ceiling).
+        const p = mod.params as ClipperParams;
+        const drive = this.ctx.createGain();
+        drive.gain.value = dbToLinear(p.driveDb * intensity);
+        const shaper = this.ctx.createWaveShaper();
+        shaper.oversample = p.oversampling >= 4 ? '4x' : p.oversampling >= 2 ? '2x' : 'none';
+        shaper.curve = makeClipperCurve(dbToLinear(p.ceilingDb), Math.max(0, Math.min(1, p.softness / 100)));
+        stageIn.connect(drive);
+        drive.connect(shaper);
+        shaper.connect(wetGain);
+        trackNodes([drive, shaper]);
+      } else if (mod.type === 'transient-shaper') {
+        // Live approximation of the offline transient shaper. A slow-attack compressor
+        // follows the sustain: at an onset its output still equals the input, later it is
+        // pulled down. out = comp * A + (dry - comp) * S, so onsets get the attack gain A
+        // and tails the sustain gain S. The dry paths are delayed by the compressor's
+        // fixed 256-frame look-ahead so the subtraction stays phase-aligned.
+        const p = mod.params as TransientShaperParams;
+        const A = dbToLinear(p.attackDb * intensity);
+        const S = dbToLinear(p.sustainDb * intensity);
+        const comp = this.ctx.createDynamicsCompressor();
+        comp.threshold.value = -50;
+        comp.knee.value = 6;
+        comp.ratio.value = 8;
+        comp.attack.value = Math.max(0.005, Math.min(0.06, (p.speedMs * 1.2) / 1000));
+        comp.release.value = Math.max(0.04, Math.min(0.5, (p.speedMs * 6) / 1000));
+        const dryDelay = this.ctx.createDelay(0.05);
+        dryDelay.delayTime.value = 256 / this.ctx.sampleRate;
+        const gA = this.ctx.createGain();
+        gA.gain.value = A;
+        const gS = this.ctx.createGain();
+        gS.gain.value = S;
+        const gNegS = this.ctx.createGain();
+        gNegS.gain.value = -S;
+        stageIn.connect(comp);
+        stageIn.connect(dryDelay);
+        comp.connect(gA);
+        comp.connect(gNegS);
+        dryDelay.connect(gS);
+        gA.connect(wetGain);
+        gS.connect(wetGain);
+        gNegS.connect(wetGain);
+        trackNodes([comp, dryDelay, gA, gS, gNegS]);
+      } else if (mod.type === 'multiband-maximizer') {
+        // Live approximation of the Maximus-style maximizer: LR4 3-band split, per-band
+        // pre-gain -> compressor -> post-gain, then a brick-wall master stage at the ceiling.
+        const p = mod.params as MultibandMaximizerParams;
+        const ctx = this.ctx;
+        const lr4 = (type: BiquadFilterType, f: number): [BiquadFilterNode, BiquadFilterNode] => {
+          const a = ctx.createBiquadFilter();
+          const b = ctx.createBiquadFilter();
+          a.type = type; b.type = type;
+          a.frequency.value = f; b.frequency.value = f;
+          a.Q.value = Math.SQRT1_2; b.Q.value = Math.SQRT1_2;
+          a.connect(b);
+          return [a, b];
+        };
+        const sum = ctx.createGain();
+        const mbNodes: AudioNode[] = [sum];
+        const bandPath = (band: MultibandMaximizerParams['low'], head: AudioNode, tail: AudioNode) => {
+          stageIn.connect(head);
+          const pre = ctx.createGain();
+          pre.gain.value = dbToLinear(band.bypass ? 0 : band.preGainDb * intensity);
+          const comp = ctx.createDynamicsCompressor();
+          comp.threshold.value = band.bypass ? 0 : band.thresholdDb;
+          comp.ratio.value = band.bypass ? 1 : Math.max(1, 1 + (band.ratio - 1) * intensity);
+          comp.knee.value = 2;
+          comp.attack.value = Math.max(0.001, band.attackMs / 1000);
+          comp.release.value = Math.max(0.01, band.releaseMs / 1000);
+          const post = ctx.createGain();
+          post.gain.value = dbToLinear(band.bypass ? 0 : band.postGainDb * intensity);
+          tail.connect(pre);
+          pre.connect(comp);
+          comp.connect(post);
+          post.connect(sum);
+          mbNodes.push(pre, comp, post);
+          this.compressorMonitors.push(comp);
+        };
+        const [lowA, lowB] = lr4('lowpass', p.lowCrossHz);
+        const [midHpA, midHpB] = lr4('highpass', p.lowCrossHz);
+        const [midLpA, midLpB] = lr4('lowpass', p.highCrossHz);
+        midHpB.connect(midLpA);
+        const [highA, highB] = lr4('highpass', p.highCrossHz);
+        mbNodes.push(lowA, lowB, midHpA, midHpB, midLpA, midLpB, highA, highB);
+        bandPath(p.low, lowA, lowB);
+        bandPath(p.mid, midHpA, midLpB);
+        bandPath(p.high, highA, highB);
+        const master = ctx.createDynamicsCompressor();
+        master.threshold.value = p.ceilingDb;
+        master.knee.value = 0;
+        master.ratio.value = 20;
+        master.attack.value = 0.001;
+        master.release.value = Math.max(0.015, p.releaseMs / 1000);
+        sum.connect(master);
+        master.connect(wetGain);
+        mbNodes.push(master);
+        this.compressorMonitors.push(master);
+        trackNodes(mbNodes);
       } else {
-        // Offline-only processors (transient shaper, clipper, multiband maximizer):
-        // the live approximation passes through; "Mastered" playback uses the exact
-        // verified offline render.
         stageIn.connect(wetGain);
       }
 
@@ -760,4 +860,17 @@ export class SynAudioEngine {
       timeDomainR: this.tdBufR,
     };
   }
+}
+
+/** Clipper transfer curve over the wave shaper's [-1, 1] input range (see applyClipper). */
+function makeClipperCurve(ceiling: number, soft: number): Float32Array<ArrayBuffer> {
+  const n = 4097;
+  const curve = new Float32Array(n);
+  const c = Math.max(1e-3, ceiling);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    const hard = Math.max(-c, Math.min(c, x));
+    curve[i] = soft <= 0 ? hard : hard * (1 - soft) + c * Math.tanh(x / c) * soft;
+  }
+  return curve;
 }

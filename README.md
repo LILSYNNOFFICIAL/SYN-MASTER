@@ -91,7 +91,7 @@ Four problems combined so that "FIX ALL & VERIFY" could say a track was mastered
 | Styling | `src/index.css` (SYN2 section at the bottom) |
 
 ### Open items
-- The realtime Web Audio graph (`src/engine/audioEngine.ts`) passes the three new processors (transient shaper, clipper, multiband maximizer) through. "Mastered" playback uses the verified offline render, so this only matters for the ~120 ms before a re-render lands; when a re-render lands during playback it restarts at the same position (a tiny gap).
+- [x] The realtime Web Audio graph (`src/engine/audioEngine.ts`) now approximates the three new processors: clipper = drive + WaveShaper with the same hard/soft-knee curve; transient shaper = slow-attack compressor blend `comp*A + (dry-comp)*S` with the dry path delayed 256 frames to match the compressor look-ahead; multiband maximizer = LR4 3-band split, per-band pre/compressor/post, brick-wall master at the ceiling. Not ear-tested in a browser yet (only `tsc` + `vite build`). "Mastered" playback still uses the exact verified offline render once it lands.
 - AI-shimmer detection in the diagnostic log is a heuristic (high-band stereo correlation + air energy). The deterministic engine does not switch `deShimmer` on by itself; Gemini or the user can. A measured shimmer metric would let the gate verify it.
 - The loop keeps refining open low-mid "mud" findings after the gate passes (by design of the existing mud refinement), so a run can take several passes and end with "rolled back to best pass N" even when it passed. Consider stopping as soon as the gate passes if the owner prefers speed.
 - Mouse-wheel Q on EQ nodes uses React's passive wheel handler, so the page can scroll while adjusting Q.
