@@ -888,3 +888,64 @@ test('Pre-existing dynamic compression and harmonic distortion cannot be marked 
     assert.match(state.nextRecommendedAction ?? '', /premaster|source/i);
   }
 });
+
+
+test('Noise cleanup cannot be marked resolved by uniform attenuation that leaves signal-to-noise ratio unchanged', () => {
+  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const baseline = {
+    ...measured,
+    noiseFloorDb: -40,
+    rmsDb: -12,
+  };
+  const baselineDiagnosis = analyzeTrackIntelligence(baseline, 'streaming');
+  assert.ok(baselineDiagnosis.findings.some((finding) => finding.id === 'diag-noise'));
+  const post = {
+    ...baseline,
+    noiseFloorDb: -44,
+    rmsDb: -16,
+  };
+  const report = verifyPostFixAnalysis({
+    baselineAnalysis: baseline,
+    baselineDiagnosis,
+    postAnalysis: post,
+    objective: 'streaming',
+    postProcessingStatus: 'ready',
+  });
+  const noise = report.activeFindings.find((finding) => finding.findingId === 'diag-noise');
+  assert.ok(noise);
+  assert.equal(noise.status, 'UNRESOLVED');
+  assert.match(noise.verificationSummary, /signal-to-noise|SNR/i);
+});
+
+test('Noise cleanup reports collateral transient and air loss instead of claiming a clean resolution', () => {
+  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const baseline = {
+    ...measured,
+    noiseFloorDb: -40,
+    rmsDb: -12,
+    transientDensity: 0.4,
+    crestFactorDb: 10,
+    zoneEnergyDb: { ...measured.zoneEnergyDb, air: -30 },
+  };
+  const baselineDiagnosis = analyzeTrackIntelligence(baseline, 'streaming');
+  assert.ok(baselineDiagnosis.findings.some((finding) => finding.id === 'diag-noise'));
+  const post = {
+    ...baseline,
+    noiseFloorDb: -46,
+    transientDensity: 0.05,
+    crestFactorDb: 8,
+    zoneEnergyDb: { ...baseline.zoneEnergyDb, air: -35 },
+  };
+  const report = verifyPostFixAnalysis({
+    baselineAnalysis: baseline,
+    baselineDiagnosis,
+    postAnalysis: post,
+    objective: 'streaming',
+    postProcessingStatus: 'ready',
+  });
+  const noise = report.activeFindings.find((finding) => finding.findingId === 'diag-noise');
+  assert.ok(noise);
+  assert.equal(noise.status, 'PARTIALLY_RESOLVED');
+  assert.match(noise.verificationSummary, /transient|air|collateral/i);
+  assert.match(noise.nextRecommendedAction ?? '', /conservative|restore|reduction/i);
+});
