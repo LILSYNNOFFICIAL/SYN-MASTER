@@ -659,7 +659,7 @@ export function analyzeAudioBuffer(
     const harmonicNumber = Math.round(ratio);
     return harmonicNumber >= 2 &&
       harmonicNumber <= 8 &&
-      Math.abs(ratio - harmonicNumber) / harmonicNumber <= 0.035;
+      Math.abs(ratio - harmonicNumber) / harmonicNumber <= 0.10;
   };
   const harmonicFamily = new Set<number>();
   for (let i = 0; i < resonanceCandidates.length; i++) {
