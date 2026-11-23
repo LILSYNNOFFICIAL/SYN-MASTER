@@ -2211,6 +2211,13 @@ export async function runAutonomousDirectorLoop(
       post.integratedLufs > objective.targetLufs + objective.lufsTolerance + 1.5 &&
       (preAnalysis.integratedLufs <= objective.targetLufs + objective.lufsTolerance + 1.0 ||
         post.integratedLufs > preAnalysis.integratedLufs + 1.0);
+    const previousDimensionScores = new Map<string, number>(
+      bestCheckpoint.multiObjective.dimensions.map((dimension) => [dimension.key, dimension.score] as const),
+    );
+    const severeDimensionRegressions = multiObjective.dimensions.filter((dimension) => {
+      const previousScore = previousDimensionScores.get(dimension.key);
+      return previousScore !== undefined && previousScore - dimension.score > 15;
+    });
     const hardRegressionReasons = [
       ...(introducedClipping ? ['new clipped samples'] : []),
       ...introducedTechnicalFindings.map((finding) => finding.title),
@@ -2222,6 +2229,9 @@ export async function runAutonomousDirectorLoop(
       ...(noiseRegressed ? ['level-matched noise-floor regression'] : []),
       ...(introducedTruePeakBreach ? ['new objective true-peak ceiling breach'] : []),
       ...(introducedLoudnessOvershoot ? ['new loudness overshoot'] : []),
+      ...severeDimensionRegressions.map((dimension) =>
+        dimension.label + ' objective score regressed by more than 15 points',
+      ),
     ];
     const hardRegression = hardRegressionReasons.length > 0;
     const isFirstValid = bestCheckpoint.passNumber === 0 && !hardRegression;
