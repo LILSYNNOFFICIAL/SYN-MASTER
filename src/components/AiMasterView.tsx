@@ -5,6 +5,7 @@ import {
   Check,
   CheckCircle2,
   Cpu,
+  Download,
   Pause,
   Play,
   Plug,
@@ -36,6 +37,7 @@ import type {
 } from '../types/mastering';
 import type { ExplainableMasterPlan } from '../director/directorEngine';
 import { computeRegionEnergyDb } from '../director/analyzeIntelligence';
+import type { MasteringDiagnosticRunSummary } from '../director/tempMasteringWorkspace';
 
 interface Props {
   preAnalysis: AudioAnalysis | null;
@@ -60,6 +62,11 @@ interface Props {
   iterations: IterationPass[];
   activityLog: DirectorActivityEntry[];
   checkpoints: DirectorCheckpoint[];
+  diagnosticRuns: MasteringDiagnosticRunSummary[];
+  latestDiagnosticRun: MasteringDiagnosticRunSummary | null;
+  diagnosticArchiveStatus: 'loading' | 'idle' | 'saving' | 'saved' | 'session-only' | 'failed';
+  diagnosticBundleAvailable: boolean;
+  onDownloadDiagnosticRun: (runId: string) => void;
   directorRunning: boolean;
   directorPaused: boolean;
   directorStage: string;
@@ -149,6 +156,11 @@ export const AiMasterView: React.FC<Props> = ({
   qcReport,
   activityLog,
   checkpoints,
+  diagnosticRuns,
+  latestDiagnosticRun,
+  diagnosticArchiveStatus,
+  diagnosticBundleAvailable,
+  onDownloadDiagnosticRun,
   directorRunning,
   directorPaused,
   directorStage,
@@ -177,6 +189,77 @@ export const AiMasterView: React.FC<Props> = ({
   onRestoreCheckpoint,
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedDiagnosticRunId, setSelectedDiagnosticRunId] = useState('');
+  const availableDiagnosticRuns =
+    latestDiagnosticRun && !diagnosticRuns.some((run) => run.runId === latestDiagnosticRun.runId)
+      ? [latestDiagnosticRun, ...diagnosticRuns]
+      : diagnosticRuns;
+  const selectedDiagnosticRunIdValue = availableDiagnosticRuns.some(
+    (run) => run.runId === selectedDiagnosticRunId,
+  )
+    ? selectedDiagnosticRunId
+    : availableDiagnosticRuns[0]?.runId ?? '';
+
+  const archiveStatusLabel = {
+    loading: 'Checking local archive...',
+    idle: 'No diagnostic runs saved yet.',
+    saving: 'Writing diagnostic bundle...',
+    saved: 'Persistent local archive available.',
+    'session-only': 'Session-only fallback. Download before leaving this page.',
+    failed: 'Archive index unavailable. The current bundle may still be downloadable.',
+  }[diagnosticArchiveStatus];
+
+  const diagnosticArchivePanel = (
+    <section
+      data-testid="diagnostic-archive-panel"
+      className="p-3 rounded bg-[#111217] border border-[#38BDF8]/30 flex flex-col gap-2"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-[#38BDF8]">
+            Fix All Diagnostic Archives
+          </h3>
+          <p className="text-[11px] text-[#9CA3AF]">
+            Original measurements, diagnosis, processor settings, pass history, final QC, and unresolved findings.
+          </p>
+        </div>
+        <span className="text-[10px] font-mono-tabular text-[#9CA3AF]">
+          {diagnosticRuns.length} persistent run(s)
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {availableDiagnosticRuns.length > 0 ? (
+          <select
+            aria-label="Saved mastering diagnostic runs"
+            value={selectedDiagnosticRunIdValue}
+            onChange={(event) => setSelectedDiagnosticRunId(event.target.value)}
+            className="min-w-0 flex-1 bg-[#0C0D12] border border-[#2B2E3A] rounded px-2 py-1.5 text-[11px] text-[#F7F8FA]"
+          >
+            {availableDiagnosticRuns.map((run) => (
+              <option key={run.runId} value={run.runId}>
+                {new Date(run.createdAt).toLocaleString()} · {run.trackName} · {run.status}
+                {run.storage === 'memory' ? ' · SESSION ONLY' : ''}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="text-[11px] text-[#9CA3AF]">Run Fix All to create the first diagnostic bundle.</span>
+        )}
+        <button
+          type="button"
+          disabled={!selectedDiagnosticRunIdValue || (!diagnosticBundleAvailable && diagnosticRuns.length === 0)}
+          onClick={() => {
+            if (selectedDiagnosticRunIdValue) onDownloadDiagnosticRun(selectedDiagnosticRunIdValue);
+          }}
+          className="px-3 py-1.5 rounded bg-[#38BDF8]/15 border border-[#38BDF8]/50 text-[11px] font-bold text-[#7DD3FC] hover:bg-[#38BDF8]/25 disabled:opacity-40 flex items-center gap-1.5"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Download Diagnostic JSON
+        </button>
+      </div>
+      <p className="text-[10px] text-[#9CA3AF]">{archiveStatusLabel}</p>
+    </section>
+  );
 
   if (!preAnalysis) {
     return (
@@ -185,6 +268,7 @@ export const AiMasterView: React.FC<Props> = ({
         <p className="mt-1 text-xs text-[#9CA3AF]">
           Load a track first to enable autonomous analysis, explainable mastering plans, multi-objective evaluation, and closed-loop DSP refinement.
         </p>
+        <div className="mt-4 text-left">{diagnosticArchivePanel}</div>
       </div>
     );
   }
@@ -1231,6 +1315,8 @@ export const AiMasterView: React.FC<Props> = ({
           )}
         </div>
       </div>
+
+      {diagnosticArchivePanel}
 
       {/* Section 5: Final Optimization Report & Accept / Restore Workflow */}
       {directorReport && (

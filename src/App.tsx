@@ -66,7 +66,13 @@ import { validateChainAgainstInventory } from './director/processorInventory';
 import { encodeWavBlob } from './dsp/wavEncoder';
 import { DEFAULT_EXPORT_CONFIG } from './dsp/exportDefaults';
 import { encodeMidiTempoFile } from './dsp/midiEncoder';
-import { createTemporaryMasteringWorkspace } from './director/tempMasteringWorkspace';
+import {
+  createTemporaryMasteringWorkspace,
+  listMasteringDiagnosticRuns,
+  loadMasteringDiagnosticBundle,
+  type MasteringDiagnosticBundle,
+  type MasteringDiagnosticRunSummary,
+} from './director/tempMasteringWorkspace';
 import { SynAudioEngine, type AuditionTarget } from './engine/audioEngine';
 import { telemetryStore } from './engine/telemetryStore';
 import { SynHostBridge, type HostBridgeSnapshot } from './services/hostBridge';
@@ -250,6 +256,12 @@ export default function App() {
   const [exportDownloadName, setExportDownloadName] = useState<string | null>(null);
   const [exportDeliveryCheck, setExportDeliveryCheck] = useState<{ text: string; warning: boolean } | null>(null);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
+  const [diagnosticRuns, setDiagnosticRuns] = useState<MasteringDiagnosticRunSummary[]>([]);
+  const [latestDiagnosticRun, setLatestDiagnosticRun] = useState<MasteringDiagnosticRunSummary | null>(null);
+  const [latestDiagnosticBundle, setLatestDiagnosticBundle] = useState<MasteringDiagnosticBundle | null>(null);
+  const [diagnosticArchiveStatus, setDiagnosticArchiveStatus] = useState<
+    'loading' | 'idle' | 'saving' | 'saved' | 'session-only' | 'failed'
+  >('loading');
 
   // Subscribe to SynHostBridge and load IndexedDB projects, chains & settings on mount
   useEffect(() => {
@@ -268,6 +280,32 @@ export default function App() {
     })();
     return () => {
       unsub();
+    };
+  }, []);
+
+  // Restore the latest persistent Fix All diagnostic bundle on app startup.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const runs = await listMasteringDiagnosticRuns();
+      if (cancelled) return;
+      setDiagnosticRuns(runs);
+      if (runs.length === 0) {
+        setDiagnosticArchiveStatus('idle');
+        return;
+      }
+      const latest = await loadMasteringDiagnosticBundle(runs[0].runId);
+      if (cancelled) return;
+      if (latest) {
+        setLatestDiagnosticRun(runs[0]);
+        setLatestDiagnosticBundle(latest);
+        setDiagnosticArchiveStatus('saved');
+      } else {
+        setDiagnosticArchiveStatus('failed');
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -1230,6 +1268,8 @@ export default function App() {
 
     const runId = ++directorRunIdRef.current;
     const sourceTrackId = activeTrack.id;
+    const diagnosticCreatedAt = Date.now();
+    const diagnosticRunId = `fix-all-${sourceTrackId}-${diagnosticCreatedAt}`;
     const isStale = () => directorRunIdRef.current !== runId || activeTrackIdRef.current !== sourceTrackId;
 
     directorRunningRef.current = true;
@@ -1237,6 +1277,7 @@ export default function App() {
     setAiChainAccepted(null);
     setPreAiChainSnapshot(structuredClone(chain));
     setDirectorRunning(true);
+    setDiagnosticArchiveStatus('saving');
     setDirectorPaused(false);
     directorPauseRef.current = false;
     directorStopRef.current = false;
@@ -1314,6 +1355,8 @@ export default function App() {
 
     let tempWorkspace: Awaited<ReturnType<typeof createTemporaryMasteringWorkspace>> | null = null;
     let tempWriteQueue: Promise<void> = Promise.resolve();
+    const runActivityLog: DirectorActivityEntry[] = [];
+    const runCheckpoints: DirectorCheckpoint[] = [];
     const writeTempNote = (relativePath: string, value: unknown) => {
       if (!tempWorkspace) return;
       tempWriteQueue = tempWriteQueue
@@ -1321,11 +1364,11 @@ export default function App() {
         .catch(() => undefined);
     };
     try {
-      tempWorkspace = await createTemporaryMasteringWorkspace('fix-all-' + sourceTrackId + '-' + Date.now());
+      tempWorkspace = await createTemporaryMasteringWorkspace(diagnosticRunId);
       writeTempNote('session.json', {
         trackId: sourceTrackId,
         trackName: activeTrack.name,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(diagnosticCreatedAt).toISOString(),
         objectiveId,
         operatingMode: runOperatingMode,
         scratchStorage: tempWorkspace.storage,
@@ -1376,10 +1419,12 @@ export default function App() {
           setDirectorStage(upd.stage);
           setDirectorPass(upd.passNumber);
           if (upd.activityEntry) {
+            runActivityLog.push(upd.activityEntry);
             setDirectorActivityLog((prev) => [...prev, upd.activityEntry!]);
             writeTempNote('activity/' + String(upd.activityEntry.timestamp) + '-' + upd.activityEntry.id + '.json', upd.activityEntry);
           }
           if (upd.checkpoint) {
+            runCheckpoints.push(upd.checkpoint);
             setDirectorCheckpoints((prev) => [...prev, upd.checkpoint!]);
             writeTempNote('passes/pass-' + String(upd.checkpoint.passNumber).padStart(2, '0') + '.json', upd.checkpoint);
           }
@@ -1398,6 +1443,78 @@ export default function App() {
         qualityControl: report.qcReport,
         postFixVerification: report.postFixVerification,
       });
+      writeTempNote('final/report.json', report);
+
+      const diagnosticSummary: MasteringDiagnosticRunSummary = {
+        runId: tempWorkspace?.runId ?? diagnosticRunId,
+        createdAt: diagnosticCreatedAt,
+        trackName: activeTrack.name,
+        objectiveId,
+        operatingMode: runOperatingMode,
+        status: report.status,
+        storage: tempWorkspace?.storage ?? 'memory',
+      };
+      const diagnosticBundle: MasteringDiagnosticBundle = {
+        schemaVersion: 1,
+        summary: diagnosticSummary,
+        session: {
+          source: {
+            trackId: sourceTrackId,
+            trackName: activeTrack.name,
+            sampleRate: activeTrack.sampleRate,
+            baselineAnalysis: report.preAnalysis,
+          },
+          objective: report.objective,
+          baselineDiagnosis: report.diagnosis,
+          initialPlan: {
+            chain: plan.chain,
+            recommendations: plan.recommendations,
+            strategy: plan.strategy,
+            geminiInitialChain: geminiInitialChain ?? null,
+          },
+          finalChain: report.finalChain,
+          checkpoints: report.checkpoints,
+          activityLog: report.activityLog,
+          qualityControl: report.qcReport,
+          postFixVerification: report.postFixVerification,
+          report,
+          runConfiguration: {
+            forceAutonomous,
+            operatingMode: runOperatingMode,
+            objectiveId,
+            customObjective,
+            maxIterations: forceAutonomous ? 10 : maxIterations,
+            maxCpuBudgetMs: forceAutonomous ? 120_000 : 60_000,
+            convergenceThreshold,
+            exportConfig,
+            useGeminiCloud,
+            referenceAnalysis: referenceTrack?.analysis ?? null,
+            externalPlugins: hostSnapshot.plugins,
+          },
+        },
+      };
+      setLatestDiagnosticRun(diagnosticSummary);
+      setLatestDiagnosticBundle(diagnosticBundle);
+
+      let diagnosticNotice = 'Diagnostic bundle is available for download.';
+      try {
+        await tempWriteQueue.catch(() => undefined);
+        const archived = tempWorkspace
+          ? await tempWorkspace.complete(diagnosticSummary, diagnosticBundle)
+          : { persisted: false };
+        if (archived.persisted) {
+          setDiagnosticRuns(await listMasteringDiagnosticRuns());
+          setDiagnosticArchiveStatus('saved');
+          diagnosticNotice = 'Full diagnostic bundle saved locally.';
+        } else {
+          setDiagnosticArchiveStatus('session-only');
+          diagnosticNotice = 'Diagnostic bundle is downloadable now, but persistent browser storage was unavailable.';
+        }
+      } catch {
+        setDiagnosticArchiveStatus('failed');
+        diagnosticNotice = 'Mastering finished, but the diagnostic archive could not be saved. Download the in-session bundle before leaving this page.';
+      }
+
       setDirectorReport(report);
       setDirectorCheckpoints(report.checkpoints);
       setDirectorActivityLog(report.activityLog);
@@ -1427,18 +1544,78 @@ export default function App() {
       setIterations(passHistory);
 
       setStatusNotice(
-        runOperatingMode === 'manual'
+        `${runOperatingMode === 'manual'
           ? 'Manual Mode: Explainable mastering plan generated without altering rack.'
-          : `CHAIN WITH AI ${report.status}: Best Pass #${report.bestPassNumber} (${report.postAnalysis.integratedLufs.toFixed(1)} LUFS, QC ${report.qcReport.overallStatus.toUpperCase()}).`,
+          : `CHAIN WITH AI ${report.status}: Best Pass #${report.bestPassNumber} (${report.postAnalysis.integratedLufs.toFixed(1)} LUFS, QC ${report.qcReport.overallStatus.toUpperCase()}).`} ${diagnosticNotice}`,
       );
     } catch (err) {
+      const failureMessage = err instanceof Error ? err.message : 'Mastering Director execution failed';
       if (!isStale()) {
         setAiLifecycleState('Failed');
-        setAiError(err instanceof Error ? err.message : 'Mastering Director execution failed');
+        setAiError(failureMessage);
+      }
+      if (tempWorkspace && !isStale()) {
+        const failureSummary: MasteringDiagnosticRunSummary = {
+          runId: tempWorkspace.runId,
+          createdAt: diagnosticCreatedAt,
+          trackName: activeTrack.name,
+          objectiveId,
+          operatingMode: runOperatingMode,
+          status: 'failed',
+          storage: tempWorkspace.storage,
+        };
+        const failureBundle: MasteringDiagnosticBundle = {
+          schemaVersion: 1,
+          summary: failureSummary,
+          session: {
+            source: {
+              trackId: sourceTrackId,
+              trackName: activeTrack.name,
+              sampleRate: activeTrack.sampleRate,
+              baselineAnalysis: activeTrack.analysis,
+            },
+            objectiveId,
+            customObjective,
+            baselineDiagnosis: plan.diagnosis,
+            initialPlan: {
+              chain: plan.chain,
+              recommendations: plan.recommendations,
+              strategy: plan.strategy,
+              geminiInitialChain: geminiInitialChain ?? null,
+            },
+            activityLog: runActivityLog,
+            checkpoints: runCheckpoints,
+            error: failureMessage,
+            runConfiguration: {
+              operatingMode: runOperatingMode,
+              maxIterations: forceAutonomous ? 10 : maxIterations,
+              maxCpuBudgetMs: forceAutonomous ? 120_000 : 60_000,
+              convergenceThreshold,
+              exportConfig,
+              useGeminiCloud,
+            },
+          },
+        };
+        setLatestDiagnosticRun(failureSummary);
+        setLatestDiagnosticBundle(failureBundle);
+        try {
+          writeTempNote('final/error.json', { message: failureMessage, createdAt: diagnosticCreatedAt });
+          await tempWriteQueue.catch(() => undefined);
+          const archived = await tempWorkspace.complete(failureSummary, failureBundle);
+          if (archived.persisted) {
+            setDiagnosticRuns(await listMasteringDiagnosticRuns());
+            setDiagnosticArchiveStatus('saved');
+          } else {
+            setDiagnosticArchiveStatus('session-only');
+          }
+        } catch {
+          setDiagnosticArchiveStatus('failed');
+        }
+      } else if (!isStale()) {
+        setDiagnosticArchiveStatus('session-only');
       }
     } finally {
       await tempWriteQueue.catch(() => undefined);
-      await tempWorkspace?.cleanup().catch(() => undefined);
       if (directorRunIdRef.current === runId) {
         directorRunningRef.current = false;
         setDirectorRunning(false);
@@ -1465,6 +1642,33 @@ export default function App() {
     updateChainWithHistory,
     recordCorrection,
   ]);
+
+
+  const handleDownloadDiagnosticRun = useCallback(async (runId: string) => {
+    try {
+      const bundle =
+        latestDiagnosticBundle?.summary.runId === runId
+          ? latestDiagnosticBundle
+          : await loadMasteringDiagnosticBundle(runId);
+      if (!bundle) {
+        setStatusNotice('The selected diagnostic archive is unavailable in this browser storage.');
+        return;
+      }
+      const safeTrackName = bundle.summary.trackName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60) || 'Track';
+      const timestamp = new Date(bundle.summary.createdAt).toISOString().replace(/[:.]/g, '-');
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = `SYN-MASTER-${safeTrackName}-${timestamp}-DIAGNOSTICS.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      setStatusNotice(error instanceof Error ? error.message : 'Could not export the mastering diagnostic bundle.');
+    }
+  }, [latestDiagnosticBundle]);
 
   const handleGenerateBattle = useCallback(async () => {
     const src = sourceChannelsRef.current;
@@ -2380,6 +2584,11 @@ export default function App() {
               iterations={iterations}
               activityLog={directorActivityLog}
               checkpoints={directorCheckpoints}
+              diagnosticRuns={diagnosticRuns}
+              latestDiagnosticRun={latestDiagnosticRun}
+              diagnosticArchiveStatus={diagnosticArchiveStatus}
+              diagnosticBundleAvailable={Boolean(latestDiagnosticBundle)}
+              onDownloadDiagnosticRun={handleDownloadDiagnosticRun}
               directorRunning={directorRunning}
               directorPaused={directorPaused}
               directorStage={directorStage}
