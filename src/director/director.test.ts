@@ -842,3 +842,39 @@ test('Loudness refinement backs off processing-induced dynamic-range collapse', 
     'Bus compression ratio should be relaxed rather than increasing transient emphasis',
   );
 });
+
+
+test('Autonomous loop rejects a first-pass chain that introduces new harmonic distortion', async () => {
+  const n = Math.floor(SR * 2);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const sample = 0.24 * Math.sin((2 * Math.PI * 440 * i) / SR);
+    left[i] = sample;
+    right[i] = sample;
+  }
+  const source = [left, right];
+  const baseline = analyzeAudioBuffer(source, SR);
+  assert.ok(baseline.thdEstimatePercent < 2.2, 'Fixture must begin with a clean harmonic baseline');
+  const damaged = { ...baseline, integratedLufs: -14, thdEstimatePercent: 8.0 };
+
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: source,
+    sampleRate: SR,
+    operatingMode: 'autonomous',
+    objectiveId: 'streaming',
+    maxIterations: 1,
+    renderPassFn: async () => ({ channels: source, analysis: damaged }),
+  });
+
+  assert.equal(
+    report.finalChain.length,
+    0,
+    'A first pass that introduces a new technical distortion finding must not replace the clean baseline checkpoint',
+  );
+  assert.equal(report.postAnalysis.thdEstimatePercent, baseline.thdEstimatePercent);
+  assert.equal(
+    report.checkpoints.find((checkpoint) => checkpoint.passNumber === 1)?.iterationSummary.outcome,
+    'regressed',
+  );
+});
