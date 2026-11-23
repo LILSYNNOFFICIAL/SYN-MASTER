@@ -91,10 +91,12 @@ test('completed Fix All diagnostics survive workspace closure and can be reopene
   const bundle = {
     schemaVersion: 1,
     summary,
-    baseline: { integratedLufs: -16.2 },
-    diagnosis: [{ id: 'diag-mud', severity: 'moderate' }],
-    corrections: [{ processor: 'dynamic-eq', frequencyHz: 260, maxCutDb: -2 }],
-    verification: { unresolvedFindingCount: 1 },
+    session: {
+      baseline: { integratedLufs: -16.2 },
+      diagnosis: [{ id: 'diag-mud', severity: 'moderate' }],
+      corrections: [{ processor: 'dynamic-eq', frequencyHz: 260, maxCutDb: -2 }],
+      verification: { unresolvedFindingCount: 1 },
+    },
   };
 
   const completion = await workspace.complete(summary, bundle);
