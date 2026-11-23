@@ -973,7 +973,15 @@ test('Explainable plan still targets a genuinely isolated upper-mid resonance', 
 
 
 test('Noise objective remains unverified when the source contains no measurable quiet passage', () => {
-  const analysis = analyzeAudioBuffer(makeBalancedStereo(), SR);
+  const n = Math.floor(SR * 2);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const sample = 0.22 * Math.sin((2 * Math.PI * 440 * i) / SR);
+    left[i] = sample;
+    right[i] = sample;
+  }
+  const analysis = analyzeAudioBuffer([left, right], SR);
   const qc = runQualityControl(analysis, analysis, QC_TARGET_PROFILES[0]);
   const evaluation = evaluateMultiObjectiveMetrics(
     analysis,
