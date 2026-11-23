@@ -723,3 +723,46 @@ test('Partially resolved mud recommendation targets bass when only Bass vs Mid r
   assert.match(mud.nextRecommendedAction ?? '', /low-shelf/i);
   assert.doesNotMatch(mud.nextRecommendedAction ?? '', /220-340 Hz bell cut/i);
 });
+
+test('source clipping cannot be marked RESOLVED by simply attenuating the clipped waveform', () => {
+  const n = SR * 2;
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const sample = 1.3 * Math.sin((2 * Math.PI * 997 * i) / SR);
+    const clipped = Math.max(-1, Math.min(1, sample));
+    left[i] = clipped;
+    right[i] = clipped;
+  }
+
+  const source = [left, right];
+  const baseline = analyzeAudioBuffer(source, SR);
+  assert.ok(baseline.clippedSamples > 0, 'Fixture must contain full-scale clipped samples');
+
+  // Gain reduction removes the over-ceiling sample count but cannot restore the clipped waveform.
+  const attenuated = source.map((channel) => Float32Array.from(channel, (sample) => sample * 0.5));
+  const post = analyzeAudioBuffer(attenuated, SR);
+  assert.equal(post.clippedSamples, 0, 'Attenuated output must fall below the analyzer full-scale threshold');
+
+  const report = verifyPostFixAnalysis({
+    baselineAnalysis: baseline,
+    postAnalysis: post,
+    objective: 'streaming',
+    baselineAnalysisId: 'clipped-source',
+    postAnalysisId: 'attenuated-output',
+    currentChainFingerprint: 'gain-trim-only',
+    postChainFingerprint: 'gain-trim-only',
+    postProcessingStatus: 'ready',
+  });
+
+  const clipping = report.activeFindings.find((finding) => finding.findingId === 'diag-clipping');
+  assert.ok(clipping, 'Irreversible source clipping must remain visible after output attenuation');
+  assert.equal(clipping.status, 'UNRESOLVED');
+  assert.match(clipping.verificationSummary, /source.*clipp|clipp.*source/i);
+  assert.match(clipping.nextRecommendedAction ?? '', /unclipped|source/i);
+  assert.equal(
+    report.resolvedFindings.some((finding) => finding.findingId === 'diag-clipping'),
+    false,
+    'Gain reduction must never be reported as reconstruction of clipped source peaks',
+  );
+});
