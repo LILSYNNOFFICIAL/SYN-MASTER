@@ -259,6 +259,8 @@ function applyDynamicEQ(
 
     const attCoeff = Math.exp(-1 / Math.max(1, (band.attackMs / 1000) * sampleRate));
     const relCoeff = Math.exp(-1 / Math.max(1, (band.releaseMs / 1000) * sampleRate));
+    const gainAttackCoeff = attCoeff;
+    const gainReleaseCoeff = relCoeff;
     let env = 0;
     let currentGainDb = 0;
     let coeffs = designPeakingEQ(band.freq, 0, band.q, sampleRate);
@@ -277,7 +279,8 @@ function applyDynamicEQ(
         const over = envDb - band.thresholdDb;
         targetCut = Math.max(band.maxCutDb * intensityScale, -over * 0.65 * intensityScale);
       }
-      currentGainDb = currentGainDb * 0.96 + targetCut * 0.04;
+      const gainCoeff = targetCut < currentGainDb ? gainAttackCoeff : gainReleaseCoeff;
+      currentGainDb = gainCoeff * currentGainDb + (1 - gainCoeff) * targetCut;
       if (Math.abs(currentGainDb) > maxGr) maxGr = Math.abs(currentGainDb);
 
       // Update filter coeffs periodically (every 32 samples) for CPU efficiency
