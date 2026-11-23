@@ -44,6 +44,19 @@ export function isAnalysisMeasurementReliable(
   analysis: AudioAnalysis | null | undefined,
 ): analysis is AudioAnalysis {
   if (!analysis) return false;
+  const zoneEnergy = analysis.zoneEnergyDb;
+  if (!zoneEnergy || typeof zoneEnergy !== 'object') return false;
+  const zoneKeys: Array<keyof typeof zoneEnergy> = [
+    'sub',
+    'bass',
+    'lowMid',
+    'mid',
+    'highMid',
+    'presence',
+    'air',
+  ];
+  if (zoneKeys.some((key) => !Number.isFinite(zoneEnergy[key]))) return false;
+
   const requiredFinite = [
     analysis.durationSec,
     analysis.sampleRate,
@@ -96,7 +109,12 @@ export function isAnalysisMeasurementReliable(
   }
 
   if (!Array.isArray(analysis.resonances) || analysis.resonances.some(
-    (peak) => !Number.isFinite(peak.freqHz) || peak.freqHz <= 0 || !Number.isFinite(peak.excessDb),
+    (peak) =>
+      !peak ||
+      typeof peak !== 'object' ||
+      !Number.isFinite(peak.freqHz) ||
+      peak.freqHz <= 0 ||
+      !Number.isFinite(peak.excessDb),
   )) return false;
   if (!Array.isArray(analysis.loudnessHistoryLufs) || analysis.loudnessHistoryLufs.length === 0 ||
     analysis.loudnessHistoryLufs.some((value) => !Number.isFinite(value))) return false;
