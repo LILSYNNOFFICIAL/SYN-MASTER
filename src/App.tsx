@@ -90,12 +90,27 @@ import { LeftLibraryPanel } from './components/LeftLibraryPanel';
 import { MasteringRack } from './components/MasteringRack';
 import { MeterBridge } from './components/MeterBridge';
 import { SpectrumAndEQCanvas, WaveformTimelineCanvas } from './components/CanvasVisualizers';
-import { SynLabView } from './components/SynLabView';
-import { StemIntelligencePanel } from './components/StemIntelligencePanel';
-import { AiMasterView } from './components/AiMasterView';
-import { BattleModeView } from './components/BattleModeView';
-import { QualityControlView, ReferenceMatchView } from './components/ReferenceAndQcViews';
-import { PluginManagerView } from './components/PluginManagerView';
+const SynLabView = React.lazy(() =>
+  import('./components/SynLabView').then(({ SynLabView }) => ({ default: SynLabView })),
+);
+const StemIntelligencePanel = React.lazy(() =>
+  import('./components/StemIntelligencePanel').then(({ StemIntelligencePanel }) => ({ default: StemIntelligencePanel })),
+);
+const AiMasterView = React.lazy(() =>
+  import('./components/AiMasterView').then(({ AiMasterView }) => ({ default: AiMasterView })),
+);
+const BattleModeView = React.lazy(() =>
+  import('./components/BattleModeView').then(({ BattleModeView }) => ({ default: BattleModeView })),
+);
+const ReferenceMatchView = React.lazy(() =>
+  import('./components/ReferenceAndQcViews').then(({ ReferenceMatchView }) => ({ default: ReferenceMatchView })),
+);
+const QualityControlView = React.lazy(() =>
+  import('./components/ReferenceAndQcViews').then(({ QualityControlView }) => ({ default: QualityControlView })),
+);
+const PluginManagerView = React.lazy(() =>
+  import('./components/PluginManagerView').then(({ PluginManagerView }) => ({ default: PluginManagerView })),
+);
 import { ExportModal, SettingsModal } from './components/Modals';
 import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 
@@ -2466,6 +2481,16 @@ export default function App() {
           )}
 
           {/* Active Workspace Tab Content */}
+          <React.Suspense
+            fallback={
+              <div
+                role="status"
+                className="rounded border border-[#242732] bg-[#111217] px-4 py-6 text-center text-xs text-[#9CA3AF]"
+              >
+                Loading workspace…
+              </div>
+            }
+          >
           {activeTab === 'studio' && activeTrack && (
             <section className="p-3.5 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2738,6 +2763,7 @@ export default function App() {
               onStopWasapiAudition={handleStopWasapiAudition}
             />
           )}
+          </React.Suspense>
         </main>
 
       </div>
