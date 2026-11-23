@@ -63,6 +63,32 @@ test('ITU-R BS.1770 LUFS & True Peak measurement on calibrated 1kHz sine', () =>
   assert.ok(Math.abs(analysis.phaseCorrelation - 1.0) < 0.01);
 });
 
+test('Analyzer detects phase cancellation isolated to the high-frequency band', () => {
+  const sr = 48000;
+  const durationSec = 1.5;
+  const n = Math.round(sr * durationSec);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const low = 0.22 * Math.sin((2 * Math.PI * 80 * i) / sr);
+    const mid = 0.18 * Math.sin((2 * Math.PI * 1000 * i) / sr);
+    const high = 0.16 * Math.sin((2 * Math.PI * 8000 * i) / sr);
+    left[i] = low + mid + high;
+    right[i] = low + mid - high;
+  }
+
+  const analysis = analyzeAudioBuffer([left, right], sr);
+  assert.ok(analysis.phaseCorrelation > 0.2, 'Global correlation should hide this band-limited fault');
+  assert.ok(analysis.lowEndCorrelation > 0.8, 'Low-frequency mono compatibility should remain healthy');
+  assert.ok(
+    analysis.stereoBandCorrelation,
+    'Analyzer must expose separate low, mid, and high band correlation measurements',
+  );
+  assert.ok(analysis.stereoBandCorrelation.low > 0.8);
+  assert.ok(analysis.stereoBandCorrelation.mid > 0.8);
+  assert.ok(analysis.stereoBandCorrelation.high < -0.7);
+});
+
 test('Parametric EQ Bell Boost increases 1kHz level while HPF attenuates 40Hz', () => {
   const sr = 48000;
   const [l1k, r1k] = makeSineStereo(1000, 0.1, 1.0, sr);
