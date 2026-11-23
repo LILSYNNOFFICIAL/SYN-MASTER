@@ -126,6 +126,31 @@ The runner prints a JSON summary (before/after LUFS, dBTP, LRA, crest, clicks wi
 
 ---
 
+## Current engineering worklist (owner-directed, Nov 23 2026)
+
+This section is the active implementation queue and progress ledger. Update it in the same commit as each meaningful code change. A checkbox is only checked after the corresponding code and regression coverage are present; CI and runtime verification are recorded separately. Do not weaken an objective, detector, regression guard, or test to obtain a pass.
+
+### Execution order
+
+- [ ] **P0-1: Unify sub-bass excess reporting, correction, and objective verification.** The diagnostic log currently calls Sub/Bass above +2 dB an issue and prints a target of <= 0 dB, but its local status accepts <= +1 dB; the objective gate has no Sub/Bass check. Make the displayed target, post-render gate, log status, and deterministic repair path use one measured Sub (20-60 Hz) minus Bass (60-250 Hz) ratio. When the source finding is triggered (> +2 dB), the delivered render must measure <= 0 dB to pass. Add synthetic regression tests and a real-track check before release. Files: `masterTargets.ts`, `diagnosticLog.ts`, `directorEngine.ts`, `postFixVerification.test.ts`.
+- [ ] **P0-2: Bound offline-render memory and CPU on long tracks/mobile browsers.** Audit full-track allocations in `offlineDsp.ts`, especially wet/dry copies, multiband buffers, lookahead limiter buffers, and true-peak oversampling. Reuse scratch storage only where aliasing and channel lifetime are proven safe; preserve exact DSP behavior with numerical regression tests. Add duration-based memory/benchmark evidence. Files: `offlineDsp.ts`, `analyzer.ts`, DSP tests.
+- [ ] **P1-1: Align objective and QC loudness tolerances.** Remove contradictory fixed-vs-objective tolerances and add boundary tests for every objective.
+- [ ] **P1-2: Review click acceptance policy.** The current relative allowance can retain 25% of source clicks. Do not impose a new absolute cap until calibrated against real tracks and the existing source-transient false-positive protections.
+- [ ] **P1-3: Harden codec export resource handling.** Stream the WAV request to a temporary file, bound concurrent FFmpeg jobs, preserve the existing per-client rate limiter and cleanup guarantees, and enforce same-origin policy only after confirming AI Studio's actual request origin behavior. Keep valid long-form masters supported; do not choose an arbitrary body limit that rejects supported duration/sample-rate combinations. Files: `server.ts`, export integration tests.
+- [ ] **P1-4: Make FFmpeg-dependent tests portable.** Detect FFmpeg availability and clearly skip only integration cases that require the absent executable; CI must continue installing FFmpeg and run those tests.
+- [ ] **P1-5: Discover tests automatically.** Replace the hand-maintained test command only after proving the glob includes every current TypeScript and MJS test file and does not execute fixtures or generated output.
+- [ ] **P1-6: Enable TypeScript strictness incrementally.** First `strict`, then `noUncheckedIndexedAccess` as a separate stage. Fix actual errors without broad casts or suppressions. Preserve AI Studio's entry/build chain.
+- [ ] **P1-7: Inspect the `npm start` runtime path.** Verify Node 22 deployment behavior before changing `node server.ts`; `npm run dev` remains `tsx server.ts`.
+- [ ] **P2: Defer broad App/director refactors, lint/format toolchain additions, native cross-platform work, and cosmetic repository cleanup** until mastering correctness and mobile resource use have regression coverage.
+
+### Commit policy and implementation ledger
+
+- Every implementation commit goes directly to `main`. Never create a branch, pull request, or force-push.
+- Each commit must update this README with its subject, scope, and verification status. Small conventional commits only.
+- Re-read the current `main` head immediately before writing. Use a fast-forward update with an expected-head check; if the head moved, stop and reconcile rather than overwrite.
+- A passing TypeScript check or desktop CI is not evidence of Android Chrome stability or subjective mastering quality. Record those separately.
+- [ ] **docs: establish prioritized engineering worklist** — this README worklist and commit-ledger policy (this commit; SHA to be recorded by the next commit).
+
 # Reference: existing capabilities and setup
 
 ## Core capabilities
