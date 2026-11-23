@@ -898,6 +898,11 @@ export default function App() {
       directorRunIdRef.current += 1;
       setDirectorRunning(false);
       setDirectorPaused(false);
+      // A stale Gemini request intentionally cannot clear its own loading state.
+      // Reset request UI here when the source changes so the new track is never left blocked.
+      setAiLoading(false);
+      setAiError(null);
+      setAiStrategy(null);
       setAiLifecycleState('Ready');
       setPreAiChainSnapshot(null);
       setAiChainAccepted(null);
