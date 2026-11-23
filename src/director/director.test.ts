@@ -883,3 +883,39 @@ test('Autonomous loop rejects a first-pass chain that introduces new harmonic di
     'regressed',
   );
 });
+
+
+test('Noise objective score is invariant to uniform attenuation and rewards level-matched noise reduction', () => {
+  const measured = analyzeAudioBuffer(makeBalancedStereo(), SR);
+  const pre = {
+    ...measured,
+    integratedLufs: -12,
+    rmsDb: -12,
+    noiseFloorDb: -40,
+  };
+  const uniformlyAttenuated = {
+    ...pre,
+    integratedLufs: -16,
+    rmsDb: -16,
+    noiseFloorDb: -44,
+  };
+  const noiseReduced = {
+    ...uniformlyAttenuated,
+    noiseFloorDb: -46,
+  };
+  const objective = resolveObjectiveTarget('streaming');
+  const scoreFor = (post: typeof pre) => {
+    const qc = runQualityControl(pre, post, QC_TARGET_PROFILES[0]);
+    const evaluation = evaluateMultiObjectiveMetrics(pre, post, objective, qc);
+    return evaluation.dimensions.find((dimension) => dimension.key === 'noise')?.score;
+  };
+  assert.equal(
+    scoreFor(uniformlyAttenuated),
+    scoreFor(pre),
+    'Uniform gain reduction must not improve the noise score',
+  );
+  assert.ok(
+    Number(scoreFor(noiseReduced)) > Number(scoreFor(uniformlyAttenuated)),
+    'Noise reduction that improves level-matched noise floor must improve the noise score',
+  );
+});
