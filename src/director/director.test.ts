@@ -370,7 +370,7 @@ test('Bass-vs-mid residual drives a targeted, proportionate low-shelf refinement
   const eq = createProcessorModule('parametric-eq');
 
   const refinement = deriveRefinementCommands(pre, post, [eq], objective, qc, evaluation);
-  const eqCommand = refinement.commands.find((command) => command.op === 'configure' && command.op !== 'reorder' && command.processorType === 'parametric-eq');
+  const eqCommand = refinement.commands.find((command) => command.op === 'configure' && command.processorType === 'parametric-eq');
   assert.ok(eqCommand && eqCommand.op === 'configure', 'Bass excess must produce an EQ refinement command');
   const bands = (eqCommand.paramsPatch as { bands?: Array<{ shape: string; freq: number; gain: number }> }).bands;
   assert.ok(bands?.some((band) => band.shape === 'lowshelf' && band.freq >= 70 && band.freq <= 140 && band.gain < 0),
@@ -385,7 +385,7 @@ test('Bass-vs-mid residual drives a targeted, proportionate low-shelf refinement
   assert.ok((appliedEq.params as { bands: Array<{ shape: string; gain: number }> }).bands.some((band) => band.shape === 'lowshelf' && band.gain === bassCut.gain));
 
   const withoutEq = deriveRefinementCommands(pre, post, [], objective, qc, evaluation);
-  assert.ok(withoutEq.commands.some((command) => command.op === 'add' && command.op !== 'reorder' && command.processorType === 'parametric-eq'),
+  assert.ok(withoutEq.commands.some((command) => command.op === 'add' && command.processorType === 'parametric-eq'),
     'The Director must add a bass-targeted EQ when no parametric EQ exists');
 });
 test('Anti-oscillation step damping reduces LUFS step magnitude when sign reverses', () => {
