@@ -612,7 +612,7 @@ test('Reference comparison preserves raw band deltas but bases EQ guidance on le
     'Genuine relative bass difference should produce a restrained bass recommendation',
   );
   assert.ok(
-    shapedComparison.suggestedActions.some((action) => /darker in the top octave by 3\.0 dB/.test(action)),
+    shapedComparison.suggestedActions.some((action) => /darker in the top octave relative to the midrange by 3\.0 dB/.test(action)),
     'Genuine relative air difference should remain visible in reference guidance',
   );
 });
