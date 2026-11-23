@@ -9,6 +9,7 @@ import { analyzeTrackIntelligence } from './analyzeIntelligence';
 import { applyStructuredChainCommands } from './chainCommands';
 import {
   buildExplainableMasterPlan,
+  compareReferenceIntelligent,
   deriveRefinementCommands,
   evaluateMultiObjectiveMetrics,
   resolveObjectiveTarget,
@@ -548,6 +549,20 @@ test('Reference EQ matching removes overall loudness bias and responds only to r
     false,
     'A level-only reference difference must not create bass or air EQ boosts/cuts',
   );
+  const levelOnlyComparison = compareReferenceIntelligent(
+    sourceAnalysis,
+    sourceAnalysis,
+    louderReference,
+  );
+  assert.ok(
+    levelOnlyComparison.zoneDeltasDb.bass > 5.5,
+    'Raw band-level telemetry should remain available to explain the loudness difference',
+  );
+  assert.equal(
+    levelOnlyComparison.suggestedActions.some((action) => /low-shelf|high-shelf/i.test(action)),
+    false,
+    'A level-only reference difference must not generate tonal EQ recommendations',
+  );
 
   const shapedReference = {
     ...louderReference,
@@ -571,4 +586,25 @@ test('Reference EQ matching removes overall loudness bias and responds only to r
   assert.ok(airMatch, 'A genuine -1.5 dB relative air difference should produce a restrained highshelf adjustment');
   assert.ok(Math.abs(bassMatch.gain - 0.9) <= 0.11, 'Expected +0.9 dB relative bass trim, got ' + bassMatch.gain + ' dB');
   assert.ok(Math.abs(airMatch.gain + 0.6) <= 0.11, 'Expected -0.6 dB relative air trim, got ' + airMatch.gain + ' dB');
+}  const comparisonReference = {
+    ...louderReference,
+    zoneEnergyDb: {
+      ...louderReference.zoneEnergyDb,
+      bass: louderReference.zoneEnergyDb.bass + 2.0,
+      air: louderReference.zoneEnergyDb.air - 3.0,
+    },
+  };
+  const shapedComparison = compareReferenceIntelligent(
+    sourceAnalysis,
+    sourceAnalysis,
+    comparisonReference,
+  );
+  assert.ok(
+    shapedComparison.suggestedActions.some((action) => /warmer bass weight/.test(action) && /\+2\.0 dB/.test(action)),
+    'Genuine relative bass difference should still produce a restrained bass recommendation',
+  );
+  assert.ok(
+    shapedComparison.suggestedActions.some((action) => /darker in the top octave by 3\.0 dB/.test(action)),
+    'Genuine relative air difference should remain visible in reference guidance',
+  );
 });
