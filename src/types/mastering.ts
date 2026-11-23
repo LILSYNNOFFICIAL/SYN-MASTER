@@ -250,6 +250,7 @@ export interface AudioAnalysis {
   midSideRatioDb: number;
   phaseCorrelation: number; // -1 to +1
   lowEndCorrelation: number; // -1 to +1
+  stereoBandCorrelation?: { low: number; mid: number; high: number };
   lrBalanceDb: number;
   monoCompatibilityScore: number; // 0 to 100
   clippedSamples: number;
