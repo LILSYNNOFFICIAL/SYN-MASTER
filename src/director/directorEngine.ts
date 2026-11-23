@@ -1832,7 +1832,7 @@ function buildFinalReportFromState(params: {
     postChainFingerprint: hasExecutedProcessing ? chainFp : undefined,
     postProcessingStatus: hasExecutedProcessing ? 'ready' : 'idle',
     appliedCorrections: [
-      ...(stemProcessingApplied
+      ...(params.stemProcessingApplied
         ? (() => {
             const stemModules = Object.values(params.stemChainsById ?? {})
               .flat()
