@@ -511,6 +511,22 @@ function classifyVerifiedFinding(opts: {
       'Return to an unclipped premaster or use a dedicated declipping restoration process before mastering. Output gain reduction can restore headroom, but it cannot reconstruct waveform peaks that were already flattened in the source.';
     verificationSummary =
       `VERIFICATION: The source entered mastering with ${sourceClippedSamples} sample(s) at or near full scale. The rendered output reports ${outputClippedSamples}, but level reduction alone cannot establish that missing waveform peaks were reconstructed. This workflow has no verified source-declipping reconstruction step. Status: UNRESOLVED`;
+  } else if (finding.id === 'diag-overcompressed' && pre.dynamicRangeDb < thresholds.dynamicRangeMin) {
+    status = 'UNRESOLVED';
+    remainingDeviation =
+      `The premaster entered mastering with only ${pre.dynamicRangeDb.toFixed(1)} dB dynamic range (source threshold >= ${thresholds.dynamicRangeMin.toFixed(1)} dB); the rendered output reports ${post.dynamicRangeDb.toFixed(1)} dB.`;
+    nextRecommendedAction =
+      'Use an uncompressed premaster or separated stems to recover transient and microdynamic detail. A changed stereo-master DR or crest reading does not prove that transient information already removed before mastering has been reconstructed.';
+    verificationSummary =
+      `VERIFICATION: The source entered mastering already dynamically compressed (${pre.dynamicRangeDb.toFixed(1)} dB DR, ${pre.crestFactorDb.toFixed(1)} dB crest). The rendered output reports ${post.dynamicRangeDb.toFixed(1)} dB DR and ${post.crestFactorDb.toFixed(1)} dB crest, but meter movement alone cannot establish reconstruction of source transients or microdynamics. This workflow has no verified source-dynamics reconstruction step. Status: UNRESOLVED`;
+  } else if (finding.id === 'diag-thd' && pre.thdEstimatePercent > thresholds.thdMaxPercent) {
+    status = 'UNRESOLVED';
+    remainingDeviation =
+      `The source entered mastering with ${pre.thdEstimatePercent.toFixed(2)}% estimated THD (source threshold <= ${thresholds.thdMaxPercent.toFixed(1)}%); the rendered output reports ${post.thdEstimatePercent.toFixed(2)}%.`;
+    nextRecommendedAction =
+      'Return to a cleaner premaster or original stems, or use a dedicated distortion-restoration process with independent artifact checks. This mastering chain has no verified source de-distortion reconstruction step.';
+    verificationSummary =
+      `VERIFICATION: The source entered mastering with ${pre.thdEstimatePercent.toFixed(2)}% estimated harmonic distortion. The rendered output reports ${post.thdEstimatePercent.toFixed(2)}%, but a lower estimate alone does not establish that source distortion artifacts were reconstructed or removed transparently. This workflow has no verified source de-distortion reconstruction step. Status: UNRESOLVED`;
   } else if (finding.id === 'diag-mud') {
     const preLowMid = pre.zoneEnergyDb.lowMid - pre.zoneEnergyDb.mid;
     const postLowMid = post.zoneEnergyDb.lowMid - post.zoneEnergyDb.mid;
