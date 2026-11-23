@@ -97,7 +97,7 @@ Four problems combined so that "FIX ALL & VERIFY" could say a track was mastered
 - Mouse-wheel Q on EQ nodes uses React's passive wheel handler, so the page can scroll while adjusting Q.
 - [x] Fades now run AFTER the effects chain (`processChainOffline(..., postFades)`), in preview, Fix-All, battle, checkpoint audition, WASAPI audition and export, so the limiter sees the unfaded signal.
 - Only the director, post-fix verification, inventory and DSP unit tests were re-run for these changes, plus `tsc` and `vite build`. Run `npm test` before the next release and test inside AI Studio after syncing.
-- The click detector ignores clicks in the first and last ~3 ms of the file (not enough audio to judge isolation).
+- [x] The click detector covers the first and last ~3 ms (`findEdgeClick` in `src/dsp/clickDetect.ts`: audio outside the file counts as silence, so a non-zero first/last sample or a spike at 0:00 is a click; background is measured 3-13 ms inside). De-click repairs edge clicks with a mute + 2 ms raised-cosine micro-fade (`repairEdgeClicksChannel`). Analysis exposes `clickAtStart`, `clickAtEnd`, `edgeStartStep`, `edgeEndStep`; an edge click always fails the gate.
 
 ---
 

@@ -118,12 +118,14 @@ export function evaluateMasterTargets(
   const preClicks = pre?.clickCount ?? 0;
   // A master must not add clicks, and must remove most of the ones the source had.
   const clickLimit = Math.max(0, Math.floor(preClicks * 0.25));
+  // A click in the first/last ~3 ms is always fixable (micro-fade), so it always fails.
+  const edgeClick = Boolean(post.clickAtStart || post.clickAtEnd);
   checks.push({
     id: 'clicks',
     label: 'Clicks / pops',
-    measured: `${clicks}${post.clicksPerMinute !== undefined ? ` (${post.clicksPerMinute}/min)` : ''}`,
-    target: preClicks > 0 ? `≤ ${clickLimit} (source had ${preClicks})` : '0',
-    status: st(clicks <= clickLimit),
+    measured: `${clicks}${post.clicksPerMinute !== undefined ? ` (${post.clicksPerMinute}/min)` : ''}${post.clickAtStart ? ' · click at 0:00' : ''}${post.clickAtEnd ? ' · click at end' : ''}`,
+    target: (preClicks > 0 ? `≤ ${clickLimit} (source had ${preClicks})` : '0') + ', none at the file edges',
+    status: st(clicks <= clickLimit && !edgeClick),
     fix: 'Restore: de-click on, sensitivity up; transient spike repair on',
   });
 

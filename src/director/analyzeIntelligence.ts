@@ -279,6 +279,8 @@ export function analyzeTrackIntelligence(
         ...(analysis.clickTimesSec && analysis.clickTimesSec.length > 0
           ? [`First at: ${analysis.clickTimesSec.slice(0, 6).map((t) => `${t.toFixed(2)}s`).join(', ')}`]
           : []),
+        ...(analysis.clickAtStart ? [`Click at 0:00 (first ~3 ms; first sample ${(analysis.edgeStartStep ?? 0).toFixed(4)})`] : []),
+        ...(analysis.clickAtEnd ? [`Click at the end (last ~3 ms; last sample ${(analysis.edgeEndStep ?? 0).toFixed(4)})`] : []),
       ],
       metrics: {
         clickCount,

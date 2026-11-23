@@ -818,6 +818,10 @@ export function analyzeAudioBuffer(
     clickCount: clicks.clickCount,
     clicksPerMinute: clicks.clicksPerMinute,
     clickTimesSec: clicks.clickTimesSec,
+    clickAtStart: clicks.startClick,
+    clickAtEnd: clicks.endClick,
+    edgeStartStep: clicks.startStep,
+    edgeEndStep: clicks.endStep,
   };
 }
 

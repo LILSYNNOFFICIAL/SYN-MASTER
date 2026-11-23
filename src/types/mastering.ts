@@ -308,6 +308,12 @@ export interface AudioAnalysis {
   clickCount?: number;
   clicksPerMinute?: number;
   clickTimesSec?: number[];
+  /** Click in the first / last ~3 ms of the file (clickDetect edge test). */
+  clickAtStart?: boolean;
+  clickAtEnd?: boolean;
+  /** |first sample| and |last sample|: the jump from/to silence at the file edges. */
+  edgeStartStep?: number;
+  edgeEndStep?: number;
 }
 
 export interface AudioTrackAsset {

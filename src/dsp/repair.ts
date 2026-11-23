@@ -11,6 +11,7 @@
  * the Fix-All loop can re-render and re-measure the result.
  */
 import { createBiquadState, designHighPass, processBiquadSample } from './biquad';
+import { findEdgeClick } from './clickDetect';
 
 export interface RepairSettings {
   /** 0..100 de-click strength (0 = off). */
@@ -103,6 +104,29 @@ function bridgeHermite(ch: Float32Array, a: number, b: number): void {
   }
 }
 
+/**
+ * Repairs a click in the first/last ~3 ms (where the Hermite bridge has no audio on one
+ * side): everything up to just past the click is silenced and the audio is faded back in
+ * (or out, at the end) with a 2 ms raised cosine. Returns 1 per repaired edge.
+ */
+export function repairEdgeClicksChannel(ch: Float32Array, sampleRate: number, ratio = 10): number {
+  const n = ch.length;
+  if (n < 64) return 0;
+  const pad = Math.max(2, Math.round(sampleRate * 0.0005));
+  const fade = Math.max(8, Math.round(sampleRate * 0.002));
+  let repairs = 0;
+  for (const reverse of [false, true]) {
+    const hit = findEdgeClick(ch, sampleRate, reverse, ratio);
+    if (hit.index < 0) continue;
+    const mute = Math.min(n, hit.index + pad);
+    const idx = (k: number) => (reverse ? n - 1 - k : k);
+    for (let k = 0; k < mute; k++) ch[idx(k)] = 0;
+    for (let k = 0; k < fade && mute + k < n; k++) ch[idx(mute + k)] *= 0.5 - 0.5 * Math.cos((Math.PI * k) / fade);
+    repairs++;
+  }
+  return repairs;
+}
+
 /** Clamp single-sample spikes that jump far above both neighbours. Returns repairs. */
 export function repairSpikesChannel(ch: Float32Array): number {
   let repairs = 0;
@@ -190,7 +214,11 @@ export function applyRepair(
     const ratio = 20 - 12 * declick;
     const half = Math.max(2, Math.round(sampleRate * (0.0005 + 0.001 * declick)));
     clicksRepaired += repairClicksChannel(left, sampleRate, ratio, 0.02, half);
-    if (!stereoSame) clicksRepaired += repairClicksChannel(right, sampleRate, ratio, 0.02, half);
+    if (!stereoSame) clicksRepaired += repairClicksChannel(right, sampleRate, ratio, 0.02, half);    // Edge clicks (first/last ~3 ms) use a micro-fade; done on both channels together so
+    // the stereo image of the first/last milliseconds stays aligned.
+    const edgeL = repairEdgeClicksChannel(left, sampleRate, ratio);
+    const edgeR = stereoSame ? 0 : repairEdgeClicksChannel(right, sampleRate, ratio);
+    clicksRepaired += Math.max(edgeL, edgeR);
   }
   const crackle = ((settings.decrackle ?? 0) / 100) * intensityScale;
   if (crackle > 0) {

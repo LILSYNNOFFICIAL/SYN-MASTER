@@ -431,3 +431,27 @@ test('standalone integrated loudness measurement bounds full-track Float32 scrat
     `Scratch reuse changed calibrated integrated LUFS: ${integratedLufs}`,
   );
 });
+
+test('Click detector covers the first and last ~3 ms; de-click repairs edge clicks with a micro-fade', async () => {
+  const { detectClicks } = await import('./clickDetect');
+  const { applyRepair } = await import('./repair');
+  const sr = 48000;
+  const n = sr;
+  const mk = () => {
+    const a = new Float32Array(n);
+    for (let i = 0; i < n; i++) a[i] = 0.2 * Math.sin((2 * Math.PI * 220 * i) / sr + 0.3);
+    return a;
+  };
+  const L = mk();
+  const R = mk();
+  L[48] += 0.4; // click 1 ms in
+  R[48] += 0.4;
+  const before = detectClicks([L, R], sr);
+  assert.equal(before.startClick, true);
+  assert.equal(before.endClick, true, 'file cut off mid-waveform must count as an end click');
+  applyRepair(L, R, sr, { declick: 80 });
+  const after = detectClicks([L, R], sr);
+  assert.equal(after.startClick, false);
+  assert.equal(after.endClick, false);
+  assert.equal(after.clickCount, 0);
+});
