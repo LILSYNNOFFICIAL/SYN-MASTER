@@ -1,6 +1,6 @@
 import type { ExportConfig } from '../types/mastering';
 
-const DEFAULT_EXPORT_CONFIG: ExportConfig = {
+export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   filename: 'SYN_Master_Output',
   format: 'wav',
   wavBitDepth: 24,
