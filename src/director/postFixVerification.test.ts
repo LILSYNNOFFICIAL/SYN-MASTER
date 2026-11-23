@@ -903,6 +903,7 @@ test('Noise cleanup cannot be marked resolved by uniform attenuation that leaves
     ...baseline,
     noiseFloorDb: -44,
     rmsDb: -16,
+    integratedLufs: baseline.integratedLufs - 4,
   };
   const report = verifyPostFixAnalysis({
     baselineAnalysis: baseline,
