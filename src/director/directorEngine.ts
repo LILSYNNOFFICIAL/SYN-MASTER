@@ -1439,9 +1439,8 @@ export function deriveRefinementCommands(
         highWidth: number;
         monoBassBelowHz: number;
         lrBalanceDb: number;
-        intensity?: number;
       };
-      const imagerIntensityScale = Math.max(0.15, Math.min(1, (ip.intensity ?? 100) / 100));
+      const imagerIntensityScale = Math.max(0.15, Math.min(1, imgMod.wetDry));
       const correctedLrBalance = Math.max(
         -6,
         Math.min(6, ip.lrBalanceDb - (post.lrBalanceDb * 0.9) / imagerIntensityScale),
@@ -2255,7 +2254,7 @@ export async function runAutonomousDirectorLoop(
       // Processing restraint is a preference/effort dimension, not a technical failure.
       // Actual damage is guarded independently by transient, dynamics, THD, noise, phase,
       // clipping, true-peak, and loudness regression checks above.
-      if (dimension.key === 'processingRestraint') return false;
+      if (dimension.key === 'musicalTransparency') return false;
       const previousScore = previousDimensionScores.get(dimension.key);
       return previousScore !== undefined && previousScore - dimension.score > 15;
     });
