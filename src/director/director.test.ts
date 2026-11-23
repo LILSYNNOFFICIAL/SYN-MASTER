@@ -970,3 +970,19 @@ test('Explainable plan still targets a genuinely isolated upper-mid resonance', 
     'The dynamic EQ target should remain near the measured isolated resonance',
   );
 });
+
+
+test('Noise objective remains unverified when the source contains no measurable quiet passage', () => {
+  const analysis = analyzeAudioBuffer(makeBalancedStereo(), SR);
+  const qc = runQualityControl(analysis, analysis, QC_TARGET_PROFILES[0]);
+  const evaluation = evaluateMultiObjectiveMetrics(
+    analysis,
+    analysis,
+    resolveObjectiveTarget('streaming'),
+    qc,
+  );
+  const noise = evaluation.dimensions.find((dimension) => dimension.key === 'noise');
+  assert.ok(noise);
+  assert.equal(noise.status, 'attention');
+  assert.match(noise.note, /unverified|quiet passage/i);
+});
