@@ -207,6 +207,7 @@ This section is the active implementation queue and progress ledger. Update it i
 - [x] **docs: clarify transferred-buffer ownership contract** — [`a0a105cc`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/a0a105ccf2eea2d62310b25aeee5b87393eb12ec); document the default copy-safe path versus explicit worker ownership and clarify the worker-client lifecycle comment. CI run 45283973497 passed.
 - [x] **docs: record worker ownership memory verification** — this commit; record 194/194 tests, strict TypeScript, production build, and Node 22 startup smoke test while retaining Android profiling as open.
 - [x] **feat: dock responsive mastering DAW and harden candidate verification** — [`d1d75381`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/d1d75381a29204a68e0e86a10b10dff363ba584c); shared source-transient click interpretation, safe fallback candidate selection, responsive desktop/tablet/Android Studio layout, and documented Windows/Android packaging requirements. CI run 45289071180 is pending; desktop and real-device visual checks remain open.
+- [x] **fix: preserve fallback stop reason and refine touch timeline** — [`bcbf616e`](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/commit/bcbf616e9f54dcc15632ca31d34a65350d28f22b); append fallback information without overwriting user-stop/budget context, and enable horizontal waveform scrubbing while allowing vertical touch scrolling.
 
 
 # Reference: existing capabilities and setup
