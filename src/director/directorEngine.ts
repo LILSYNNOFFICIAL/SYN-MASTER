@@ -1042,18 +1042,19 @@ export function evaluateMultiObjectiveMetrics(
 
   // 11. Reference Similarity (optional)
   if (reference) {
-    const refLufsErr = Math.abs(post.integratedLufs - reference.integratedLufs);
+    // Loudness delivery is already scored against the selected objective above.
+    // A reference's playback/mastering gain must not also penalize tonal/stereo similarity.
     const refSlopeErr = Math.abs(post.spectralSlopeDbPerOct - reference.spectralSlopeDbPerOct);
     const refWidthErr = Math.abs(post.stereoWidth - reference.stereoWidth) * 100;
-    const refScore = Math.max(0, Math.min(100, Math.round(100 - refLufsErr * 6 - refSlopeErr * 12 - refWidthErr * 0.4)));
+    const refScore = Math.max(0, Math.min(100, Math.round(100 - refSlopeErr * 12 - refWidthErr * 0.4)));
     dimensions.push({
       key: 'referenceSimilarity',
       label: 'Reference Alignment',
       status: refScore >= 80 ? 'optimal' : refScore >= 65 ? 'acceptable' : 'attention',
       score: refScore,
-      measuredSummary: `LUFS Δ ${(post.integratedLufs - reference.integratedLufs).toFixed(1)} · Slope Δ ${(post.spectralSlopeDbPerOct - reference.spectralSlopeDbPerOct).toFixed(2)}`,
-      targetSummary: `${reference.integratedLufs.toFixed(1)} LUFS · ${reference.spectralSlopeDbPerOct.toFixed(2)} dB/oct`,
-      note: 'Weighted comparison avoiding blind mix-flattening.',
+      measuredSummary: `LUFS Δ ${(post.integratedLufs - reference.integratedLufs).toFixed(1)} (informational) · Slope Δ ${(post.spectralSlopeDbPerOct - reference.spectralSlopeDbPerOct).toFixed(2)} · Width Δ ${((post.stereoWidth - reference.stereoWidth) * 100).toFixed(0)}%`,
+      targetSummary: `Slope ${reference.spectralSlopeDbPerOct.toFixed(2)} dB/oct · Width ${(reference.stereoWidth * 100).toFixed(0)}%`,
+      note: 'Level-neutral tonal/stereo comparison. LUFS difference is reported for context; delivery loudness is scored separately against the selected objective.',
     });
   } else {
     dimensions.push({
