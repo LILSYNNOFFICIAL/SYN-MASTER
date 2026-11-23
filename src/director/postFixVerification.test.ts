@@ -766,3 +766,48 @@ test('source clipping cannot be marked RESOLVED by simply attenuating the clippe
     'Gain reduction must never be reported as reconstruction of clipped source peaks',
   );
 });
+
+test('corrupted secondary telemetry is rejected before any finding can be resolved', () => {
+  const baseline = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const invalidAnalyses: Array<{ label: string; analysis: typeof baseline }> = [
+    {
+      label: 'non-finite clipping counter',
+      analysis: { ...baseline, clippedSamples: Number.NaN },
+    },
+    {
+      label: 'non-finite spectral zone',
+      analysis: {
+        ...baseline,
+        zoneEnergyDb: { ...baseline.zoneEnergyDb, lowMid: Number.NaN },
+      },
+    },
+    {
+      label: 'non-finite spectrum bin',
+      analysis: {
+        ...baseline,
+        spectrumBinsDb: baseline.spectrumBinsDb.map((value, index) => index === 3 ? Number.NaN : value),
+      },
+    },
+    {
+      label: 'out-of-range phase correlation',
+      analysis: { ...baseline, phaseCorrelation: 1.25 },
+    },
+  ];
+
+  for (const candidate of invalidAnalyses) {
+    const report = verifyPostFixAnalysis({
+      baselineAnalysis: baseline,
+      postAnalysis: candidate.analysis,
+      objective: 'streaming',
+      baselineAnalysisId: 'integrity-baseline',
+      postAnalysisId: `invalid-${candidate.label}`,
+      currentChainFingerprint: 'integrity-check',
+      postChainFingerprint: 'integrity-check',
+      postProcessingStatus: 'ready',
+    });
+    assert.equal(report.analysisFresh, false, `Must reject ${candidate.label}`);
+    assert.match(report.verificationError ?? '', /reliability/i);
+    assert.equal(report.resolvedFindings.length, 0, `Must not resolve findings from ${candidate.label}`);
+    assert.ok(report.activeFindings.every((finding) => finding.status === 'UNVERIFIED'));
+  }
+});
