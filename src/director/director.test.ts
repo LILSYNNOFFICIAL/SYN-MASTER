@@ -741,3 +741,41 @@ test('Explainable plan does not insert dynamic EQ for a coherent harmonic instru
     'Harmonic instrument partials alone must not trigger dynamic resonance cuts',
   );
 });
+
+
+test('Director narrows only the frequency band with localized anti-phase correlation', () => {
+  const channels = makeBalancedStereo();
+  const measured = analyzeAudioBuffer(channels, SR);
+  const post = {
+    ...measured,
+    phaseCorrelation: 0.72,
+    lowEndCorrelation: 0.91,
+    stereoBandCorrelation: { low: 0.91, mid: 0.88, high: -0.82 },
+  };
+  const imager = createProcessorModule('stereo-imager');
+  const chain = [imager];
+  const objective = resolveObjectiveTarget('streaming');
+  const qc = runQualityControl(measured, post, QC_TARGET_PROFILES[0]);
+  const evaluation = evaluateMultiObjectiveMetrics(measured, post, objective, qc);
+  const result = deriveRefinementCommands(
+    measured,
+    post,
+    chain,
+    objective,
+    qc,
+    evaluation,
+  );
+  const correction = result.commands.find((command) =>
+    command.processorType === 'stereo-imager' && command.op === 'configure',
+  );
+  assert.ok(correction && correction.op === 'configure');
+  const current = imager.params as { lowWidth: number; midWidth: number; highWidth: number; monoBassBelowHz: number };
+  const patch = correction.paramsPatch as Partial<typeof current>;
+  assert.ok(
+    typeof patch.highWidth === 'number' && patch.highWidth < current.highWidth,
+    'Negative high-band correlation must reduce high-band width',
+  );
+  assert.equal(patch.lowWidth, current.lowWidth, 'Healthy low band must not be narrowed');
+  assert.equal(patch.midWidth, current.midWidth, 'Healthy mid band must not be narrowed');
+  assert.equal(patch.monoBassBelowHz, current.monoBassBelowHz, 'High-band cancellation must not move the mono-bass crossover');
+});
