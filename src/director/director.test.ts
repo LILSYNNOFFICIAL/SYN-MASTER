@@ -280,7 +280,7 @@ test('CHAIN WITH AI repairs out-of-phase sub-bass using Stereo Imager mono-bass 
 
   assert.ok(
     report.finalChain.some((m) => m.type === 'stereo-imager'),
-    `Expected targeted stereo correction to survive closed-loop validation. Status=${report.status}; stop=${report.stopReason}; checkpoints=${JSON.stringify(report.checkpoints.map((checkpoint) => ({ pass: checkpoint.passNumber, outcome: checkpoint.iterationSummary.outcome, issue: checkpoint.iterationSummary.detectedIssue, fit: checkpoint.multiObjective.engineeringFitIndex, phase: checkpoint.analysis.phaseCorrelation, low: checkpoint.analysis.lowEndCorrelation, thd: checkpoint.analysis.thdEstimatePercent, dr: checkpoint.analysis.dynamicRangeDb })))}; activity=${JSON.stringify(report.activityLog.map((entry) => entry.message))}`,
+    `Expected targeted stereo correction to survive closed-loop validation. Status=${report.status}; stop=${report.stopReason}; checkpoints=${JSON.stringify(report.checkpoints.map((checkpoint) => ({ pass: checkpoint.passNumber, outcome: checkpoint.iterationSummary.outcome, issue: checkpoint.iterationSummary.detectedIssue, fit: checkpoint.multiObjective.engineeringFitIndex, phase: checkpoint.analysis.phaseCorrelation, low: checkpoint.analysis.lowEndCorrelation, lr: checkpoint.analysis.lrBalanceDb, thd: checkpoint.analysis.thdEstimatePercent, dr: checkpoint.analysis.dynamicRangeDb })))}; activity=${JSON.stringify(report.activityLog.map((entry) => entry.message))}`,
   );
   assert.ok(
     report.postAnalysis.lowEndCorrelation > report.preAnalysis.lowEndCorrelation + 0.35,
