@@ -63,6 +63,7 @@ const pick = (a: ReturnType<typeof analyzeAudioBuffer>) => ({
 });
 
 async function main() {
+  (globalThis as { __SYN_HEADLESS__?: boolean }).__SYN_HEADLESS__ = true;
   const [input, objectiveArg, outArg] = process.argv.slice(2);
   if (!input) throw new Error('usage: headless-master.ts <input> [objectiveId] [out.wav]');
   const objectiveId = (objectiveArg || 'streaming') as MasteringObjectiveId;

@@ -162,9 +162,10 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
     } = opts;
     const safePeakBins = Math.max(1, Math.min(8192, Math.floor(peakBins)));
     const durationSec = (sourceChannels[0]?.length ?? 0) / sampleRate;
-    // Outside a browser (headless Node runs, tests) there is no UI to freeze, so long
-    // files may fall back to the in-process renderer.
-    const requiresWorker = typeof window !== 'undefined' && durationSec > maxMainThreadFallbackDurationSec;
+    // Headless runs (scripts/headless-master.ts sets globalThis.__SYN_HEADLESS__) have no
+    // UI to freeze, so long files may fall back to the in-process renderer there.
+    const headless = Boolean((globalThis as { __SYN_HEADLESS__?: boolean }).__SYN_HEADLESS__);
+    const requiresWorker = !headless && durationSec > maxMainThreadFallbackDurationSec;
     const workerTimeoutMs = Math.max(
       1,
       Math.min(120_000, options.workerTimeoutMs ?? Math.max(45_000, durationSec * 1_500 + 15_000)),
