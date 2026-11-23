@@ -779,3 +779,66 @@ test('Director narrows only the frequency band with localized anti-phase correla
   assert.equal(patch.midWidth, current.midWidth, 'Healthy mid band must not be narrowed');
   assert.equal(patch.monoBassBelowHz, current.monoBassBelowHz, 'High-band cancellation must not move the mono-bass crossover');
 });
+
+
+test('Loudness refinement does not drive an already compressed premaster harder', () => {
+  const base = analyzeAudioBuffer(makeBalancedStereo(1.2, 0.18), SR);
+  const pre = { ...base, dynamicRangeDb: 4.0 };
+  const post = { ...pre, integratedLufs: -18.0 };
+  const objective = resolveObjectiveTarget('streaming');
+  const qc = runQualityControl(pre, post, QC_TARGET_PROFILES[0]);
+  const evaluation = evaluateMultiObjectiveMetrics(pre, post, objective, qc);
+  const maximizer = createProcessorModule('maximizer', {
+    params: { character: 'transparent', targetLufs: -14, ceilingDb: -1, transientEmphasis: 25, truePeak: true },
+  });
+  const result = deriveRefinementCommands(pre, post, [maximizer], objective, qc, evaluation);
+  assert.equal(
+    result.commands.some((command) =>
+      command.processorType === 'maximizer' && command.op === 'configure' &&
+      Object.prototype.hasOwnProperty.call(command.paramsPatch, 'targetLufs') &&
+      Number((command.paramsPatch as { targetLufs: number }).targetLufs) > -14,
+    ),
+    false,
+    'A low-DR premaster must not receive more maximizer drive merely to chase the LUFS target',
+  );
+  assert.equal(
+    result.commands.some((command) =>
+      command.processorType === 'maximizer' && command.op === 'configure' &&
+      Object.prototype.hasOwnProperty.call(command.paramsPatch, 'transientEmphasis'),
+    ),
+    false,
+    'Transient emphasis is not source-dynamics reconstruction',
+  );
+});
+
+test('Loudness refinement backs off processing-induced dynamic-range collapse', () => {
+  const base = analyzeAudioBuffer(makeBalancedStereo(1.2, 0.18), SR);
+  const pre = { ...base, dynamicRangeDb: 12.0 };
+  const post = { ...base, dynamicRangeDb: 6.0, integratedLufs: -14.0 };
+  const objective = resolveObjectiveTarget('streaming');
+  const qc = runQualityControl(pre, post, QC_TARGET_PROFILES[0]);
+  const evaluation = evaluateMultiObjectiveMetrics(pre, post, objective, qc);
+  const maximizer = createProcessorModule('maximizer', {
+    params: { character: 'transparent', targetLufs: -14, ceilingDb: -1, transientEmphasis: 25, truePeak: true },
+  });
+  const compressor = createProcessorModule('compressor', {
+    params: { mode: 'downward', thresholdDb: -22, ratio: 4, attackMs: 8, releaseMs: 90, kneeDb: 3, makeupDb: 0, scHpfHz: 40 },
+  });
+  const result = deriveRefinementCommands(pre, post, [maximizer, compressor], objective, qc, evaluation);
+  const maxCommand = result.commands.find((command) =>
+    command.processorType === 'maximizer' && command.op === 'configure',
+  );
+  const compCommand = result.commands.find((command) =>
+    command.processorType === 'compressor' && command.op === 'configure',
+  );
+  assert.ok(maxCommand && maxCommand.op === 'configure');
+  assert.ok(compCommand && compCommand.op === 'configure');
+  assert.ok(
+    Number((maxCommand.paramsPatch as { targetLufs: number }).targetLufs) < -14,
+    'Maximizer target should be eased quieter to restore headroom and transient contrast',
+  );
+  assert.ok(
+    Number((compCommand.paramsPatch as { ratio: number }).ratio) < 4,
+    'Bus compression ratio should be relaxed rather than increasing transient emphasis',
+  );
+});
