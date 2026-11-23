@@ -974,18 +974,36 @@ export function evaluateMultiObjectiveMetrics(
 
   // 6. Stereo Integrity
   const lrPen = Math.max(0, Math.abs(post.lrBalanceDb) - 0.5) * 20;
-  const phasePen = Math.max(0, 0.3 - post.phaseCorrelation) * 65 + Math.max(0, 0.45 - post.lowEndCorrelation) * 45;
-  const stereoScore = Math.max(0, Math.min(100, Math.round(100 - lrPen - phasePen)));
+  const phasePen =
+    Math.max(0, 0.3 - post.phaseCorrelation) * 65 +
+    Math.max(0, 0.45 - post.lowEndCorrelation) * 45;
+  const bandPhase = post.stereoBandCorrelation;
+  const bandPhasePen = bandPhase
+    ? Math.max(0, 0.45 - bandPhase.low) * 25 +
+      Math.max(0, 0.15 - bandPhase.mid) * 25 +
+      Math.max(0, 0.15 - bandPhase.high) * 25
+    : 0;
+  const stereoScore = Math.max(0, Math.min(100, Math.round(100 - lrPen - phasePen - bandPhasePen)));
   dimensions.push({
     key: 'stereoIntegrity',
     label: 'Stereo & Phase Integrity',
     status: stereoScore >= 85 ? 'optimal' : stereoScore >= 70 ? 'acceptable' : stereoScore >= 50 ? 'attention' : 'critical',
     score: stereoScore,
-    measuredSummary: `Corr ${post.phaseCorrelation.toFixed(2)} · Low ${post.lowEndCorrelation.toFixed(2)} · L/R ${post.lrBalanceDb.toFixed(2)} dB`,
-    targetSummary: 'Mono-safe bass · Centered L/R',
-    note: stereoScore < 75 ? 'Check low-end mono focus or L/R balance.' : 'Coherent stereo field.',
+    measuredSummary: `Corr ${post.phaseCorrelation.toFixed(2)} · Low ${post.lowEndCorrelation.toFixed(2)} · Bands L/M/H ${bandPhase ? `${bandPhase.low.toFixed(2)}/${bandPhase.mid.toFixed(2)}/${bandPhase.high.toFixed(2)}` : 'n/a'} · L/R ${post.lrBalanceDb.toFixed(2)} dB`,
+    targetSummary: 'Mono-safe bass · Coherent frequency bands · Centered L/R',
+    note: bandPhase && (bandPhase.low < 0.45 || bandPhase.mid < 0.15 || bandPhase.high < 0.15)
+      ? 'Frequency-localized mono cancellation risk; audition affected band-limited fold-down.'
+      : stereoScore < 75
+        ? 'Check low-end mono focus or L/R balance.'
+        : 'Coherent stereo field across measured bands.',
   });
-  if (post.lowEndCorrelation < 0.35 || post.phaseCorrelation < 0.1) limitingFactors.push('Phase / low-end mono correlation below safe threshold');
+  if (
+    post.lowEndCorrelation < 0.35 ||
+    post.phaseCorrelation < 0.1 ||
+    (bandPhase && (bandPhase.low < 0.45 || bandPhase.mid < 0 || bandPhase.high < 0))
+  ) {
+    limitingFactors.push('Phase / frequency-band mono compatibility below safe threshold');
+  }
 
   // 7. Distortion Control
   const thdDelta = Math.max(0, post.thdEstimatePercent - pre.thdEstimatePercent);
