@@ -6,7 +6,7 @@ import { processChainOffline } from '../dsp/offlineDsp';
 import { createProcessorModule } from '../dsp/chainValidation';
 import { runQualityControl, QC_TARGET_PROFILES } from '../dsp/qc';
 import type { AiChainLifecycleState, MasteringObjectiveId } from '../types/mastering';
-import { analyzeTrackIntelligence } from './analyzeIntelligence';
+import { analyzeTrackIntelligence, isAnalysisMeasurementReliable } from './analyzeIntelligence';
 import { applyStructuredChainCommands } from './chainCommands';
 import {
   buildExplainableMasterPlan,
@@ -917,5 +917,24 @@ test('Noise objective score is invariant to uniform attenuation and rewards leve
   assert.ok(
     Number(scoreFor(noiseReduced)) > Number(scoreFor(uniformlyAttenuated)),
     'Noise reduction that improves level-matched noise floor must improve the noise score',
+  );
+});
+
+
+test('Analysis reliability rejects malformed optional frequency-band phase telemetry', () => {
+  const analysis = analyzeAudioBuffer(makeBalancedStereo(), SR);
+  assert.equal(isAnalysisMeasurementReliable(analysis), true);
+  assert.equal(
+    isAnalysisMeasurementReliable({ ...analysis, stereoBandCorrelation: null } as unknown as typeof analysis),
+    false,
+    'Explicit null must not bypass optional stereo-band telemetry validation',
+  );
+  assert.equal(
+    isAnalysisMeasurementReliable({
+      ...analysis,
+      stereoBandCorrelation: { low: 0.2, mid: 1.2, high: -0.1 },
+    }),
+    false,
+    'Out-of-range band correlation must be rejected',
   );
 });
