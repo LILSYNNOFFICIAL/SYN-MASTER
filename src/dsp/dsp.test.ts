@@ -8,6 +8,7 @@ import { QC_TARGET_PROFILES, runQualityControl } from './qc';
 import { encodeWavBlob } from './wavEncoder';
 import { generateDemoMasterStem } from './demoAudio';
 import { buildAlgorithmicStrategy } from './presets';
+import { designHighPass, designHighShelf, processBiquadBuffer } from './biquad';
 
 function makeSineStereo(
   freqHz: number,
@@ -24,6 +25,56 @@ function makeSineStereo(
     r[i] = v;
   }
   return [l, r];
+}
+
+function referenceIntegratedLufs(channels: Float32Array[], sampleRate: number): number {
+  const numChannels = channels.length;
+  const left = channels[0];
+  if (!left || left.length === 0) return -70;
+  const right = numChannels > 1 ? channels[1] : left;
+  const shelf = Math.abs(sampleRate - 48000) < 1
+    ? { b0: 1.53512485958697, b1: -2.69169618940638, b2: 1.19839281085285, a1: -1.69065929318241, a2: 0.73248077421585 }
+    : designHighShelf(1681.974, 3.99984, 0.707175, sampleRate);
+  const rlb = Math.abs(sampleRate - 48000) < 1
+    ? { b0: 1, b1: -2, b2: 1, a1: -1.99004745483398, a2: 0.99007225036621 }
+    : designHighPass(38.135, 0.500327, sampleRate);
+  const workL = new Float32Array(left.length);
+  const workR = numChannels > 1 ? new Float32Array(left.length) : workL;
+  processBiquadBuffer(left, workL, shelf);
+  processBiquadBuffer(workL, workL, rlb);
+  if (numChannels > 1) {
+    processBiquadBuffer(right, workR, shelf);
+    processBiquadBuffer(workR, workR, rlb);
+  }
+  const blockSamples = Math.max(1, Math.round(sampleRate * 0.4));
+  const hopSamples = Math.max(1, Math.round(sampleRate * 0.1));
+  const blocks: number[] = [];
+  if (left.length < blockSamples) {
+    let energy = 0;
+    for (let i = 0; i < left.length; i++) energy += workL[i] ** 2 + (numChannels > 1 ? workR[i] ** 2 : 0);
+    blocks.push(energy / Math.max(1, left.length));
+  } else {
+    const ring = new Float64Array(blockSamples);
+    let rolling = 0;
+    for (let i = 0; i < left.length; i++) {
+      const energy = workL[i] ** 2 + (numChannels > 1 ? workR[i] ** 2 : 0);
+      const slot = i % blockSamples;
+      if (i >= blockSamples) rolling -= ring[slot];
+      ring[slot] = energy;
+      rolling += energy;
+      if (i + 1 >= blockSamples && (i + 1 - blockSamples) % hopSamples === 0) blocks.push(Math.max(0, rolling) / blockSamples);
+    }
+  }
+  const absGate = Math.pow(10, (-70 + 0.691) / 10);
+  const absPassed = blocks.filter((value) => value > absGate);
+  if (absPassed.length === 0) return -70;
+  const ungatedMean = absPassed.reduce((sum, value) => sum + value, 0) / absPassed.length;
+  const ungatedLufs = -0.691 + 10 * Math.log10(Math.max(ungatedMean, 1e-12));
+  const relGate = Math.pow(10, (ungatedLufs - 10 + 0.691) / 10);
+  const relPassed = absPassed.filter((value) => value > relGate);
+  if (relPassed.length === 0) return -70;
+  const gatedMean = relPassed.reduce((sum, value) => sum + value, 0) / relPassed.length;
+  return -0.691 + 10 * Math.log10(Math.max(gatedMean, 1e-12));
 }
 
 test('FFT detects exact frequency bin for 1000 Hz sine wave', () => {
@@ -587,5 +638,20 @@ test('Limiter wet/dry blending keeps a separate dry snapshot while reusing its l
   for (let i = 0; i < left.length; i++) {
     assert.ok(Math.abs(half[0][i] - (left[i] * 0.5 + wet[0][i] * 0.5)) < 1e-7);
     assert.ok(Math.abs(half[1][i] - (right[i] * 0.5 + wet[1][i] * 0.5)) < 1e-7);
+  }
+});
+
+test('Streaming K-weighted LUFS matches the full-buffer reference at 48 kHz and 44.1 kHz', () => {
+  for (const sr of [48000, 44100]) {
+    const [left, right] = makeSineStereo(997, 0.38, 1.4, sr);
+    for (let i = 0; i < left.length; i++) {
+      const t = i / sr;
+      const scale = t < 0.45 ? 0.12 : t < 0.9 ? 0.58 : 0.31;
+      left[i] *= scale;
+      right[i] = right[i] * scale * 0.91 + 0.025 * Math.sin(2 * Math.PI * 83 * t);
+    }
+    const expected = referenceIntegratedLufs([left, right], sr);
+    const actual = measureIntegratedLufs([left, right], sr);
+    assert.ok(Math.abs(actual - expected) < 1e-6, `LUFS mismatch at ${sr} Hz: expected ${expected}, got ${actual}`);
   }
 });

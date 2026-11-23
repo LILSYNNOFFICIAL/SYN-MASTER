@@ -2,7 +2,7 @@ import { detectClicks } from './clickDetect';
 import { measureShimmer } from './shimmerDetect';
 import type { AudioAnalysis, ResonancePeak, SpectralBandEnergy } from '../types/mastering';
 import { SPECTRAL_ZONES_HZ } from './bandMap';
-import { BiquadCoeffs, designHighPass, designHighShelf, designLowPass, processBiquadBuffer } from './biquad';
+import { BiquadCoeffs, createBiquadState, designHighPass, designHighShelf, designLowPass, processBiquadSample } from './biquad';
 import { computeMagnitudeSpectrumDb, createHannWindow } from './fft';
 
 export function linearToDb(val: number, floorDb = -120): number {
@@ -206,48 +206,83 @@ function estimateChannelTruePeak(samples: Float32Array): {
 /**
  * Fast ITU-R BS.1770-4 K-weighted integrated LUFS helper
  */
-export function measureIntegratedLufs(channels: Float32Array[], sampleRate: number): number {
+interface KWeightedBlockMetrics {
+  blockMeanSquares: number[];
+  blockLufsList: number[];
+}
+
+/**
+ * K-weight audio in a streaming pass. Filter state and the 400 ms energy ring are
+ * bounded by sample rate; no full-track filtered work buffers are needed.
+ *
+ * Math.fround mirrors the Float32Array writes in the former two-pass buffer path,
+ * preserving the rounding between shelf and RLB stages.
+ */
+function measureKWeightedBlocks(channels: Float32Array[], sampleRate: number): KWeightedBlockMetrics {
   const numChannels = channels.length;
   const left = channels[0];
-  if (!left || left.length === 0) return -70;
+  if (!left) return { blockMeanSquares: [], blockLufsList: [] };
   const right = numChannels > 1 ? channels[1] : left;
   const length = left.length;
-
   const { shelf, rlb } = designKWeightingFilters(sampleRate);
-  const workL = new Float32Array(length);
-  const workR = numChannels > 1 ? new Float32Array(length) : workL;
-  processBiquadBuffer(left, workL, shelf);
-  processBiquadBuffer(workL, workL, rlb);
-  if (numChannels > 1) {
-    processBiquadBuffer(right, workR, shelf);
-    processBiquadBuffer(workR, workR, rlb);
-  }
-
+  const shelfL = createBiquadState();
+  const rlbL = createBiquadState();
+  const shelfR = numChannels > 1 ? createBiquadState() : null;
+  const rlbR = numChannels > 1 ? createBiquadState() : null;
   const blockSamples = Math.max(1, Math.round(sampleRate * 0.4));
   const hopSamples = Math.max(1, Math.round(sampleRate * 0.1));
   const blockMeanSquares: number[] = [];
+  const blockLufsList: number[] = [];
 
   if (length < blockSamples) {
-    let ms = 0;
+    let totalEnergy = 0;
     for (let i = 0; i < length; i++) {
-      ms += workL[i] * workL[i] + (numChannels > 1 ? workR[i] * workR[i] : 0);
+      const lShelf = Math.fround(processBiquadSample(left[i], shelf, shelfL));
+      const lK = Math.fround(processBiquadSample(lShelf, rlb, rlbL));
+      let energy = lK * lK;
+      if (numChannels > 1 && shelfR && rlbR) {
+        const rShelf = Math.fround(processBiquadSample(right[i], shelf, shelfR));
+        const rK = Math.fround(processBiquadSample(rShelf, rlb, rlbR));
+        energy += rK * rK;
+      }
+      totalEnergy += energy;
     }
-    blockMeanSquares.push(ms / Math.max(1, length));
+    const meanSq = totalEnergy / Math.max(1, length);
+    blockMeanSquares.push(meanSq);
+    blockLufsList.push(-0.691 + 10 * Math.log10(Math.max(meanSq, 1e-12)));
   } else {
     const energyRing = new Float64Array(blockSamples);
     let rollingEnergy = 0;
     for (let i = 0; i < length; i++) {
-      const energy = workL[i] * workL[i] + (numChannels > 1 ? workR[i] * workR[i] : 0);
+      const lShelf = Math.fround(processBiquadSample(left[i], shelf, shelfL));
+      const lK = Math.fround(processBiquadSample(lShelf, rlb, rlbL));
+      let energy = lK * lK;
+      if (numChannels > 1 && shelfR && rlbR) {
+        const rShelf = Math.fround(processBiquadSample(right[i], shelf, shelfR));
+        const rK = Math.fround(processBiquadSample(rShelf, rlb, rlbR));
+        energy += rK * rK;
+      }
       const slot = i % blockSamples;
       if (i >= blockSamples) rollingEnergy -= energyRing[slot];
       energyRing[slot] = energy;
       rollingEnergy += energy;
       if (i + 1 >= blockSamples && (i + 1 - blockSamples) % hopSamples === 0) {
-        blockMeanSquares.push(Math.max(0, rollingEnergy) / blockSamples);
+        const meanSq = Math.max(0, rollingEnergy) / blockSamples;
+        blockMeanSquares.push(meanSq);
+        blockLufsList.push(-0.691 + 10 * Math.log10(Math.max(meanSq, 1e-12)));
       }
     }
   }
 
+  return { blockMeanSquares, blockLufsList };
+}
+
+/**
+ * Fast ITU-R BS.1770-4 K-weighted integrated LUFS helper.
+ * Uses a streaming biquad pass and a bounded 400 ms energy ring.
+ */
+export function measureIntegratedLufs(channels: Float32Array[], sampleRate: number): number {
+  const { blockMeanSquares } = measureKWeightedBlocks(channels, sampleRate);
   const absGate = Math.pow(10, (-70 + 0.691) / 10);
   const absPassed = blockMeanSquares.filter((z) => z > absGate);
   if (absPassed.length === 0) return -70;
@@ -335,65 +370,41 @@ export function analyzeAudioBuffer(
   const stereoWidth = Math.min(2.0, (2 * sideRms) / Math.max(midRms + sideRms, 1e-9));
   const lrBalanceDb = linearToDb(rmsR) - linearToDb(rmsL);
 
-  // Two reusable full-track work buffers keep stereo analysis memory bounded.
-  const scratchL = new Float32Array(length);
-  const scratchR = numChannels > 1 ? new Float32Array(length) : scratchL;
-
-  // Low-end (<120Hz) phase correlation via 2nd-order Butterworth LPF (-12 dB/oct)
-  const lpCoeffs = designLowPass(120, Math.SQRT1_2, sampleRate);
-  processBiquadBuffer(left, scratchL, lpCoeffs);
-  if (numChannels > 1) processBiquadBuffer(right, scratchR, lpCoeffs);
-  let lpSqL = 0;
-  let lpSqR = 0;
-  let lpProd = 0;
-  for (let i = 0; i < length; i++) {
-    const lVal = scratchL[i];
-    const rVal = scratchR[i];
-    lpSqL += lVal * lVal;
-    lpSqR += rVal * rVal;
-    lpProd += lVal * rVal;
-  }
-  const lpDenom = Math.sqrt(lpSqL * lpSqR);
-  const lowEndCorrelation =
-    lpSqL < 1e-12 && lpSqR < 1e-12
-      ? 1
-      : lpSqL < 1e-12 || lpSqR < 1e-12
-        ? 0
-        : Math.max(-1, Math.min(1, lpProd / lpDenom));
-
-  // Measure each frequency-localized band before reusing the same work buffers.
-  const lp150 = designLowPass(150, Math.SQRT1_2, sampleRate);
-  const hp150 = designHighPass(150, Math.SQRT1_2, sampleRate);
-  const lp3500 = designLowPass(3500, Math.SQRT1_2, sampleRate);
-  const hp3500 = designHighPass(3500, Math.SQRT1_2, sampleRate);
-  const measureCorrelation = (a: Float32Array, b: Float32Array): number => {
+  // Streaming filter passes preserve Float32 stage rounding without allocating
+  // two full-track scratch channels for each band.
+  const measureFilteredCorrelation = (first: BiquadCoeffs, second?: BiquadCoeffs): number => {
+    const firstL = createBiquadState();
+    const firstR = createBiquadState();
+    const secondL = second ? createBiquadState() : null;
+    const secondR = second ? createBiquadState() : null;
     let aa = 0;
     let bb = 0;
     let ab = 0;
     for (let i = 0; i < length; i++) {
-      aa += a[i] * a[i];
-      bb += b[i] * b[i];
-      ab += a[i] * b[i];
+      let lVal = Math.fround(processBiquadSample(left[i], first, firstL));
+      let rVal = Math.fround(processBiquadSample(right[i], first, firstR));
+      if (second && secondL && secondR) {
+        lVal = Math.fround(processBiquadSample(lVal, second, secondL));
+        rVal = Math.fround(processBiquadSample(rVal, second, secondR));
+      }
+      aa += lVal * lVal;
+      bb += rVal * rVal;
+      ab += lVal * rVal;
     }
     if (aa < 1e-12 && bb < 1e-12) return 1;
     if (aa < 1e-12 || bb < 1e-12) return 0;
-    const d = Math.sqrt(aa * bb);
-    return d > 1e-12 ? Math.max(-1, Math.min(1, ab / d)) : 0;
+    const denom = Math.sqrt(aa * bb);
+    return denom > 1e-12 ? Math.max(-1, Math.min(1, ab / denom)) : 0;
   };
 
-  processBiquadBuffer(left, scratchL, lp150);
-  if (numChannels > 1) processBiquadBuffer(right, scratchR, lp150);
-  const lowBandCorrelation = measureCorrelation(scratchL, scratchR);
-
-  processBiquadBuffer(left, scratchL, hp150);
-  if (numChannels > 1) processBiquadBuffer(right, scratchR, hp150);
-  processBiquadBuffer(scratchL, scratchL, lp3500);
-  if (numChannels > 1) processBiquadBuffer(scratchR, scratchR, lp3500);
-  const midBandCorrelation = measureCorrelation(scratchL, scratchR);
-
-  processBiquadBuffer(left, scratchL, hp3500);
-  if (numChannels > 1) processBiquadBuffer(right, scratchR, hp3500);
-  const highBandCorrelation = measureCorrelation(scratchL, scratchR);
+  const lowEndCorrelation = measureFilteredCorrelation(designLowPass(120, Math.SQRT1_2, sampleRate));
+  const lp150 = designLowPass(150, Math.SQRT1_2, sampleRate);
+  const hp150 = designHighPass(150, Math.SQRT1_2, sampleRate);
+  const lp3500 = designLowPass(3500, Math.SQRT1_2, sampleRate);
+  const hp3500 = designHighPass(3500, Math.SQRT1_2, sampleRate);
+  const lowBandCorrelation = measureFilteredCorrelation(lp150);
+  const midBandCorrelation = measureFilteredCorrelation(hp150, lp3500);
+  const highBandCorrelation = measureFilteredCorrelation(hp3500);
 
   const stereoBandCorrelation = {
     low: Number(lowBandCorrelation.toFixed(3)),
@@ -408,60 +419,11 @@ export function analyzeAudioBuffer(
     ((stereoBandCorrelation.high + 1) * 0.5) * 25,
   )));
 
-  // 3. ITU-R BS.1770-4 K-Weighted LUFS
-  const { shelf, rlb } = designKWeightingFilters(sampleRate);
-  processBiquadBuffer(left, scratchL, shelf);
-  processBiquadBuffer(scratchL, scratchL, rlb);
-  if (numChannels > 1) {
-    processBiquadBuffer(right, scratchR, shelf);
-    processBiquadBuffer(scratchR, scratchR, rlb);
-  }
-
-  const blockSamples = Math.max(1, Math.round(sampleRate * 0.4)); // 400ms
-  const hopSamples = Math.max(1, Math.round(sampleRate * 0.1)); // 100ms (75% overlap)
-  const blockMeanSquares: number[] = [];
-  const blockLufsList: number[] = [];
-
-  if (length < blockSamples) {
-    let ms = 0;
-    for (let i = 0; i < length; i++) {
-      ms += scratchL[i] * scratchL[i] + (numChannels > 1 ? scratchR[i] * scratchR[i] : 0);
-    }
-    const meanSq = ms / Math.max(1, length);
-    blockMeanSquares.push(meanSq);
-    blockLufsList.push(-0.691 + 10 * Math.log10(Math.max(meanSq, 1e-12)));
-  } else {
-    // Rolling 400ms energy window with 100ms hops; storage is bounded by one window.
-    const energyRing = new Float64Array(blockSamples);
-    let rollingEnergy = 0;
-    for (let i = 0; i < length; i++) {
-      const energy = scratchL[i] * scratchL[i] + (numChannels > 1 ? scratchR[i] * scratchR[i] : 0);
-      const slot = i % blockSamples;
-      if (i >= blockSamples) rollingEnergy -= energyRing[slot];
-      energyRing[slot] = energy;
-      rollingEnergy += energy;
-      if (i + 1 >= blockSamples && (i + 1 - blockSamples) % hopSamples === 0) {
-        const meanSq = Math.max(0, rollingEnergy) / blockSamples;
-        blockMeanSquares.push(meanSq);
-        blockLufsList.push(-0.691 + 10 * Math.log10(Math.max(meanSq, 1e-12)));
-      }
-    }
-  }
-
-  // Absolute gate (-70 LKFS)
-  const absGate = Math.pow(10, (-70 + 0.691) / 10);
-  const absPassed = blockMeanSquares.filter((z) => z > absGate);
-  let integratedLufs = -70;
-  if (absPassed.length > 0) {
-    const ungatedMean = absPassed.reduce((a, b) => a + b, 0) / absPassed.length;
-    const ungatedLufs = -0.691 + 10 * Math.log10(Math.max(ungatedMean, 1e-12));
-    const relGate = Math.pow(10, (ungatedLufs - 10 + 0.691) / 10);
-    const relPassed = absPassed.filter((z) => z > relGate);
-    if (relPassed.length > 0) {
-      const gatedMean = relPassed.reduce((a, b) => a + b, 0) / relPassed.length;
-      integratedLufs = -0.691 + 10 * Math.log10(Math.max(gatedMean, 1e-12));
-    }
-  }
+  // 3. ITU-R BS.1770-4 K-Weighted LUFS, streamed through bounded filter state.
+  const { blockMeanSquares, blockLufsList } = measureKWeightedBlocks(
+    numChannels > 1 ? [left, right] : [left],
+    sampleRate,
+  );
 
   const momentaryLufsMax = blockLufsList.reduce((max, value) => Math.max(max, value), integratedLufs);
 
