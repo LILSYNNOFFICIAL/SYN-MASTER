@@ -2747,7 +2747,7 @@ export function deriveGateRepairCommands(
 
   if (wantsSubExcess) {
     const subBassExcessDb = post.zoneEnergyDb.sub - post.zoneEnergyDb.bass;
-    const reductionStepDb = Math.min(3, Math.max(1, subBassExcessDb + 1));
+    const reductionStepDb = Math.min(1.5, Math.max(0.15, subBassExcessDb * 0.5));
     const eqMod = chain.find((m) => m.type === 'parametric-eq' && m.enabled && !m.bypassed);
     const eqBands = eqMod ? ((eqMod.params as { bands?: EQBand[] }).bands ?? []) : [];
     const controlBandIndex = eqBands.findIndex((band) => band.id === 'syn-sub-excess');
@@ -2759,7 +2759,7 @@ export function deriveGateRepairCommands(
           enabled: true,
           shape: 'lowshelf',
           freq: 45,
-          gain: -Math.min(8, Math.max(2, subBassExcessDb + 1)),
+          gain: -Math.min(8, Math.max(0.5, subBassExcessDb * 0.75)),
           q: 0.71,
         };
 

@@ -44,8 +44,6 @@ export interface MasterTargetGate {
   summary: string;
 }
 
-/** Tolerance for integrated loudness used by the gate (LU). */
-export const GATE_LUFS_TOLERANCE = 0.65;
 const ZONES: Array<keyof SpectralBandEnergy> = ['sub', 'bass', 'lowMid', 'mid', 'highMid', 'presence', 'air'];
 
 /** Zone energies relative to the mid zone, so curves can be compared regardless of level. */
@@ -93,8 +91,8 @@ export function evaluateMasterTargets(
     id: 'lufs',
     label: 'Integrated loudness',
     measured: `${post.integratedLufs.toFixed(1)} LUFS`,
-    target: `${objective.targetLufs.toFixed(1)} ± ${GATE_LUFS_TOLERANCE} LUFS`,
-    status: st(Math.abs(lufsErr) <= GATE_LUFS_TOLERANCE),
+    target: `${objective.targetLufs.toFixed(1)} ± ${objective.lufsTolerance.toFixed(1)} LUFS`,
+    status: st(Math.abs(lufsErr) <= objective.lufsTolerance),
     fix: `Maximizer/limiter drive ${lufsErr > 0 ? '-' : '+'}${Math.abs(lufsErr).toFixed(1)} dB (target ${objective.targetLufs.toFixed(1)} LUFS)`,
   });
 

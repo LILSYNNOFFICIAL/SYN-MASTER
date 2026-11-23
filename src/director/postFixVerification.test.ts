@@ -1059,3 +1059,61 @@ test('Sub/Bass repair removes additive Bass Enhancer sub gain and refines its ow
   const bands = (eqPatch.paramsPatch as { bands: Array<{ id: string; gain: number }> }).bands;
   assert.ok(bands.find((band) => band.id === 'syn-sub-excess')!.gain < -3);
 });
+
+test('Objective gate uses the objective-specific integrated loudness tolerance', () => {
+  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const objective = resolveObjectiveTarget('streaming');
+  const inside = {
+    ...measured,
+    integratedLufs: objective.targetLufs + objective.lufsTolerance - 0.05,
+  };
+  const insideCheck = evaluateMasterTargets(inside, objective)
+    .checks.find((check) => check.id === 'lufs');
+  assert.ok(insideCheck);
+  assert.equal(insideCheck.status, 'pass');
+  assert.match(insideCheck.target, new RegExp(`± ${objective.lufsTolerance.toFixed(1)} LUFS`));
+
+  const outside = {
+    ...measured,
+    integratedLufs: objective.targetLufs + objective.lufsTolerance + 0.05,
+  };
+  assert.equal(
+    evaluateMasterTargets(outside, objective).checks.find((check) => check.id === 'lufs')?.status,
+    'fail',
+  );
+});
+
+test('Sub/Bass iterative correction uses smaller bounded increments near the target', () => {
+  const measured = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const source = {
+    ...measured,
+    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 5.3 },
+  };
+  const objective = resolveObjectiveTarget('streaming');
+  const firstGate = evaluateMasterTargets(source, objective, { preAnalysis: source });
+  const firstRepair = deriveGateRepairCommands(firstGate, [], source);
+  const firstAdd = firstRepair.commands.find((command) => command.op === 'add' && command.processorType === 'parametric-eq');
+  assert.ok(firstAdd && firstAdd.op === 'add');
+  const firstBand = (firstAdd.params as { bands: Array<{ id: string; gain: number }> }).bands.find((band) => band.id === 'syn-sub-excess');
+  assert.ok(firstBand);
+  assert.ok(firstBand.gain <= -3.9 && firstBand.gain >= -4.0, 'Initial correction should be measured but not an oversized fixed cut');
+
+  const residual = {
+    ...source,
+    zoneEnergyDb: { ...source.zoneEnergyDb, sub: source.zoneEnergyDb.bass + 0.2 },
+  };
+  const residualGate = evaluateMasterTargets(residual, objective, { preAnalysis: source });
+  const eq = createProcessorModule('parametric-eq', {
+    params: {
+      phaseMode: 'minimum',
+      msMode: 'stereo',
+      tiltDb: 0,
+      bands: [{ id: 'syn-sub-excess', enabled: true, shape: 'lowshelf', freq: 45, gain: -3, q: 0.71 }],
+    },
+  });
+  const residualRepair = deriveGateRepairCommands(residualGate, [eq], residual);
+  const patch = residualRepair.commands.find((command) => command.op === 'configure' && command.processorType === 'parametric-eq');
+  assert.ok(patch && patch.op === 'configure');
+  const bands = (patch.paramsPatch as { bands: Array<{ id: string; gain: number }> }).bands;
+  assert.equal(bands.find((band) => band.id === 'syn-sub-excess')?.gain, -3.15);
+});
