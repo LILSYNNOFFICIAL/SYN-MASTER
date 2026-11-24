@@ -289,6 +289,10 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
     modeRef.current = mode;
     const sampleRateRef = useRef(sampleRate);
     sampleRateRef.current = sampleRate;
+    const waveformPeaksRef = useRef(waveformPeaks);
+    waveformPeaksRef.current = waveformPeaks;
+    const durationSecRef = useRef(durationSec);
+    durationSecRef.current = durationSec;
     const allowLiveRef = useRef(allowLiveTelemetry);
     allowLiveRef.current = allowLiveTelemetry;
 
@@ -332,9 +336,9 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Playback cursor follows engine telemetry and stays behind the EQ curves.
-      if (waveformPeaks.length > 0 && durationSec > 0) {
-        const progress = Math.max(0, Math.min(1, snap.currentTimeSec / durationSec));
+      // Playback cursor follows engine telemetry over the composite waveform/EQ view.
+      if (waveformPeaksRef.current.length > 0 && durationSecRef.current > 0) {
+        const progress = Math.max(0, Math.min(1, snap.currentTimeSec / durationSecRef.current));
         const playheadX = padL + progress * plotW;
         ctx.save();
         ctx.strokeStyle = 'rgba(74,207,255,0.92)';
