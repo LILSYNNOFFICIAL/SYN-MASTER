@@ -2374,6 +2374,7 @@ export default function App() {
       onOpenStereoLab={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
       notice={statusNotice}
       onAskAi={() => setActiveTab('ai')}
+      mode={mode}
       blanketPeaks={chainBypassed || auditionTarget === 'original' ? prePeaksHi : postPeaksHi ?? prePeaksHi}
       timeline={
         <TimelinePlayer
@@ -2561,6 +2562,7 @@ export default function App() {
             Mode:
             <select
               aria-label="Mastering Mode"
+              title="Session mode: shown on the console and suggests a preset. Saved with the project and sent to the AI as context; Target and Objective drive processing."
               value={mode}
               onChange={(e) => setMode(e.target.value as MasteringMode)}
               className="bg-[#181A22] border border-[#2B2E3A] rounded px-2 py-1 text-xs text-[#F7F8FA]"

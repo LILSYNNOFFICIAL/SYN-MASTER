@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { BrainCircuit, MessageSquareText, Plus, Square, Upload } from 'lucide-react';
 import type {
   AudioAnalysis,
@@ -67,7 +67,27 @@ export interface MasterConsoleProps {
   timeline?: React.ReactNode;
   /** Opens the AI Assistant (Mastering Director) workspace. Planning / explanations, not the one-click fix. */
   onAskAi?: () => void;
+  /** Session "Mode" from the ribbon (MasteringMode). Shown on the console and used to suggest a preset. */
+  mode?: string;
 }
+
+/**
+ * What the ribbon Mode does today: it is saved with the project and passed to the AI strategy
+ * request as context; Target / Objective drive the actual processing. The console reflects it by
+ * labelling it and pre-selecting a matching preset (nothing is applied until "Load preset chain").
+ */
+export const MODE_INFO: Record<string, { label: string; hint: string; preset?: string }> = {
+  'ai-auto': { label: 'AI Automatic', hint: 'Use FIX ALL AI for a fully automatic, verified master.' },
+  hybrid: { label: 'Hybrid', hint: 'FIX ALL AI first, then fine-tune the knobs and EQ by hand.' },
+  manual: { label: 'Manual', hint: 'You drive every control; FIX ALL stays available.' },
+  transparent: { label: 'Transparent', hint: 'Minimal colour, streaming-safe loudness.', preset: 'phil-transparent' },
+  loudness: { label: 'Loudness Max', hint: 'Club-level loudness with tight limiting.', preset: 'genre-electronic' },
+  analog: { label: 'Analog Character', hint: 'Warm console saturation and glue.', preset: 'phil-warm' },
+  dynamic: { label: 'Dynamic Preservation', hint: 'Keep transients and range; gentle limiting.', preset: 'genre-acoustic' },
+  reference: { label: 'Reference Match', hint: 'Load a reference track in the library, then match it.' },
+  streaming: { label: 'Streaming Delivery', hint: 'Aim for -14 LUFS / -1 dBTP platform targets.', preset: 'phil-transparent' },
+  custom: { label: 'Custom', hint: 'Your own objective.' },
+};
 
 const LOUDNESS_STAGES: ProcessorType[] = ['limiter', 'maximizer', 'multiband-maximizer', 'clipper', 'dither'];
 const CATALOG_FOR: Partial<Record<ProcessorType, string>> = {
@@ -115,6 +135,11 @@ const AddModule: React.FC<{ type: ProcessorType; onAdd: (t: ProcessorType) => vo
 export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
   const [eqView, setEqView] = useState<'eq' | 'spectrum' | 'spectrogram'>('eq');
   const [presetId, setPresetId] = useState<string>(p.presets[0]?.id ?? '');
+  const modeInfo = p.mode ? MODE_INFO[p.mode] : undefined;
+  const suggestedPreset = modeInfo?.preset && p.presets.some((x) => x.id === modeInfo.preset) ? modeInfo.preset : null;
+  useEffect(() => {
+    if (suggestedPreset) setPresetId(suggestedPreset);
+  }, [suggestedPreset]);
   const chain = p.chain;
   const find = (type: ProcessorType) => chain.find((m) => m.type === type && m.enabled);
   const patch = (id: string, next: Partial<ProcessorModule>) =>
@@ -221,7 +246,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
   );
 
   return (
-    <section className="syn-console" aria-label="SYN-MASTER console" data-testid="syn-console">
+    <section className="syn-console" aria-label="SYN-MASTER console" data-testid="syn-console" data-mode={p.mode}>
       <LightRibbons className="syn-console-ribbons" />
 
       <div className="syn-console-col syn-console-left">
@@ -309,6 +334,12 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
                 ))}
               </select>
             </label>
+            {modeInfo && (
+              <div className="syn-mode-chip" title={modeInfo.hint}>
+                <span>Mode</span><b>{modeInfo.label}</b>
+                <small>{modeInfo.hint}</small>
+              </div>
+            )}
             <div className={`syn-global-status${gate ? (gate.passed ? ' is-pass' : ' is-fail') : ''}`}>{statusLine}</div>
             {p.notice && <div className="syn-global-notice" title={p.notice}>{p.notice}</div>}
             <div className="syn-progress" aria-hidden="true"><span style={{ width: `${Math.max(p.running ? 6 : 0, pct)}%` }} /></div>
@@ -329,6 +360,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
                 <option key={pr.id} value={pr.id}>{pr.name}</option>
               ))}
             </select>
+            {suggestedPreset === presetId && modeInfo && <div className="syn-preset-suggest">Suggested for {modeInfo.label} mode</div>}
             <p className="syn-preset-desc">{p.presets.find((x) => x.id === presetId)?.description}</p>
             <button type="button" className="syn-btn-ghost" disabled={p.running} onClick={() => { const pr = p.presets.find((x) => x.id === presetId); if (pr) p.onApplyPreset(pr); }}>
               Load preset chain
