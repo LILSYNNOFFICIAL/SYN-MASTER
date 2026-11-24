@@ -327,6 +327,13 @@ try {
   Write-Host "=== [7/7] Unload Plugin & Clean Shutdown ===" -ForegroundColor Cyan
   $null = Invoke-HostRpc "plugin.unload" @{ instanceId = $InstId }
   $WsClient.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "done", $Ct).GetAwaiter().GetResult()
+  $ShutdownResp = Invoke-RestMethod -Uri "http://127.0.0.1:$HttpPort/v1/host/shutdown" `
+    -Method Post -Headers @{ Authorization = "Bearer $Token" }
+  if (-not $ShutdownResp.stopping) { throw "Authenticated graceful shutdown did not acknowledge the request." }
+  if (-not $HostProc.WaitForExit(5000)) { throw "Native host did not exit cleanly after authenticated shutdown." }
+  $HostProc.Refresh()
+  if ($HostProc.ExitCode -ne 0) { throw "Native host graceful shutdown exited with code $($HostProc.ExitCode)." }
+  Write-Host "Verified authenticated graceful shutdown and clean native worker unload." -ForegroundColor Green
   Write-Host "MILESTONE 2.5 REAL WINDOWS VST3 VALIDATION PASSED." -ForegroundColor Green
 }
 finally {

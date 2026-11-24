@@ -16,6 +16,8 @@ let nativePairing = null;
 let nativeHostWarning = null;
 let nativeProcessError = null;
 let quitting = false;
+let cleanupStarted = false;
+let cleanupFinished = false;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -263,10 +265,52 @@ if (!hasSingleInstance) {
   });
 }
 
-app.on('before-quit', () => {
+async function shutdownNativeHost() {
+  const child = nativeProcess;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+
+  let acknowledged = false;
+  if (nativePairing?.sessionToken && Number.isInteger(nativePairing.httpPort)) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${nativePairing.httpPort}/v1/host/shutdown`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${nativePairing.sessionToken}` },
+        signal: AbortSignal.timeout(1500),
+      });
+      acknowledged = response.status === 202;
+    } catch {
+      // The forced child termination below is the bounded fallback.
+    }
+  }
+
+  if (acknowledged && child.exitCode === null && child.signalCode === null) {
+    const exited = await Promise.race([
+      new Promise((resolve) => child.once('exit', () => resolve(true))),
+      delay(4000).then(() => false),
+    ]);
+    if (exited) return;
+  }
+  if (child.exitCode === null && child.signalCode === null) child.kill();
+}
+
+async function shutdownChildren() {
+  try {
+    await shutdownNativeHost();
+  } finally {
+    if (webProcess) webProcess.kill();
+    cleanupFinished = true;
+    app.quit();
+  }
+}
+
+app.on('before-quit', (event) => {
+  if (cleanupFinished) return;
+  event.preventDefault();
   quitting = true;
-  if (nativeProcess && nativeProcess.exitCode === null) nativeProcess.kill();
-  if (webProcess) webProcess.kill();
+  if (!cleanupStarted) {
+    cleanupStarted = true;
+    void shutdownChildren();
+  }
 });
 
 app.on('window-all-closed', () => {

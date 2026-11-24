@@ -156,6 +156,10 @@ void LocalIpcServer::setScanHandler(ScanTriggerCallback cb) {
   m_scanHandler = std::move(cb);
 }
 
+void LocalIpcServer::setShutdownHandler(std::function<void()> cb) {
+  m_shutdownHandler = std::move(cb);
+}
+
 bool LocalIpcServer::start(std::string& errorOut) {
 #ifndef SYN_HAS_IXWEBSOCKET
   errorOut = "IXWebSocket not enabled at compile time";
@@ -267,6 +271,21 @@ bool LocalIpcServer::start(std::string& errorOut) {
                 400, "Bad Request", ix::HttpErrorCode::Ok, respHeaders,
                 nlohmann::json({{"error", "Malformed JSON payload"}}).dump());
           }
+        }
+
+        // Graceful host shutdown is only available to a client holding the per-launch
+        // session bearer token. The callback asks the owning process to unwind workers
+        // and audio devices on its normal main-loop path.
+        if (req->method == "POST" && req->uri == "/v1/host/shutdown") {
+          if (!isBearerAuthorized(req->headers)) {
+            return std::make_shared<ix::HttpResponse>(
+                401, "Unauthorized", ix::HttpErrorCode::Ok, respHeaders,
+                nlohmann::json({{"error", "Bearer session token required"}}).dump());
+          }
+          if (m_shutdownHandler) m_shutdownHandler();
+          return std::make_shared<ix::HttpResponse>(
+              202, "Accepted", ix::HttpErrorCode::Ok, respHeaders,
+              nlohmann::json({{"stopping", true}}).dump());
         }
 
         // High-throughput authenticated offline stereo float32 rendering endpoint

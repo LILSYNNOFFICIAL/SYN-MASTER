@@ -181,6 +181,7 @@ int main(int argc, char* argv[]) {
 #endif
 
   LocalIpcServer server(cfg, db, security, &instanceManager, &audioManager);
+  server.setShutdownHandler([] { g_shouldStop.store(true); });
   server.setScanHandler([&](
       const std::string& mode,
       const std::string& onlyBundlePath,

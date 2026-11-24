@@ -412,3 +412,6 @@ The live `/api/health` response only verifies configuration presence, not full A
 
 
 **Desktop runtime resilience:** the Electron shell waits for the native host HTTP listener after reading the pairing file (the native host writes that file before listening), and continues in browser-only mastering mode with a visible warning if the VST3 companion cannot start. The loopback port allocator retries distinct ports without leaving its Promise pending.
+
+
+**Native companion cleanup:** the VST3 host now exposes `POST /v1/host/shutdown` only to the current bearer session. It signals the host's normal shutdown loop, which stops audition, unloads plugin workers, and stops its HTTP/WebSocket listeners. The Windows validation script now verifies HTTP 202 and a clean process exit; Electron requests this graceful shutdown before its bounded forced-stop fallback.

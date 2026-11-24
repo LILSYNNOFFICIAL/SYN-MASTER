@@ -47,6 +47,7 @@ public:
   void wait();
 
   void setScanHandler(ScanTriggerCallback cb);
+  void setShutdownHandler(std::function<void()> cb);
   void broadcastNotification(const std::string& method, const std::string& paramsJson);
 
   static std::string serializePluginJson(const PluginDescriptor& d);
@@ -58,6 +59,7 @@ private:
   PluginInstanceManager* m_instanceManager = nullptr;
   WasapiDeviceManager* m_audioManager = nullptr;
   ScanTriggerCallback m_scanHandler;
+  std::function<void()> m_shutdownHandler;
   std::atomic<bool> m_running{false};
   std::atomic<bool> m_scanInProgress{false};
 
