@@ -16,6 +16,23 @@ import type {
 } from '../types/mastering';
 import { dbToLinear, linearToDb } from '../dsp/analyzer';
 
+export type AudioLatencyMode = 'interactive' | 'balanced' | 'playback';
+
+export interface AudioEngineInfo {
+  state: AudioContextState | 'not-started';
+  sampleRate: number | null;
+  baseLatency: number | null;
+  outputLatency: number | null;
+  latencyMode: AudioLatencyMode;
+  outputDeviceId: string;
+  supportsOutputDeviceSelection: boolean;
+}
+
+type AudioContextWithSink = AudioContext & {
+  setSinkId?: (deviceId: string) => Promise<void>;
+  outputLatency?: number;
+};
+
 export type AuditionTarget =
   | 'mastered'
   | 'original'
@@ -43,6 +60,8 @@ export interface LiveMeterSnapshot {
  */
 export class SynAudioEngine {
   private ctx: AudioContext | null = null;
+  private latencyMode: AudioLatencyMode = 'balanced';
+  private outputDeviceId = '';
   private sourceBuffer: AudioBuffer | null = null;
   private referenceBuffer: AudioBuffer | null = null;
   private overrideBuffers = new Map<string, AudioBuffer>();
@@ -80,7 +99,7 @@ export class SynAudioEngine {
   private ensureContext(): AudioContext {
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      this.ctx = new AudioCtx();
+      this.ctx = new AudioCtx({ latencyHint: this.latencyMode });
       this.chainInputGain = this.ctx.createGain();
       this.chainOutputGain = this.ctx.createGain();
       this.monitorGain = this.ctx.createGain();
@@ -103,6 +122,10 @@ export class SynAudioEngine {
       this.splitter.connect(this.analyserL, 0);
       this.splitter.connect(this.analyserR, 1);
       this.monitorGain.connect(this.ctx.destination);
+      const sinkContext = this.ctx as AudioContextWithSink;
+      if (this.outputDeviceId && sinkContext.setSinkId) {
+        void sinkContext.setSinkId(this.outputDeviceId).catch(() => undefined);
+      }
     }
     if (this.ctx.state === 'suspended') {
       void this.ctx.resume();
@@ -173,6 +196,59 @@ export class SynAudioEngine {
 
   public setOnEnded(cb: () => void): void {
     this.onEndedCallback = cb;
+  }
+
+  public getAudioEngineInfo(): AudioEngineInfo {
+    const context = this.ctx as AudioContextWithSink | null;
+    return {
+      state: context?.state ?? 'not-started',
+      sampleRate: context?.sampleRate ?? null,
+      baseLatency: context?.baseLatency ?? null,
+      outputLatency: typeof context?.outputLatency === 'number' ? context.outputLatency : null,
+      latencyMode: this.latencyMode,
+      outputDeviceId: this.outputDeviceId,
+      supportsOutputDeviceSelection: typeof context?.setSinkId === 'function',
+    };
+  }
+
+  public async setLatencyMode(mode: AudioLatencyMode): Promise<void> {
+    if (mode === this.latencyMode) return;
+    this.latencyMode = mode;
+    const previousContext = this.ctx;
+    if (!previousContext) return;
+
+    const wasPlaying = this.isPlaying;
+    const position = this.getCurrentTimeSec();
+    this.pause();
+    for (const node of this.activeChainNodes) {
+      try { node.disconnect(); } catch { /* already disconnected */ }
+    }
+    this.activeChainNodes = [];
+    this.compressorMonitors = [];
+    this.ctx = null;
+    this.chainInputGain = null;
+    this.chainOutputGain = null;
+    this.monitorGain = null;
+    this.splitter = null;
+    this.analyserL = null;
+    this.analyserR = null;
+    this.analyserMain = null;
+
+    await previousContext.close().catch(() => undefined);
+    this.ensureContext();
+    if (wasPlaying) this.play(position);
+  }
+
+  public async setOutputDevice(deviceId: string): Promise<boolean> {
+    if (!this.ctx) {
+      this.outputDeviceId = deviceId;
+      return true;
+    }
+    const context = this.ctx as AudioContextWithSink;
+    if (typeof context.setSinkId !== 'function') return false;
+    await context.setSinkId(deviceId);
+    this.outputDeviceId = deviceId;
+    return true;
   }
 
   public setMonitorVolume(val01: number): void {

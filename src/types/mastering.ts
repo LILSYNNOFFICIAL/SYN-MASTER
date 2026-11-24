@@ -482,6 +482,8 @@ export interface ProjectRecord {
 }
 
 export interface AppSettings {
+  audioLatencyMode: 'interactive' | 'balanced' | 'playback';
+  audioOutputDeviceId: string;
   density: 'compact' | 'comfortable';
   experienceMode: 'engineering' | 'guided';
   accentIntensity: 'standard' | 'vivid';

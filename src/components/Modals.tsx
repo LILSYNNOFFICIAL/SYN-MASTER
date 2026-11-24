@@ -10,6 +10,7 @@ interface ExportModalProps {
   downloadFilename: string | null;
   deliveryCheck?: { text: string; warning: boolean } | null;
   renderError?: string | null;
+  renderProgress?: string | null;
   hasTrack: boolean;
   onChange: (next: ExportConfig) => void;
   onRender: () => void;
@@ -17,7 +18,7 @@ interface ExportModalProps {
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({
-  open, config, rendering, downloadUrl, downloadFilename, deliveryCheck, renderError, hasTrack, onChange, onRender, onClose,
+  open, config, rendering, downloadUrl, downloadFilename, deliveryCheck, renderError, renderProgress, hasTrack, onChange, onRender, onClose,
 }) => {
   if (!open) return null;
   const fieldClass = "bg-[#090704] border border-[#5A4519] focus:border-[#D4AF37] rounded px-2.5 py-1.5 text-xs text-[#F7F1E2]";
@@ -221,6 +222,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <p className="mt-1">Playlist / note markers, synth polyphony and PDC-silence trimming are DAW / instrument features and are not applicable to this single-file audio mastering project.</p>
           </div>
 
+          {renderProgress && (
+            <div role="status" aria-live="polite" className="p-3 rounded-lg border border-[#5A4519] bg-[#100D06] text-[11px] text-[#F2CA52]">
+              {renderProgress}
+            </div>
+          )}
           {renderError && (
             <div role="alert" className="p-3 rounded-lg border border-red-500/60 bg-red-500/10 text-[11px] leading-relaxed text-red-200">
               <strong className="block mb-1">Export could not be completed</strong>

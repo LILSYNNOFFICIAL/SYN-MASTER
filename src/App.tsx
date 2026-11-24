@@ -76,7 +76,7 @@ import {
   type MasteringDiagnosticBundle,
   type MasteringDiagnosticRunSummary,
 } from './director/tempMasteringWorkspace';
-import { SynAudioEngine, type AuditionTarget } from './engine/audioEngine';
+import { SynAudioEngine, type AuditionTarget, type AudioEngineInfo } from './engine/audioEngine';
 import { telemetryStore } from './engine/telemetryStore';
 import { SynHostBridge, type HostBridgeSnapshot } from './services/hostBridge';
 import {
@@ -157,6 +157,8 @@ const TransportTimeReadout: React.FC<{ durationSec: number; className?: string }
 );
 
 const DEFAULT_SETTINGS: AppSettings = {
+  audioLatencyMode: 'balanced',
+  audioOutputDeviceId: '',
   density: 'compact',
   experienceMode: 'engineering',
   accentIntensity: 'standard',
@@ -209,6 +211,8 @@ export default function App() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [savedChains, setSavedChains] = useState<SavedChainRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [audioOutputDevices, setAudioOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [audioEngineInfo, setAudioEngineInfo] = useState<AudioEngineInfo>(() => engineRef.current!.getAudioEngineInfo());
 
   const [activeTrack, setActiveTrack] = useState<AudioTrackAsset | null>(null);
   const [referenceTrack, setReferenceTrack] = useState<AudioTrackAsset | null>(null);
@@ -291,6 +295,7 @@ export default function App() {
   const [exportDownloadName, setExportDownloadName] = useState<string | null>(null);
   const [exportDeliveryCheck, setExportDeliveryCheck] = useState<{ text: string; warning: boolean } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportProgress, setExportProgress] = useState<string | null>(null);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [diagnosticRuns, setDiagnosticRuns] = useState<MasteringDiagnosticRunSummary[]>([]);
   const [latestDiagnosticRun, setLatestDiagnosticRun] = useState<MasteringDiagnosticRunSummary | null>(null);
@@ -312,12 +317,36 @@ export default function App() {
       ]);
       setProjects(loadedProjs);
       setSavedChains(loadedChains);
-      if (loadedSettings) setSettings(loadedSettings);
+      if (loadedSettings) {
+        const restoredSettings = { ...DEFAULT_SETTINGS, ...loadedSettings };
+        setSettings(restoredSettings);
+        void engineRef.current!.setLatencyMode(restoredSettings.audioLatencyMode);
+        if (restoredSettings.audioOutputDeviceId) {
+          void engineRef.current!.setOutputDevice(restoredSettings.audioOutputDeviceId).catch(() => undefined);
+        }
+      }
     })();
     return () => {
       unsub();
     };
   }, []);
+
+  useEffect(() => {
+    if (!settingsModalOpen) return;
+    let active = true;
+    setAudioEngineInfo(engineRef.current!.getAudioEngineInfo());
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices?.enumerateDevices) {
+      setAudioOutputDevices([]);
+      return () => { active = false; };
+    }
+    void mediaDevices.enumerateDevices().then((devices) => {
+      if (active) setAudioOutputDevices(devices.filter((device) => device.kind === 'audiooutput'));
+    }).catch(() => {
+      if (active) setAudioOutputDevices([]);
+    });
+    return () => { active = false; };
+  }, [settingsModalOpen]);
 
   // Restore the latest persistent Fix All diagnostic bundle on app startup.
   useEffect(() => {
@@ -1881,6 +1910,7 @@ export default function App() {
 
     setRenderingExport(true);
     setExportError(null);
+    setExportProgress('Preparing export package...');
     setExportDeliveryCheck(null);
     try {
       const safeStem = (exportConfig.filename.trim() || 'SYN_Master').replace(/[<>:"/\\|?*]/g, '_').replace(/^\.+$/, 'SYN_Master');
@@ -1924,6 +1954,7 @@ export default function App() {
       const entries: ZipFileEntry[] = [];
       const outputManifest: Array<{ file: string; format: string; bytes: number; integratedLufs?: number | null; truePeakDbtp?: number | null }> = [];
       const deliveryMessages: string[] = [];
+      const failures: string[] = [];
       const audioFormats = selectedFormats.filter((format) => format !== 'mid');
 
       if (selectedFormats.includes('mid')) {
@@ -1936,6 +1967,7 @@ export default function App() {
       if (audioFormats.length > 0) {
         // Render the active mastering chain exactly once. Every codec is encoded from
         // this identical 32-bit float intermediate so format selection cannot alter DSP.
+        setExportProgress('Rendering the mastering chain once...');
         const effectiveChain = exportConfig.includeMasteringChain !== false && !chainBypassed ? chain : [];
         const processed = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage, getPostFades());
         const intermediateConfig: ExportConfig = {
@@ -1947,7 +1979,10 @@ export default function App() {
         };
         const intermediateWav = encodeWavBlob(processed.channels, activeTrack.sampleRate, intermediateConfig);
 
-        for (const format of audioFormats) {
+        for (let formatIndex = 0; formatIndex < audioFormats.length; formatIndex++) {
+          const format = audioFormats[formatIndex];
+          setExportProgress('Encoding ' + format.toUpperCase() + ' (' + (formatIndex + 1) + '/' + audioFormats.length + ')...');
+          try {
           const params = new URLSearchParams({
             format,
             sampleRate: String(exportConfig.sampleRate),
@@ -2004,9 +2039,18 @@ export default function App() {
             integratedLufs: measuredLufs !== null && Number.isFinite(measuredLufs) ? measuredLufs : null,
             truePeakDbtp: hasPeak ? measuredTp : null,
           });
+          } catch (formatError) {
+            const message = formatError instanceof Error ? formatError.message : 'Unknown encoder error.';
+            failures.push(format.toUpperCase() + ': ' + message);
+            deliveryMessages.push(format.toUpperCase() + ': FAILED. ' + message);
+          }
         }
       }
 
+      if (outputManifest.length === 0) {
+        throw new Error('No selected format could be rendered. ' + failures.join(' '));
+      }
+      setExportProgress('Building ZIP archive and render manifest...');
       const manifest = {
         application: 'SYN MASTER',
         package: safeStem,
@@ -2023,6 +2067,7 @@ export default function App() {
           metadataArtist: exportConfig.metadataArtist ?? '',
         },
         outputs: outputManifest,
+        failures,
       };
       entries.push({ name: safeStem + '/render-manifest.json', data: JSON.stringify(manifest, null, 2) });
 
@@ -2039,10 +2084,11 @@ export default function App() {
       setExportDownloadUrl(url);
       setExportDownloadName(zipName);
       setExportDeliveryCheck({
-        warning: deliveryMessages.some((message) => message.includes('could not be measured') || message.includes('(over ceiling).')),
+        warning: failures.length > 0 || deliveryMessages.some((message) => message.includes('could not be measured') || message.includes('(over ceiling).')),
         text: deliveryMessages.length ? deliveryMessages.join('  ') : 'MIDI conductor file packaged successfully.',
       });
 
+      setExportProgress(saveFileHandle ? 'Writing ZIP to the selected destination...' : 'Starting ZIP download...');
       if (saveFileHandle) {
         const writable = await saveFileHandle.createWritable();
         try {
@@ -2052,7 +2098,7 @@ export default function App() {
           await writable.abort?.().catch(() => undefined);
           throw writeError;
         }
-        setStatusNotice('Saved ' + outputManifest.length + ' output file(s) in "' + zipName + '".');
+        setStatusNotice('Saved ' + outputManifest.length + ' output file(s)' + (failures.length ? '; ' + failures.length + ' format(s) failed' : '') + ' in "' + zipName + '".');
       } else {
         // Automatic download fallback for browsers without the native file picker.
         // The visible link remains available if the browser blocks this click.
@@ -2063,7 +2109,7 @@ export default function App() {
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();
-        setStatusNotice('Packaged ' + outputManifest.length + ' output file(s) in "' + zipName + '".');
+        setStatusNotice('Packaged ' + outputManifest.length + ' output file(s)' + (failures.length ? '; ' + failures.length + ' format(s) failed' : '') + ' in "' + zipName + '".');
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Master export failed.';
@@ -2071,6 +2117,7 @@ export default function App() {
       setStatusNotice(message);
     } finally {
       setRenderingExport(false);
+      setExportProgress(null);
     }
   };
 
@@ -3111,6 +3158,7 @@ export default function App() {
             downloadFilename={exportDownloadName}
             deliveryCheck={exportDeliveryCheck}
             renderError={exportError}
+            renderProgress={exportProgress}
             hasTrack={Boolean(activeTrack)}
             onChange={setExportConfig}
             onRender={handleRenderExport}
@@ -3124,11 +3172,83 @@ export default function App() {
             open={true}
             settings={settings}
             onChange={(next) => {
+              const previous = settings;
               setSettings(next);
               void saveAppSettings(next);
+              if (next.audioLatencyMode !== previous.audioLatencyMode) {
+                void engineRef.current!.setLatencyMode(next.audioLatencyMode).then(() => {
+                  setAudioEngineInfo(engineRef.current!.getAudioEngineInfo());
+                  setStatusNotice('Audio latency mode changed to ' + next.audioLatencyMode + '.');
+                }).catch((error) => {
+                  const reverted = { ...next, audioLatencyMode: previous.audioLatencyMode };
+                  setSettings(reverted);
+                  void saveAppSettings(reverted);
+                  setStatusNotice(error instanceof Error ? error.message : 'Could not change audio latency mode.');
+                });
+              }
+              if ((next.audioOutputDeviceId ?? '') !== (previous.audioOutputDeviceId ?? '')) {
+                void engineRef.current!.setOutputDevice(next.audioOutputDeviceId ?? '').then((supported) => {
+                  setAudioEngineInfo(engineRef.current!.getAudioEngineInfo());
+                  if (!supported) {
+                    const reverted = { ...next, audioOutputDeviceId: previous.audioOutputDeviceId ?? '' };
+                    setSettings(reverted);
+                    void saveAppSettings(reverted);
+                    setStatusNotice('This browser does not support programmatic audio output selection. The system default remains active.');
+                  } else {
+                    setStatusNotice('Audio output device updated.');
+                  }
+                }).catch((error) => {
+                  const reverted = { ...next, audioOutputDeviceId: previous.audioOutputDeviceId ?? '' };
+                  setSettings(reverted);
+                  void saveAppSettings(reverted);
+                  setStatusNotice(error instanceof Error ? error.message : 'Could not change audio output device.');
+                });
+              }
             }}
             onClose={() => setSettingsModalOpen(false)}
           >
+            <section className="p-3 rounded bg-[#0C0D12] border border-[#5A4519] flex flex-col gap-3">
+              <div>
+                <div className="font-semibold text-[#D4AF37] mb-1">Audio Engine</div>
+                <p className="text-[10px] text-[#A99A74]">Live monitoring uses the browser Web Audio engine. These controls do not change export sample rate or codec quality.</p>
+              </div>
+              <label className="flex flex-col gap-1 text-[#C7B98F]">
+                Output Device
+                <select
+                  value={settings.audioOutputDeviceId ?? ''}
+                  disabled={!audioEngineInfo.supportsOutputDeviceSelection}
+                  onChange={(event) => onChange({ ...settings, audioOutputDeviceId: event.target.value })}
+                  className="bg-[#090704] border border-[#5A4519] rounded px-2.5 py-1.5 text-xs text-[#F7F1E2] disabled:opacity-50"
+                >
+                  <option value="">System Default</option>
+                  {audioOutputDevices.filter((device) => device.deviceId && device.deviceId !== 'default').map((device, index) => (
+                    <option key={device.deviceId} value={device.deviceId}>{device.label || 'Audio output ' + (index + 1)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[#C7B98F]">
+                Latency Mode
+                <select
+                  value={settings.audioLatencyMode}
+                  onChange={(event) => onChange({ ...settings, audioLatencyMode: event.target.value as AppSettings['audioLatencyMode'] })}
+                  className="bg-[#090704] border border-[#5A4519] rounded px-2.5 py-1.5 text-xs text-[#F7F1E2]"
+                >
+                  <option value="interactive">Interactive · lower monitoring latency</option>
+                  <option value="balanced">Balanced · recommended</option>
+                  <option value="playback">Playback · stability / power efficiency</option>
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-2 text-[10px] text-[#C7B98F]">
+                <div className="rounded border border-[#3D3015] p-2">Engine: <strong className="text-[#F2CA52]">{audioEngineInfo.state}</strong></div>
+                <div className="rounded border border-[#3D3015] p-2">Sample rate: <strong className="text-[#F2CA52]">{audioEngineInfo.sampleRate ? (audioEngineInfo.sampleRate / 1000).toFixed(1) + ' kHz' : 'Not initialized'}</strong></div>
+                <div className="rounded border border-[#3D3015] p-2">Base latency: <strong className="text-[#F2CA52]">{audioEngineInfo.baseLatency !== null ? (audioEngineInfo.baseLatency * 1000).toFixed(1) + ' ms' : 'Unavailable'}</strong></div>
+                <div className="rounded border border-[#3D3015] p-2">Output latency: <strong className="text-[#F2CA52]">{audioEngineInfo.outputLatency !== null ? (audioEngineInfo.outputLatency * 1000).toFixed(1) + ' ms' : 'Unavailable'}</strong></div>
+              </div>
+              {!audioEngineInfo.supportsOutputDeviceSelection && (
+                <p className="text-[10px] text-[#A99A74]">This browser does not expose AudioContext output routing. Select the output device in your browser or operating-system sound settings.</p>
+              )}
+              <p className="text-[10px] text-[#A99A74]">Browser applications cannot take exclusive control of native ASIO or bypass the Windows audio stack. The displayed sample rate and latency are the actual values reported by the browser.</p>
+            </section>
             <AiProviderPanel />
           </SettingsModal>
         </React.Suspense>
