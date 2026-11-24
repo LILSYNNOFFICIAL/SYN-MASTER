@@ -445,7 +445,7 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  httpServer.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, process.env.HOST || '0.0.0.0', () => {
     console.log(`SYN MASTER server listening on http://localhost:${PORT}`);
   });
 }
