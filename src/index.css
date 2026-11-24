@@ -1230,3 +1230,5 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 
 .syn-lab-tab-nav{max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:#3c7899 #0a1520}
 .syn-lab-tab-nav>button{flex:0 0 auto}
+
+@media(max-width:767px){.syn-ai-mini-visual{display:block}.syn-ai-mini-bars{height:54px}.syn-ai-mini-visual{padding:8px 10px 6px}}
