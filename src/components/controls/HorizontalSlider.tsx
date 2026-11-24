@@ -44,7 +44,7 @@ export const HorizontalSlider: React.FC<HorizontalSliderProps> = ({
   scale = 'linear',
   bipolar = false,
   signed,
-  accent = 'cyan',
+  accent = 'gold',
   disabled = false,
   readOnly = false,
   precision,
@@ -168,7 +168,7 @@ export const HorizontalSlider: React.FC<HorizontalSliderProps> = ({
     }
   };
 
-  const accentHex = accent === 'gold' ? '#F2CA52' : '#38BDF8';
+  const accentHex = accent === 'gold' ? '#F5B82E' : '#38BDF8';
   const fillLeft = bipolar ? Math.min(norm, defaultNorm) * 100 : 0;
   const fillWidth = bipolar ? Math.abs(norm - defaultNorm) * 100 : norm * 100;
 
@@ -220,7 +220,7 @@ export const HorizontalSlider: React.FC<HorizontalSliderProps> = ({
           if (isInteractive) onChange(resolvedDefault);
         }}
         onKeyDown={handleKeyDown}
-        className={`relative h-6 flex items-center touch-none rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[#38BDF8] ${
+        className={`relative h-6 flex items-center touch-none rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F5B82E] ${
           isInteractive ? 'cursor-ew-resize' : 'cursor-default'
         }`}
       >
