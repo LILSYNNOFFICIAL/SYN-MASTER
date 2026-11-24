@@ -151,7 +151,9 @@ export const MasteringRack: React.FC<Props> = React.memo(
     return (
       <aside
         aria-label="Mastering Chain Rack"
-        className="syn-mastering-rack w-full min-w-0 shrink-0 bg-[#0D0B06] flex flex-col overflow-visible"
+        data-syn-skin="instrument"
+        data-workspace="rack"
+        className="syn-mastering-rack syn-rack-shell w-full min-w-0 shrink-0 bg-[#0D0B06] flex flex-col overflow-visible"
       >
         {/* Rack Header */}
         <div className="px-3.5 py-3 border-b border-[#222530] flex items-center justify-between gap-2 bg-[#111217]">
