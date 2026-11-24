@@ -2305,9 +2305,12 @@ export default function App() {
             referrerPolicy="no-referrer"
             className="h-8 w-auto object-contain rounded-sm"
           />
-          <span className="font-display text-base font-extrabold tracking-tight text-[#F7F8FA]">
-            SYN <span className="text-[#F2CA52]">MASTER</span>
-          </span>
+          <div className="flex min-w-0 flex-col leading-none">
+            <span className="font-display text-base font-extrabold tracking-tight text-[#F7F8FA]">
+              SYN <span className="text-[#F2CA52]">MASTER</span>
+            </span>
+            <span className="mt-1 hidden text-[8px] font-semibold tracking-[.17em] text-[#8DAFC4] sm:block">PROFESSIONAL AUDIO MASTERING SUITE</span>
+          </div>
         </div>
 
         {/* BlueNote-grade command menu: grouped actions, keyboard-friendly native disclosure menus */}
@@ -2887,11 +2890,11 @@ export default function App() {
               className="syn-daw-spectrum p-3.5 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">
-                    Real-Time FFT Spectrum &amp; Composite EQ Curve
+                  <h2 className="text-xs font-bold uppercase tracking-[.18em] text-[#E4C477]">
+                    PRAGMATIC EQ
                   </h2>
-                  <p className="text-[11px] text-[#9CA3AF]">
-                    Dashed Silver: Pre-Master · Gold Area: Mastered · Bright Gold Curve: Parametric EQ Response
+                  <p className="text-[11px] text-[#9CB5C8]">
+                    Blue glow: imported audio waveform (time-domain) · Spectrum and EQ response: frequency-domain
                   </p>
                 </div>
                 <div className="flex items-center gap-1 p-0.5 rounded bg-[#090A0E] border border-[#242732]">
@@ -2927,6 +2930,7 @@ export default function App() {
                 chain={chainBypassed ? [] : chain}
                 sampleRate={activeTrack.sampleRate}
                 mode={spectrumMode}
+                waveformPeaks={activeTrack.peaks}
                 heightClass="h-64"
               />
             </section>
