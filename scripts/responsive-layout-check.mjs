@@ -235,8 +235,11 @@ async function runViewport(browser, width, height, mobile) {
         assert.equal(await workspaceHero.locator('[data-testid="workspace-hero-graphic"]').isVisible(), true, `${label} must display its workspace-specific instrument graphic`);
       }
       await inspectLayout(page, width, id);
-      const activePrimary = page.locator('.syn-primary-nav-item[data-active="true"]');
       const expectedPrimary = id === 'lab' ? 'Stereo' : id === 'qc' ? 'Loudness' : id === 'studio' ? 'Dashboard' : 'More';
+      if (expectedPrimary === 'More') {
+        await page.locator('.syn-primary-nav-more[data-active="true"]').waitFor({ state: 'visible', timeout: 3000 });
+      }
+      const activePrimary = page.locator('.syn-primary-nav-item[data-active="true"]');
       assert.equal(await activePrimary.count(), 1, `${label} must have exactly one active primary navigation item`);
       assert.equal((await activePrimary.innerText()).includes(expectedPrimary), true, `${label} must mark ${expectedPrimary} as the active navigation item`);
 
