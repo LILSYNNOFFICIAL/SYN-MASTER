@@ -415,7 +415,7 @@ export default function App() {
     [activeTrack],
   );
 
-  // Recompute offline DSP analysis off the main UI thread (debounced 120ms)
+  // Recompute offline DSP analysis off the main UI thread (debounced 60ms; the EQ blanket shows a live approximation meanwhile)
   useEffect(() => {
     const src = getRenderSource();
     const track = activeTrack;
@@ -488,7 +488,7 @@ export default function App() {
           setStatusNotice(errMsg);
         }
       })();
-    }, 120);
+    }, 60);
 
     return () => {
       cancelled = true;

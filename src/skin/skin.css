@@ -430,3 +430,7 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
   .syn-export-master{max-width:none;}
   .syn-step-hint{display:none;}
 }
+
+/* Round 3 · D: EQ blanket live approximation while the processed render catches up */
+.syn-ceq-blanket-path{transition:transform 60ms linear;}
+.syn-ceq-blanket-path[data-live="true"]{stroke-opacity:.85;}
