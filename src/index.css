@@ -1266,3 +1266,101 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 .syn-daw-main[data-syn-skin="instrument"]{background:radial-gradient(ellipse at 82% 5%,rgba(20,83,126,.16),transparent 38%),radial-gradient(ellipse at 12% 82%,rgba(130,97,38,.06),transparent 42%),linear-gradient(155deg,#091522 0%,#070e16 58%,#070a10 100%)!important}
 .syn-daw-main[data-syn-skin="instrument"]:before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1;background-image:linear-gradient(rgba(100,151,184,.13) 1px,transparent 1px),linear-gradient(90deg,rgba(100,151,184,.13) 1px,transparent 1px);background-size:48px 48px;mask-image:linear-gradient(130deg,transparent 15%,black 75%)}
 .syn-daw-main[data-syn-skin="instrument"]>*{position:relative;z-index:1}
+
+
+/* Unified SYN MASTER instrument skin: real controls and measurements stay intact. */
+[data-syn-skin="instrument"] [class*="bg-[#111217]"],
+[data-syn-skin="instrument"] [class*="bg-[#12141B]"],
+[data-syn-skin="instrument"] [class*="bg-[#171A22]"] {
+  background:linear-gradient(145deg,rgba(18,34,48,.96),rgba(8,15,23,.98)) !important;
+  border-color:rgba(91,145,181,.25) !important;
+  box-shadow:inset 0 1px rgba(255,255,255,.035),0 10px 28px rgba(0,0,0,.16);
+}
+[data-syn-skin="instrument"] [class*="border-[#D4AF37]"],
+[data-syn-skin="instrument"] [class*="border-[#242732]"],
+[data-syn-skin="instrument"] [class*="border-[#232632]"] {
+  border-color:rgba(111,157,190,.25) !important;
+}
+[data-syn-skin="instrument"] [class*="bg-[#0C0D12]"],
+[data-syn-skin="instrument"] [class*="bg-[#0B0C10]"],
+[data-syn-skin="instrument"] [class*="bg-[#090A0E]"],
+[data-syn-skin="instrument"] [class*="bg-[#0F1219]"] {
+  background:linear-gradient(180deg,rgba(5,13,21,.96),rgba(10,21,31,.96)) !important;
+  border-color:rgba(76,139,180,.24) !important;
+}
+[data-syn-skin="instrument"] h2,
+[data-syn-skin="instrument"] h3,
+[data-syn-skin="instrument"] h4 {
+  letter-spacing:.035em;
+}
+[data-syn-skin="instrument"] canvas {
+  border:1px solid rgba(78,151,194,.2);
+  border-radius:8px;
+  background:linear-gradient(180deg,rgba(5,14,23,.7),rgba(8,17,26,.92));
+}
+[data-syn-skin="instrument"] input:not([type="checkbox"]):not([type="radio"]),
+[data-syn-skin="instrument"] select,
+[data-syn-skin="instrument"] textarea {
+  background-color:#091521 !important;
+  border-color:rgba(81,145,184,.38) !important;
+  color:#e7f0f7 !important;
+}
+[data-syn-skin="instrument"] input:focus,
+[data-syn-skin="instrument"] select:focus,
+[data-syn-skin="instrument"] textarea:focus {
+  outline:1px solid rgba(84,190,246,.55);
+  outline-offset:1px;
+}
+[data-syn-skin="instrument"] button:not(:disabled) {
+  transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease,transform .16s ease;
+}
+[data-syn-skin="instrument"] button:not(:disabled):focus-visible {
+  outline:2px solid #65c7ff;
+  outline-offset:2px;
+}
+[data-syn-skin="instrument"] .syn-workspace-empty {
+  background:radial-gradient(ellipse at 50% 0%,rgba(42,133,183,.13),transparent 65%),linear-gradient(145deg,#112235,#080f17) !important;
+  border-color:rgba(81,157,201,.3) !important;
+  box-shadow:inset 0 1px rgba(255,255,255,.035),0 14px 34px rgba(0,0,0,.2);
+}
+.syn-lab-workspace .syn-lab-tab-nav {
+  border-color:rgba(83,153,193,.28);
+  background:linear-gradient(145deg,#122638,#09131e);
+  box-shadow:inset 0 1px rgba(255,255,255,.04);
+}
+.syn-lab-workspace .syn-lab-tab-nav button[aria-pressed="true"] {
+  color:#07121c !important;
+  background:linear-gradient(135deg,#83d7ff,#3ba9e6) !important;
+  border:1px solid rgba(159,224,255,.5);
+  box-shadow:0 0 18px rgba(58,172,230,.16);
+}
+.syn-battle-workspace > .p-4:first-child,
+.syn-reference-workspace > .p-4:first-child,
+.syn-qc-workspace > .p-4:first-child {
+  background:radial-gradient(ellipse at 95% 0%,rgba(45,136,185,.14),transparent 55%),linear-gradient(145deg,#122638,#09131e) !important;
+  border-color:rgba(84,157,199,.3) !important;
+}
+.syn-battle-workspace .grid > [class*="rounded"],
+.syn-reference-workspace .grid > [class*="rounded"],
+.syn-qc-workspace .grid > [class*="rounded"] {
+  box-shadow:inset 0 1px rgba(255,255,255,.025),0 8px 22px rgba(0,0,0,.14);
+}
+.syn-stem-workspace > section:first-child {
+  background:radial-gradient(ellipse at 88% 0%,rgba(55,146,190,.18),transparent 55%),linear-gradient(145deg,#13283a,#09131d) !important;
+  border-color:rgba(82,155,197,.32) !important;
+}
+.syn-plugin-workspace > section:first-child {
+  background:radial-gradient(ellipse at 90% 0%,rgba(52,138,183,.16),transparent 52%),linear-gradient(145deg,#13283a,#09131d) !important;
+  border-color:rgba(82,155,197,.32) !important;
+}
+.syn-plugin-workspace .syn-workspace-empty-plugins {
+  background:linear-gradient(145deg,#102234,#09131d) !important;
+}
+.syn-ai-workspace [class*="bg-[#111217]"],
+.syn-ai-workspace [class*="bg-[#0C0D12]"] {
+  background:linear-gradient(145deg,rgba(17,34,49,.96),rgba(7,14,22,.98)) !important;
+  border-color:rgba(84,154,196,.26) !important;
+}
+@media(max-width:767px) {
+  [data-syn-skin="instrument"] canvas { max-width:100%; }
+}
