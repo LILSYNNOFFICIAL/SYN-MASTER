@@ -46,7 +46,8 @@ export const TimelineWaveform: React.FC<Props> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const playheadRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
-  const dragRef = useRef<null | 'in' | 'out'>(null);
+  const dragRef = useRef<null | 'in' | 'out' | 'seek'>(null);
+  const lastSeekRef = useRef(0);
   const fadesRef = useRef(fades);
   fadesRef.current = fades;
 
@@ -76,8 +77,8 @@ export const TimelineWaveform: React.FC<Props> = ({
 
     // Background
     const bg = ctx.createLinearGradient(0, 0, 0, h);
-    bg.addColorStop(0, '#0B0905');
-    bg.addColorStop(1, '#050403');
+    bg.addColorStop(0, '#071222');
+    bg.addColorStop(1, '#03070F');
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, h);
 
@@ -91,7 +92,7 @@ export const TimelineWaveform: React.FC<Props> = ({
     ctx.textBaseline = 'middle';
     for (let t = 0; t <= durationSec + 1e-6; t += step) {
       const x = (t / durationSec) * width;
-      ctx.strokeStyle = 'rgba(212,175,55,0.10)';
+      ctx.strokeStyle = 'rgba(46,168,255,0.10)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(Math.round(x) + 0.5, top);
@@ -101,23 +102,23 @@ export const TimelineWaveform: React.FC<Props> = ({
       for (let k = 1; k < 4; k++) {
         const xm = ((t + (k * step) / 4) / durationSec) * width;
         if (xm > width) break;
-        ctx.strokeStyle = 'rgba(212,175,55,0.22)';
+        ctx.strokeStyle = 'rgba(63,224,255,0.25)';
         ctx.beginPath();
         ctx.moveTo(Math.round(xm) + 0.5, RULER_H - 5);
         ctx.lineTo(Math.round(xm) + 0.5, RULER_H);
         ctx.stroke();
       }
-      ctx.strokeStyle = 'rgba(242,202,82,0.55)';
+      ctx.strokeStyle = 'rgba(63,224,255,0.6)';
       ctx.beginPath();
       ctx.moveTo(Math.round(x) + 0.5, RULER_H - 10);
       ctx.lineTo(Math.round(x) + 0.5, RULER_H);
       ctx.stroke();
       if (x < width - 24) {
-        ctx.fillStyle = '#B9A46A';
+        ctx.fillStyle = '#8FC9F2';
         ctx.fillText(fmt(t), x + 4, RULER_H / 2 - 1);
       }
     }
-    ctx.strokeStyle = 'rgba(212,175,55,0.35)';
+    ctx.strokeStyle = 'rgba(46,168,255,0.4)';
     ctx.beginPath();
     ctx.moveTo(0, RULER_H + 0.5);
     ctx.lineTo(width, RULER_H + 0.5);
@@ -125,7 +126,7 @@ export const TimelineWaveform: React.FC<Props> = ({
     // amplitude grid (-6 dB lines and center)
     for (const g of [0.5, 1]) {
       const dy = (waveH / 2 - 6) * g;
-      ctx.strokeStyle = g === 1 ? 'rgba(212,175,55,0.08)' : 'rgba(212,175,55,0.06)';
+      ctx.strokeStyle = g === 1 ? 'rgba(46,168,255,0.08)' : 'rgba(46,168,255,0.06)';
       ctx.setLineDash([3, 5]);
       ctx.beginPath();
       ctx.moveTo(0, mid - dy);
@@ -135,7 +136,7 @@ export const TimelineWaveform: React.FC<Props> = ({
       ctx.stroke();
     }
     ctx.setLineDash([]);
-    ctx.strokeStyle = 'rgba(212,175,55,0.18)';
+    ctx.strokeStyle = 'rgba(63,224,255,0.22)';
     ctx.beginPath();
     ctx.moveTo(0, mid);
     ctx.lineTo(width, mid);
@@ -160,24 +161,27 @@ export const TimelineWaveform: React.FC<Props> = ({
     };
 
     const preFill = ctx.createLinearGradient(0, top, 0, h);
-    preFill.addColorStop(0, 'rgba(150,130,90,0.45)');
-    preFill.addColorStop(0.5, 'rgba(110,95,60,0.65)');
-    preFill.addColorStop(1, 'rgba(150,130,90,0.45)');
+    preFill.addColorStop(0, 'rgba(90,120,170,0.35)');
+    preFill.addColorStop(0.5, 'rgba(60,90,140,0.55)');
+    preFill.addColorStop(1, 'rgba(90,120,170,0.35)');
     drawPeaks(prePeaks, preFill);
     if (showPost && postPeaks && postPeaks.length) {
       const postFill = ctx.createLinearGradient(0, top, 0, h);
-      postFill.addColorStop(0, 'rgba(255,225,130,0.85)');
-      postFill.addColorStop(0.5, 'rgba(212,175,55,0.75)');
-      postFill.addColorStop(1, 'rgba(255,225,130,0.85)');
+      postFill.addColorStop(0, 'rgba(63,224,255,0.9)');
+      postFill.addColorStop(0.5, 'rgba(46,120,255,0.8)');
+      postFill.addColorStop(1, 'rgba(63,224,255,0.9)');
+      ctx.shadowColor = 'rgba(46,168,255,0.85)';
+      ctx.shadowBlur = 10;
       ctx.globalAlpha = 0.85;
       drawPeaks(postPeaks, postFill);
       ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
     }
 
     // Fade overlays
     const inX = (fades.inSec / durationSec) * width;
     const outX = width - (fades.outSec / durationSec) * width;
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillStyle = 'rgba(2,6,14,0.6)';
     if (inX > 1) {
       ctx.beginPath();
       ctx.moveTo(0, top);
@@ -200,8 +204,10 @@ export const TimelineWaveform: React.FC<Props> = ({
       ctx.closePath();
       ctx.fill();
     }
-    ctx.strokeStyle = '#F2CA52';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#E040FB';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(224,64,251,0.9)';
+    ctx.shadowBlur = 8;
     if (inX > 1) {
       ctx.beginPath();
       for (let i = 0; i <= 40; i++) {
@@ -220,15 +226,19 @@ export const TimelineWaveform: React.FC<Props> = ({
       }
       ctx.stroke();
     }
-    // handles
+    ctx.shadowBlur = 0;
+    // handles (FL-style fade knobs at the top corners)
     const handle = (x: number) => {
-      ctx.fillStyle = '#F2CA52';
-      ctx.strokeStyle = '#0A0804';
+      ctx.shadowColor = 'rgba(63,224,255,0.95)';
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#3FE0FF';
+      ctx.strokeStyle = '#02060C';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.rect(x - HANDLE_R, top + 2, HANDLE_R * 2, HANDLE_R * 2);
+      ctx.arc(x, top + 2 + HANDLE_R, HANDLE_R, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+      ctx.shadowBlur = 0;
     };
     handle(Math.max(HANDLE_R, inX));
     handle(Math.min(width - HANDLE_R, outX));
@@ -262,23 +272,51 @@ export const TimelineWaveform: React.FC<Props> = ({
     if (nearTop && Math.abs(x - inX) <= HANDLE_R + 5) dragRef.current = 'in';
     else if (nearTop && Math.abs(x - outX) <= HANDLE_R + 5) dragRef.current = 'out';
     else {
+      dragRef.current = 'seek';
+      lastSeekRef.current = performance.now();
       onSeek(xToSec(e.clientX));
-      return;
     }
-    (e.target as Element).setPointerCapture?.(e.pointerId);
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!dragRef.current) return;
     const sec = xToSec(e.clientX);
+    if (dragRef.current === 'seek') {
+      // Move the playhead immediately, restart audio at most every 80 ms while scrubbing.
+      telemetryStore.publish({ currentTimeSec: sec });
+      const now = performance.now();
+      if (now - lastSeekRef.current > 80) {
+        lastSeekRef.current = now;
+        onSeek(sec);
+      }
+      return;
+    }
     const f = fadesRef.current;
     const maxLen = durationSec * 0.5;
     if (dragRef.current === 'in') onFadesChange({ ...f, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
     else onFadesChange({ ...f, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (dragRef.current === 'seek') onSeek(xToSec(e.clientX));
     dragRef.current = null;
+  };
+  const onPointerCancel = () => {
+    dragRef.current = null;
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const now = telemetryStore.getSnapshot().currentTimeSec;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      onSeek(Math.max(0, Math.min(durationSec, now + (e.key === 'ArrowRight' ? 5 : -5))));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      onSeek(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      onSeek(Math.max(0, durationSec - 0.05));
+    }
   };
 
   return (
@@ -289,9 +327,10 @@ export const TimelineWaveform: React.FC<Props> = ({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onKeyDown={onKeyDown}
       role="slider"
-      aria-label="Track timeline: click to seek, drag the gold corner handles to set fade-in and fade-out"
+      aria-label="Track timeline: click to seek, drag the glowing corner handles to set fade-in and fade-out"
       aria-valuemin={0}
       aria-valuemax={durationSec}
       tabIndex={0}

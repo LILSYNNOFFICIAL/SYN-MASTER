@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Pause, Play, Sparkles, SlidersHorizontal, RotateCcw, ChevronDown, ChevronUp, Wand2 } from 'lucide-react';
+import { Sparkles, SlidersHorizontal, RotateCcw, ChevronDown, ChevronUp, Wand2 } from 'lucide-react';
 import type { AudioAnalysis, MasterFinalReport } from '../../types/mastering';
-import type { FadeSettings, FadeCurve } from '../../dsp/fades';
+import type { FadeSettings } from '../../dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from '../../dsp/loudnessTargets';
 import type { DiagnosticLog } from '../../director/diagnosticLog';
-import { TimelineWaveform } from './TimelineWaveform';
 import { DiagnosticLogPanel } from './DiagnosticLogPanel';
 
 interface Props {
@@ -57,7 +56,6 @@ const Stat: React.FC<{ label: string; src: string; out?: string | null; good?: b
 /** One-button mastering stage: waveform + grid, big FIX IT ALL WITH AI, technical details on demand. */
 export const FixItStage: React.FC<Props> = (p) => {
   const [showDetails, setShowDetails] = useState(false);
-  const [showTimeline, setShowTimeline] = useState(false);
   const pressed = p.running || p.report !== null;
   useEffect(() => {
     if (p.running) setShowDetails(true);
@@ -118,47 +116,10 @@ export const FixItStage: React.FC<Props> = (p) => {
         </div>
       )}
 
-      {showTimeline && (
-        <div className="syn2-wave-wrap">
-          <TimelineWaveform
-            prePeaks={p.prePeaks}
-            postPeaks={p.postPeaks}
-            durationSec={p.durationSec}
-            showPost={p.auditionTarget !== 'original'}
-            fades={p.fades}
-            onFadesChange={p.onFadesChange}
-            onSeek={p.onSeek}
-            heightPx={190}
-          />
-        </div>
-      )}
-
-      <div className="flex justify-center">
-        <button type="button" className="syn2-btn-ghost" onClick={() => setShowTimeline((value) => !value)} aria-expanded={showTimeline}>
-          <SlidersHorizontal className="w-4 h-4" /> {showTimeline ? 'Hide timeline & fades' : 'Timeline & fades'}
-        </button>
-      </div>
-
       <div className="syn2-transport">
-        <button type="button" className="syn2-play" onClick={p.onTogglePlay} aria-label={p.isPlaying ? 'Pause' : 'Play'}>
-          {p.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-        </button>
         <div className="syn2-ab" role="group" aria-label="A/B compare">
           <button type="button" className={p.auditionTarget === 'original' ? 'is-on' : ''} onClick={() => p.onAudition('original')}>A · Original</button>
           <button type="button" className={p.auditionTarget === 'mastered' ? 'is-on' : ''} onClick={() => p.onAudition('mastered')}>B · Master</button>
-        </div>
-        <div className="syn2-fades">
-          <span>Fade in {p.fades.inSec.toFixed(1)}s</span>
-          <select value={p.fades.inCurve} onChange={(e) => p.onFadesChange({ ...p.fades, inCurve: e.target.value as FadeCurve })} aria-label="Fade-in curve">
-            <option value="scurve">S-curve</option><option value="linear">Linear</option><option value="exp">Exponential</option>
-          </select>
-          <span>Fade out {p.fades.outSec.toFixed(1)}s</span>
-          <select value={p.fades.outCurve} onChange={(e) => p.onFadesChange({ ...p.fades, outCurve: e.target.value as FadeCurve })} aria-label="Fade-out curve">
-            <option value="scurve">S-curve</option><option value="linear">Linear</option><option value="exp">Exponential</option>
-          </select>
-          {(p.fades.inSec > 0 || p.fades.outSec > 0) && (
-            <button type="button" className="syn2-link" onClick={() => p.onFadesChange({ ...p.fades, inSec: 0, outSec: 0 })}>clear</button>
-          )}
         </div>
         {p.report && !p.running && (
           <button type="button" className="syn2-btn-gold" onClick={p.onFix}>

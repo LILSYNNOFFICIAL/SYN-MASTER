@@ -2,6 +2,7 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { AudioAnalysis, EQBand, EQBandShape, ParametricEQParams } from '../../types/mastering';
 import { designEQBand } from '../../dsp/offlineDsp';
+import { telemetryStore } from '../../engine/telemetryStore';
 import { designHighShelf, designLowShelf, evaluateBiquadMagnitudeDb } from '../../dsp/biquad';
 
 /**
@@ -17,8 +18,12 @@ interface Props {
   sampleRate: number;
   spectrum: AudioAnalysis | null;
   onChange: (next: ParametricEQParams) => void;
-  /** 'console' = reference-mockup styling (gradient curve, spectrum bars, band table, keyboard-focusable nodes). */
+  /** 'console' = reference-mockup styling (gradient curve, waveform blanket, band table, keyboard-focusable nodes). */
   variant?: 'classic' | 'console';
+  /** Console only: decoded waveform peaks (0..1) of the processed preview, drawn as a glowing blanket behind the curve. */
+  waveformPeaks?: number[] | null;
+  /** Console only: track length, used to place the live playhead on the blanket. */
+  durationSec?: number;
 }
 
 const W = 640;
@@ -26,7 +31,7 @@ const H = 240;
 const F_MIN = 20;
 const F_MAX = 20000;
 const G_MAX = 18;
-const CONSOLE_COLORS = ['#2F8BFF', '#C04CFF', '#D4A84A', '#2F8BFF', '#C04CFF', '#8B5CFF', '#D4A84A', '#5EC8FF'];
+const CONSOLE_COLORS = ['#2EA8FF', '#3FE0FF', '#8B5CF6', '#C04CFF', '#E040FB', '#5EC8FF', '#2EA8FF', '#8B5CF6'];
 const SHAPE_SHORT: Record<EQBandShape, string> = { bell: 'Peak', lowshelf: 'Low shelf', highshelf: 'High shelf', highpass: 'High pass', lowpass: 'Low pass', notch: 'Notch' };
 const COLORS = ['#F2CA52', '#FF8A5B', '#7BE0A0', '#6CC4FF', '#C792EA', '#FF6B9A', '#E8E36A', '#5EEAD4'];
 const SHAPES: EQBandShape[] = ['bell', 'lowshelf', 'highshelf', 'highpass', 'lowpass', 'notch'];
@@ -42,7 +47,7 @@ function fmtF(f: number) {
   return f >= 1000 ? `${(f / 1000).toFixed(f >= 10000 ? 1 : 2)}k` : f.toFixed(0);
 }
 
-export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, onChange, variant = 'classic' }) => {
+export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, onChange, variant = 'classic', waveformPeaks = null, durationSec = 0 }) => {
   const uid = useId().replace(/:/g, '');
   const isConsole = variant === 'console';
   const palette = isConsole ? CONSOLE_COLORS : COLORS;
@@ -158,31 +163,40 @@ export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, o
   const selected = bands.find((b) => b.id === sel) ?? null;
   const gridF = [30, 50, 100, 200, 300, 500, 1000, 2000, 3000, 5000, 10000, 20000];
 
-  const spectrumBars = useMemo(() => {
-    if (!isConsole || !spectrum || !spectrum.spectrumBinsFreq?.length) return [] as { x: number; w: number; h: number }[];
-    const fs = spectrum.spectrumBinsFreq;
-    const ds = spectrum.spectrumBinsDb;
-    let max = -Infinity;
-    for (const d of ds) if (d > max) max = d;
-    const slots = 120;
-    const out: { x: number; w: number; h: number }[] = [];
-    let k = 0;
-    for (let i = 0; i < slots; i++) {
-      const f0 = xToF((i / slots) * W);
-      const f1 = xToF(((i + 1) / slots) * W);
-      let best = -Infinity;
-      while (k < fs.length && fs[k] < f0) k++;
-      let j = k;
-      while (j < fs.length && fs[j] < f1) {
-        if (ds[j] > best) best = ds[j];
-        j++;
-      }
-      if (!Number.isFinite(best)) continue;
-      const h = Math.max(0, Math.min(1, (best - (max - 66)) / 66)) * (H * 0.62);
-      out.push({ x: (i / slots) * W + 0.6, w: W / slots - 1.2, h });
+  // Waveform "blanket": mirrored envelope of the processed preview (re-rendered, debounced, on
+  // every chain change), so the shape visibly reacts to the settings.
+  const blanketPath = useMemo(() => {
+    if (!isConsole || !waveformPeaks || waveformPeaks.length < 2) return null;
+    const N = Math.min(480, waveformPeaks.length);
+    const step = waveformPeaks.length / N;
+    const env: number[] = [];
+    for (let i = 0; i < N; i++) {
+      let m = 0;
+      const a = Math.floor(i * step);
+      const b = Math.max(a + 1, Math.floor((i + 1) * step));
+      for (let k = a; k < b && k < waveformPeaks.length; k++) if (waveformPeaks[k] > m) m = waveformPeaks[k];
+      env.push(Math.min(1, m));
     }
-    return out;
-  }, [isConsole, spectrum]);
+    const mid = H / 2;
+    const amp = H * 0.44;
+    let d = `M0,${mid}`;
+    for (let i = 0; i < N; i++) d += ` L${((i / (N - 1)) * W).toFixed(1)},${(mid - env[i] * amp).toFixed(1)}`;
+    for (let i = N - 1; i >= 0; i--) d += ` L${((i / (N - 1)) * W).toFixed(1)},${(mid + env[i] * amp).toFixed(1)}`;
+    return d + ' Z';
+  }, [isConsole, waveformPeaks]);
+  const blanketHeadRef = useRef<SVGLineElement | null>(null);
+  useEffect(() => {
+    if (!isConsole || !durationSec) return;
+    const update = (sec: number) => {
+      const el = blanketHeadRef.current;
+      if (!el) return;
+      const x = (Math.max(0, Math.min(1, sec / durationSec)) * W).toFixed(1);
+      el.setAttribute('x1', x);
+      el.setAttribute('x2', x);
+    };
+    update(telemetryStore.getSnapshot().currentTimeSec);
+    return telemetryStore.subscribe((snap) => update(snap.currentTimeSec));
+  }, [isConsole, durationSec]);
 
   const nudgeBand = (b: EQBand, e: React.KeyboardEvent) => {
     const fine = e.shiftKey;
@@ -236,18 +250,29 @@ export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, o
           >
             <defs>
               <linearGradient id={`${uid}-curve`} x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0%" stopColor="#2F8BFF" />
-                <stop offset="45%" stopColor="#C04CFF" />
-                <stop offset="70%" stopColor="#D4A84A" />
-                <stop offset="100%" stopColor="#8B5CFF" />
+                <stop offset="0%" stopColor="#2EA8FF" />
+                <stop offset="35%" stopColor="#3FE0FF" />
+                <stop offset="65%" stopColor="#8B5CF6" />
+                <stop offset="100%" stopColor="#E040FB" />
               </linearGradient>
               <linearGradient id={`${uid}-spec`} x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0%" stopColor="#2F8BFF" />
-                <stop offset="30%" stopColor="#C04CFF" />
-                <stop offset="50%" stopColor="#D4A84A" />
-                <stop offset="75%" stopColor="#C04CFF" />
-                <stop offset="100%" stopColor="#2F8BFF" />
+                <stop offset="0%" stopColor="#2EA8FF" />
+                <stop offset="50%" stopColor="#8B5CF6" />
+                <stop offset="100%" stopColor="#2EA8FF" />
               </linearGradient>
+              <linearGradient id={`${uid}-blanket`} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.42} />
+                <stop offset="50%" stopColor="#2EA8FF" stopOpacity={0.18} />
+                <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0.42} />
+              </linearGradient>
+              <linearGradient id={`${uid}-area`} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#3FE0FF" stopOpacity={0.22} />
+                <stop offset="100%" stopColor="#E040FB" stopOpacity={0} />
+              </linearGradient>
+              <filter id={`${uid}-soft`} x="-5%" y="-20%" width="110%" height="140%">
+                <feGaussianBlur stdDeviation="1.6" result="b" />
+                <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
               <filter id={`${uid}-glow`} x="-20%" y="-20%" width="140%" height="140%">
                 <feGaussianBlur stdDeviation="2.2" result="b" />
                 <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
@@ -259,11 +284,17 @@ export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, o
             {[-12, -6, 0, 6, 12].map((g) => (
               <line key={g} x1={0} x2={W} y1={gToY(g)} y2={gToY(g)} className={g === 0 ? 'syn-ceq-grid is-zero' : 'syn-ceq-grid'} />
             ))}
-            <g opacity={0.6} fill={`url(#${uid}-spec)`}>
-              {spectrumBars.map((bar, i) => (
-                <rect key={i} x={bar.x} y={H - bar.h} width={Math.max(0.6, bar.w)} height={bar.h} rx={0.6} />
-              ))}
-            </g>
+            {blanketPath && (
+              <g className="syn-ceq-blanket" pointerEvents="none">
+                <path d={blanketPath} fill={`url(#${uid}-blanket)`} stroke={`url(#${uid}-spec)`} strokeWidth={0.8} strokeOpacity={0.5} filter={`url(#${uid}-soft)`} />
+                {durationSec > 0 && <line ref={blanketHeadRef} x1={0} x2={0} y1={0} y2={H} className="syn-ceq-playhead" />}
+              </g>
+            )}
+            <path
+              d={`${total.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')} L${W},${gToY(0)} L0,${gToY(0)} Z`}
+              fill={`url(#${uid}-area)`}
+              pointerEvents="none"
+            />
             <path
               d={total.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')}
               fill="none"

@@ -125,6 +125,7 @@ import { MasterConsole } from './components/console/MasterConsole';
 import { Portal } from './ui/Portal';
 import { FixItStage } from './components/studio/FixItStage';
 import { FxRackWindow } from './components/studio/FxRackWindow';
+import { TimelinePlayer } from './components/studio/TimelinePlayer';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
 import { buildDiagnosticLog } from './director/diagnosticLog';
@@ -2372,6 +2373,24 @@ export default function App() {
       onOpenRack={() => setRackWindowOpen(true)}
       onOpenStereoLab={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
       notice={statusNotice}
+      blanketPeaks={chainBypassed || auditionTarget === 'original' ? prePeaksHi : postPeaksHi ?? prePeaksHi}
+      timeline={
+        <TimelinePlayer
+          prePeaks={prePeaksHi}
+          postPeaks={postPeaksHi}
+          durationSec={activeTrack?.durationSec ?? 0}
+          showPost={auditionTarget !== 'original'}
+          isPlaying={isPlaying}
+          fades={fades}
+          onFadesChange={setFades}
+          onSeek={(sec) => {
+            engineRef.current!.seek(sec);
+            telemetryStore.publish({ currentTimeSec: sec });
+          }}
+          onTogglePlay={togglePlay}
+          onImport={handleUploadSourceFile}
+        />
+      }
     />
   );
 

@@ -61,6 +61,10 @@ export interface MasterConsoleProps {
   onOpenStereoLab: () => void;
   /** Latest app status notice (also shown in the session ribbon on very wide screens). */
   notice?: string | null;
+  /** Peaks of the processed preview render (falls back to the source); drawn as the glowing blanket behind the EQ curve. */
+  blanketPeaks?: number[] | null;
+  /** Timeline player rendered directly under the EQ panel. */
+  timeline?: React.ReactNode;
 }
 
 const LOUDNESS_STAGES: ProcessorType[] = ['limiter', 'maximizer', 'multiband-maximizer', 'clipper', 'dither'];
@@ -254,6 +258,8 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
                 params={eq.params as ParametricEQParams}
                 sampleRate={p.sampleRate}
                 spectrum={p.master ?? p.source}
+                waveformPeaks={p.blanketPeaks ?? p.waveformPeaks}
+                durationSec={p.durationSec}
                 onChange={(next) => setParams<ParametricEQParams>(eq, next)}
               />
             ) : (
@@ -273,6 +279,8 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
             />
           )}
         </section>
+
+        {p.timeline}
 
         <div className="syn-console-bottom">
           <Card title="Global" area="global" className="syn-card-global">
