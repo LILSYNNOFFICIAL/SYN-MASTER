@@ -2283,7 +2283,7 @@ export default function App() {
     telemetryStore.publish({ isPlaying: false, currentTimeSec: 0, live: null });
     setActiveTrack(null);
     setDirectorReport(null);
-    setShowWorkstationWithoutTrack(false);
+    setShowWorkstationWithoutTrack(typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
   };
 
   if (!activeTrack && !showWorkstationWithoutTrack) {
