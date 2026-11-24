@@ -406,3 +406,6 @@ The live `/api/health` response only verifies configuration presence, not full A
 
 
 **CI hardening follow-up:** Web CI now runs the JavaScript bundle budget check after production build and starts production with a throwaway test-only `SYN_MASTER_AI_ACCESS_TOKEN`. Its smoke test posts empty (invalid, non-billable) payloads to both `/api/ai/master` and `/api/ai/refine`: unauthenticated requests must receive 401, while the valid test bearer token must pass the gate and reach payload validation (400). This validates the server boundary without sending a Gemini request. The test-only token is not a repository secret and is not reused for deployment.
+
+
+- [x] **Windows desktop shell scaffold:** `desktop/main.cjs` starts the bundled Express server on a randomly selected loopback port, generates a per-launch AI access token (passed to the renderer only through a narrow preload IPC bridge), and starts/pairs the native VST3 companion when its three binaries are staged. The native pairing file is deleted after the HTTP listener is confirmed ready. This is source scaffolding; packaging scripts, CI installer build, Windows smoke tests, signing, and user-device validation are still open.

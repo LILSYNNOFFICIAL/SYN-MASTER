@@ -35,6 +35,7 @@ export const AiProviderPanel: React.FC = () => {
   const preset = getPreset(settings.presetId);
   const config = getActiveProviderConfig(settings);
   const isBuiltin = preset.id === BUILTIN_PROVIDER_ID;
+  const desktopMode = typeof window !== 'undefined' && Boolean(window.synMasterDesktop);
   const editable = preset.adapter === 'openai-compatible' || preset.adapter === 'webhook';
   const supportsAgentic = preset.adapter === 'openai-compatible' || preset.adapter === 'webhook';
 
@@ -151,8 +152,12 @@ export const AiProviderPanel: React.FC = () => {
 
       {isBuiltin ? (
         <div className="flex flex-col gap-2 text-[11px] text-[#9CA3AF]">
-          <p>Built-in Gemini uses the server-side Gemini key. Hosted production builds require a separate cloud access token from the SYN MASTER operator. Do not paste a Gemini API key here.</p>
-          <label className="flex flex-col gap-1">
+          {desktopMode ? (
+            <p>Desktop workstation: the app creates a per-launch local access token automatically. No cloud access token entry is needed here.</p>
+          ) : (
+            <>
+              <p>Built-in Gemini uses the server-side Gemini key. Hosted production builds require a separate cloud access token from the SYN MASTER operator. Do not paste a Gemini API key here.</p>
+              <label className="flex flex-col gap-1">
             Cloud AI access token
             <div className="flex items-center gap-2">
               <input type={showServerToken ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={serverTokenDraft} onChange={(e) => setServerTokenDraft(e.target.value)} placeholder="Paste server access token" className={inputCls + ' min-w-0 flex-1 font-mono-tabular'} />
@@ -169,7 +174,9 @@ export const AiProviderPanel: React.FC = () => {
             <input type="checkbox" checked={settings.remember} onChange={(e) => setProviderSettings((prev) => ({ ...prev, remember: e.target.checked }))} className="accent-[#D4AF37]" />
             Remember on this device (otherwise cleared when this tab closes)
           </label>
-          <p className="text-[10px] text-[#9CA3AF]">The token is sent only as a Bearer authorization header to this SYN MASTER server. Use a random token of at least 32 characters.</p>
+              <p className="text-[10px] text-[#9CA3AF]">The token is sent only as a Bearer authorization header to this SYN MASTER server. Use a random token of at least 32 characters.</p>
+            </>
+          )}
         </div>
       ) : (
         <>

@@ -55,6 +55,30 @@ async function waitForWebServer(port) {
   throw new Error(`Local SYN MASTER server did not become healthy: ${lastError?.message ?? 'startup timeout'}`);
 }
 
+async function waitForNativeHttpPort(port, child) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (child.exitCode !== null) {
+      throw new Error(`Native VST3 host exited before its HTTP listener started (code ${child.exitCode}).`);
+    }
+    const listening = await new Promise((resolve) => {
+      const socket = net.createConnection({ host: '127.0.0.1', port });
+      socket.setTimeout(600);
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once('timeout', () => {
+        socket.destroy();
+        resolve(false);
+      });
+      socket.once('error', () => resolve(false));
+    });
+    if (listening) return;
+    await delay(150);
+  }
+  throw new Error(`Native VST3 host did not open its HTTP listener on 127.0.0.1:${port}.`);
+}
+
 async function waitForNativePairing(pairingPath, child) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
     if (child.exitCode !== null) {
@@ -66,6 +90,9 @@ async function waitForNativePairing(pairingPath, child) {
       if (typeof parsed.sessionToken === 'string' &&
           Number.isInteger(parsed.httpPort) &&
           Number.isInteger(parsed.wsPort)) {
+        // The native host writes host_pairing.json immediately before opening its listener.
+        // Wait for TCP readiness so the renderer's one-shot auto-pair cannot race startup.
+        await waitForNativeHttpPort(parsed.httpPort, child);
         await fs.rm(pairingPath, { force: true });
         return parsed;
       }
