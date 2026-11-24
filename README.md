@@ -434,3 +434,17 @@ The client-entered cloud token is a shared bearer credential, not individual use
 - [x] **Compact command header:** brand and export action share the first row, while the command menus occupy a horizontally scrollable second row to avoid compressing the workstation.
 - [ ] **Physical Android acceptance:** verify the live synced build in Chrome/Chrome Canary on the target phone at portrait and landscape widths. GitHub CI and CSS inspection do not replace this device check.
 - **Scope:** this is a CSS-only responsive layout change. React state, Web Audio routing, DSP, mastering algorithms, and audio engine modules were not modified.
+
+## Flagship mastering UI and responsive polish — November 24, 2026
+
+- [x] **Hardware surface hierarchy:** unified the workstation chassis, rack cards, recessed waveform/spectrum wells, telemetry tiles, and meter wells around deep black surfaces, warm gold borders, subtle inner highlights, and tabular technical readouts.
+- [x] **Touch controls:** increased mobile slider, switch, bypass, and A/B control hit areas to at least 40 px, with gold active states.
+- [x] **Compact command header:** below 1024 px, the application header keeps the SYN MASTER lockup, a single Menu disclosure for File/Edit/Workspace/View/Tools, and a persistent Export action. Selecting a command closes the menu.
+- [x] **Consistent workspace layout:** every workspace tab now uses the same main layout container. Non-studio workspaces use a single content column; the full two-lane mastering cockpit is retained at 1024 px and wider.
+- [x] **Mastering Control Desk:** long track names wrap, measurement summaries remain readable, and Analyze/Fix/Export actions wrap instead of clipping.
+- [x] **AI Director:** Manual/Assisted/Autonomous cards stack below 768 px and return to three columns at 768 px; measured before/after telemetry uses two columns on mobile and three from 768 px upward.
+- [x] **Analysis Lab:** spectral zone balance and resonance panels stack until the 1024 px desktop breakpoint. Frequency-band values and resonance rows use constrained grid columns to prevent overlap.
+- [x] **Spectrum analyzer:** frequency ticks now cover 30 Hz through 20 kHz, with smaller edge-aware labels on narrow canvases and a 240 px minimum mobile canvas height.
+- [x] **Master Output Meter Bridge:** stereo L/R bars and monitor control occupy the first mobile row; Integrated, True Peak, Dynamic Range, Gain Reduction, and Phase occupy the second row. QC status remains visible.
+- **Scope:** UI-only files changed: `src/App.tsx`, `src/components/AiMasterView.tsx`, `src/components/SynLabView.tsx`, `src/components/MeterBridge.tsx`, `src/components/CanvasVisualizers.tsx`, and `src/index.css`. No Web Audio nodes, DSP calculations, audio worklets, or engine modules were edited.
+- [ ] **Visual acceptance still required:** run the built app at 375 px and 1440 px, check every workspace tab for horizontal overflow and clipping, and confirm the result on a physical Android browser. Source inspection and CI do not substitute for rendered viewport/device verification.
