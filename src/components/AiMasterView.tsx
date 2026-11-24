@@ -264,15 +264,15 @@ export const AiMasterView: React.FC<Props> = ({
 
   if (!preAnalysis) {
     return (
-      <div className="syn-ai-workspace">
-        <section className="syn-ai-hero">
+      <div className="syn-ai-workspace" data-testid="workspace-empty-state">
+        <section className="syn-ai-hero" data-testid="workspace-hero" data-workspace="ai">
           <div className="syn-ai-hero-copy">
             <span className="syn-ai-eyebrow"><Sparkles size={14}/> SYN MASTER INTELLIGENCE</span>
             <h1>Mastering Director<span> / AI Assistant</span></h1>
             <p>Measurement-led mastering intelligence. Analyze the source, build a reasoned processing strategy, render through SYN-DSP, then independently verify the result.</p>
             <div className="syn-ai-state"><i/> WAITING FOR SOURCE AUDIO</div>
           </div>
-          <div className="syn-ai-orb" aria-hidden="true">
+          <div className="syn-ai-orb" data-testid="workspace-hero-graphic" aria-hidden="true">
             <div className="syn-ai-orb-ring ring-a"/><div className="syn-ai-orb-ring ring-b"/><div className="syn-ai-orb-core"><Sparkles size={42}/><b>SYN</b><small>AI ENGINE</small></div>
             <div className="syn-ai-orb-node node-a"/><div className="syn-ai-orb-node node-b"/><div className="syn-ai-orb-node node-c"/>
           </div>
@@ -318,14 +318,14 @@ export const AiMasterView: React.FC<Props> = ({
 
   return (
     <div className="syn-ai-workspace flex flex-col gap-4">
-      <section className="syn-ai-hero syn-ai-hero-compact">
+      <section className="syn-ai-hero syn-ai-hero-compact" data-testid="workspace-hero" data-workspace="ai">
         <div className="syn-ai-hero-copy">
           <span className="syn-ai-eyebrow"><Sparkles size={14}/> SYN MASTER INTELLIGENCE</span>
           <h1>Mastering Director<span> / AI Assistant</span></h1>
           <p>Analyze. Decide. Process. Verify. Every mastering decision is tied to source measurements and checked against the rendered result.</p>
           <div className="syn-ai-state"><i className={directorRunning ? 'is-running' : ''}/>{directorRunning ? (directorStage || 'OPTIMIZATION IN PROGRESS').toUpperCase() : aiLifecycleState.toUpperCase()}</div>
         </div>
-        <div className="syn-ai-mini-visual" aria-hidden="true">
+        <div className="syn-ai-mini-visual" data-testid="workspace-hero-graphic" aria-hidden="true">
           <div className="syn-ai-mini-bars">{Array.from({length:36},(_,i)=><i key={i} style={{'--bar-height':(18+((i*17)%63))+'%'} as React.CSSProperties}/>)}</div>
           <div className="syn-ai-mini-caption"><span>INPUT</span><b>AI / DSP / QC</b><span>OUTPUT</span></div>
         </div>
