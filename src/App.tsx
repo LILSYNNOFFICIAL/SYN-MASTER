@@ -34,6 +34,7 @@ import type {
   MasteringMode,
   MasteringObjectiveId,
   MasteringPreset,
+  LabSubTab,
   ProcessorModule,
   ProjectRecord,
   SavedChainRecord,
@@ -193,6 +194,7 @@ export default function App() {
   const externalParamInFlightRef = useRef<Set<string>>(new Set());
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('studio');
+  const [labDefaultSubTab, setLabDefaultSubTab] = useState<LabSubTab>('frequency');
   const [hostSnapshot, setHostSnapshot] = useState<HostBridgeSnapshot>(() =>
     hostBridgeRef.current!.getSnapshot(),
   );
@@ -2565,6 +2567,7 @@ export default function App() {
               onOpenRack={() => setRackWindowOpen(true)}
               onExport={() => setExportModalOpen(true)}
               onSettings={() => setSettingsModalOpen(true)}
+              onStereoWorkspace={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
             />
           </div>
 
@@ -2984,6 +2987,7 @@ export default function App() {
               chain={chainBypassed ? [] : chain}
               postChannels={postChannelsRef.current}
               sampleRate={activeTrack?.sampleRate ?? 44100}
+              defaultSubTab={labDefaultSubTab}
             />
           )}
 
