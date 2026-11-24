@@ -9,6 +9,7 @@ interface ExportModalProps {
   downloadUrl: string | null;
   downloadFilename: string | null;
   deliveryCheck?: { text: string; warning: boolean } | null;
+  renderError?: string | null;
   hasTrack: boolean;
   onChange: (next: ExportConfig) => void;
   onRender: () => void;
@@ -16,13 +17,29 @@ interface ExportModalProps {
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({
-  open, config, rendering, downloadUrl, downloadFilename, deliveryCheck, hasTrack, onChange, onRender, onClose,
+  open, config, rendering, downloadUrl, downloadFilename, deliveryCheck, renderError, hasTrack, onChange, onRender, onClose,
 }) => {
   if (!open) return null;
   const fieldClass = "bg-[#090704] border border-[#5A4519] focus:border-[#D4AF37] rounded px-2.5 py-1.5 text-xs text-[#F7F1E2]";
   const labelClass = "flex flex-col gap-1 text-[11px] text-[#C7B98F]";
   const extensions: Record<ExportConfig['format'], string> = {
     wav: 'WAV', mp3: 'MP3', ogg: 'OGG', flac: 'FLAC', m4a: 'M4A', mid: 'MIDI', 'webm-opus': 'WEBM',
+  };
+  const formatOptions: Array<{ value: ExportConfig['format']; label: string }> = [
+    { value: 'wav', label: 'WAV · PCM / Float' },
+    { value: 'flac', label: 'FLAC · Lossless' },
+    { value: 'mp3', label: 'MP3 · LAME' },
+    { value: 'ogg', label: 'OGG · Vorbis' },
+    { value: 'm4a', label: 'M4A · AAC' },
+    { value: 'webm-opus', label: 'WebM · Opus' },
+    { value: 'mid', label: 'MIDI · Tempo / markers' },
+  ];
+  const selectedFormats = config.selectedFormats?.length ? config.selectedFormats : [config.format];
+  const toggleFormat = (format: ExportConfig['format'], checked: boolean) => {
+    const next = checked
+      ? Array.from(new Set([...selectedFormats, format]))
+      : selectedFormats.filter((item) => item !== format);
+    if (next.length > 0) onChange({ ...config, selectedFormats: next });
   };
 
   return (
@@ -39,6 +56,26 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
 
         <div className="p-5 flex flex-col gap-4">
+          <section className="rounded-lg border border-[#D4AF37]/50 bg-[#100D06] p-3 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] font-black uppercase tracking-[.14em] text-[#F2CA52]">Package formats</div>
+              <span className="text-[10px] text-[#A99A74]">{selectedFormats.length} selected · ZIP delivery</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {formatOptions.map((option) => (
+                <label key={option.value} className="flex items-center gap-2 text-[11px] text-[#E8D9AF] rounded border border-[#4A3917] px-2 py-2 hover:border-[#D4AF37]/70">
+                  <input
+                    type="checkbox"
+                    checked={selectedFormats.includes(option.value)}
+                    onChange={(event) => toggleFormat(option.value, event.target.checked)}
+                    className="accent-[#D4AF37]"
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+            <p className="text-[10px] text-[#A99A74]">Every checked format is rendered from the same processed master and included in one ZIP. Codec settings below apply to the format selected in the settings preview.</p>
+          </section>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <label className="flex flex-col gap-1 text-[11px] text-[#C7B98F] sm:col-span-2 lg:col-span-2">
               Output Filename
@@ -46,7 +83,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 onChange={(e) => onChange({ ...config, filename: e.target.value })} className={fieldClass} />
             </label>
             <label className={labelClass}>
-              Output Format
+              Codec Settings Preview
               <select value={config.format}
                 onChange={(e) => onChange({ ...config, format: e.target.value as ExportConfig['format'] })} className={fieldClass}>
                 <option value="wav">WAV — PCM / Float</option>
@@ -184,12 +221,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <p className="mt-1">Playlist / note markers, synth polyphony and PDC-silence trimming are DAW / instrument features and are not applicable to this single-file audio mastering project.</p>
           </div>
 
+          {renderError && (
+            <div role="alert" className="p-3 rounded-lg border border-red-500/60 bg-red-500/10 text-[11px] leading-relaxed text-red-200">
+              <strong className="block mb-1">Export could not be completed</strong>
+              {renderError}
+            </div>
+          )}
           {downloadUrl && downloadFilename && (
             <div className="p-3 rounded-lg bg-[#D4AF37]/10 border border-[#D4AF37]/55 flex items-center justify-between gap-3">
               <span className="text-xs text-[#F2CA52] font-semibold truncate">Rendered: {downloadFilename}</span>
               <a href={downloadUrl} download={downloadFilename}
                 className="px-3 py-1.5 rounded bg-[#D4AF37] text-[#080704] text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0">
-                <Download className="w-3.5 h-3.5" /> Download {extensions[config.format]}
+                <Download className="w-3.5 h-3.5" /> Download ZIP
               </a>
             </div>
           )}
@@ -203,7 +246,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <button type="button" onClick={onClose} className="px-3.5 py-2 rounded bg-[#171208] border border-[#4A3917] text-xs font-semibold text-[#D8C58C] hover:border-[#D4AF37]">Cancel</button>
             <button type="button" disabled={!hasTrack || rendering} onClick={onRender}
               className="px-4 py-2 rounded bg-[#D4AF37] text-[#080704] text-xs font-extrabold hover:bg-[#F2CA52] disabled:opacity-50">
-              {rendering ? 'Rendering / Encoding…' : 'Render ' + extensions[config.format]}
+              {rendering ? 'Rendering / Packaging…' : 'Render ZIP Package'}
             </button>
           </div>
         </div>
