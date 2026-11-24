@@ -264,7 +264,7 @@ export const AiMasterView: React.FC<Props> = ({
 
   if (!preAnalysis) {
     return (
-      <div className="syn-ai-workspace" data-testid="workspace-empty-state" data-workspace="ai">
+      <div className="syn-ai-workspace" data-testid="workspace-empty-state" data-workspace="ai" data-syn-skin="instrument">
         <section className="syn-ai-hero" data-testid="workspace-hero" data-workspace="ai">
           <div className="syn-ai-hero-copy">
             <span className="syn-ai-eyebrow"><Sparkles size={14}/> SYN MASTER INTELLIGENCE</span>
@@ -317,7 +317,7 @@ export const AiMasterView: React.FC<Props> = ({
         : '—';
 
   return (
-    <div className="syn-ai-workspace flex flex-col gap-4">
+    <div className="syn-ai-workspace flex flex-col gap-4" data-syn-skin="instrument" data-workspace="ai">
       <section className="syn-ai-hero syn-ai-hero-compact" data-testid="workspace-hero" data-workspace="ai">
         <div className="syn-ai-hero-copy">
           <span className="syn-ai-eyebrow"><Sparkles size={14}/> SYN MASTER INTELLIGENCE</span>
