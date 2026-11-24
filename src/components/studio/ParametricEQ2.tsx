@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { AudioAnalysis, EQBand, EQBandShape, ParametricEQParams } from '../../types/mastering';
 import { designEQBand } from '../../dsp/offlineDsp';
@@ -17,6 +17,8 @@ interface Props {
   sampleRate: number;
   spectrum: AudioAnalysis | null;
   onChange: (next: ParametricEQParams) => void;
+  /** 'console' = reference-mockup styling (gradient curve, spectrum bars, band table, keyboard-focusable nodes). */
+  variant?: 'classic' | 'console';
 }
 
 const W = 640;
@@ -24,6 +26,8 @@ const H = 240;
 const F_MIN = 20;
 const F_MAX = 20000;
 const G_MAX = 18;
+const CONSOLE_COLORS = ['#2F8BFF', '#C04CFF', '#D4A84A', '#2F8BFF', '#C04CFF', '#8B5CFF', '#D4A84A', '#5EC8FF'];
+const SHAPE_SHORT: Record<EQBandShape, string> = { bell: 'Peak', lowshelf: 'Low shelf', highshelf: 'High shelf', highpass: 'High pass', lowpass: 'Low pass', notch: 'Notch' };
 const COLORS = ['#F2CA52', '#FF8A5B', '#7BE0A0', '#6CC4FF', '#C792EA', '#FF6B9A', '#E8E36A', '#5EEAD4'];
 const SHAPES: EQBandShape[] = ['bell', 'lowshelf', 'highshelf', 'highpass', 'lowpass', 'notch'];
 const SHAPE_LABEL: Record<EQBandShape, string> = { bell: 'Peaking', lowshelf: 'Low shelf', highshelf: 'High shelf', highpass: 'High pass', lowpass: 'Low pass', notch: 'Notch' };
@@ -38,7 +42,10 @@ function fmtF(f: number) {
   return f >= 1000 ? `${(f / 1000).toFixed(f >= 10000 ? 1 : 2)}k` : f.toFixed(0);
 }
 
-export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, onChange }) => {
+export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, onChange, variant = 'classic' }) => {
+  const uid = useId().replace(/:/g, '');
+  const isConsole = variant === 'console';
+  const palette = isConsole ? CONSOLE_COLORS : COLORS;
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [sel, setSel] = useState<string | null>(params.bands[0]?.id ?? null);
   const dragRef = useRef<null | { id: string; fine: boolean; sx: number; sy: number; start: EQBand }>(null);
@@ -151,6 +158,214 @@ export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, o
   const selected = bands.find((b) => b.id === sel) ?? null;
   const gridF = [30, 50, 100, 200, 300, 500, 1000, 2000, 3000, 5000, 10000, 20000];
 
+  const spectrumBars = useMemo(() => {
+    if (!isConsole || !spectrum || !spectrum.spectrumBinsFreq?.length) return [] as { x: number; w: number; h: number }[];
+    const fs = spectrum.spectrumBinsFreq;
+    const ds = spectrum.spectrumBinsDb;
+    let max = -Infinity;
+    for (const d of ds) if (d > max) max = d;
+    const slots = 120;
+    const out: { x: number; w: number; h: number }[] = [];
+    let k = 0;
+    for (let i = 0; i < slots; i++) {
+      const f0 = xToF((i / slots) * W);
+      const f1 = xToF(((i + 1) / slots) * W);
+      let best = -Infinity;
+      while (k < fs.length && fs[k] < f0) k++;
+      let j = k;
+      while (j < fs.length && fs[j] < f1) {
+        if (ds[j] > best) best = ds[j];
+        j++;
+      }
+      if (!Number.isFinite(best)) continue;
+      const h = Math.max(0, Math.min(1, (best - (max - 66)) / 66)) * (H * 0.62);
+      out.push({ x: (i / slots) * W + 0.6, w: W / slots - 1.2, h });
+    }
+    return out;
+  }, [isConsole, spectrum]);
+
+  const nudgeBand = (b: EQBand, e: React.KeyboardEvent) => {
+    const fine = e.shiftKey;
+    let patch: Partial<EQBand> | null = null;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const ratio = fine ? 1.01 : 1.06;
+      const f = e.key === 'ArrowRight' ? b.freq * ratio : b.freq / ratio;
+      patch = { freq: Math.round(Math.max(F_MIN, Math.min(F_MAX, f))) };
+    } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && usesGain(b.shape)) {
+      const d = (fine ? 0.1 : 0.5) * (e.key === 'ArrowUp' ? 1 : -1);
+      patch = { gain: Number(Math.max(-G_MAX, Math.min(G_MAX, b.gain + d)).toFixed(1)) };
+    } else if (e.key === '+' || e.key === '=' || e.key === '-') {
+      const q = b.q * (e.key === '-' ? 1 / 1.12 : 1.12);
+      patch = { q: Number(Math.max(0.1, Math.min(18, q)).toFixed(2)) };
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      onChange({ ...params, bands: bands.filter((x) => x.id !== b.id) });
+      return;
+    }
+    if (patch) {
+      e.preventDefault();
+      setBand(b.id, patch);
+    }
+  };
+
+  const nodeY = (b: EQBand) =>
+    usesGain(b.shape) ? gToY(b.gain) : b.shape === 'notch' ? gToY(-G_MAX + 2) : gToY(6 * Math.log2(b.q / 0.707));
+
+  if (isConsole) {
+    const consoleGridF = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+    const addBand = () => {
+      const nb: EQBand = { id: `b${Date.now().toString(36)}`, enabled: true, shape: 'bell', freq: 1000, gain: 0, q: 1 };
+      onChange({ ...params, bands: [...bands, nb] });
+      setSel(nb.id);
+    };
+    return (
+      <div className="syn-ceq">
+        <div className="syn-ceq-plot">
+          <span className="syn-ceq-axis-y" aria-hidden="true">GAIN (dB)</span>
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="none"
+            className="syn-ceq-svg"
+            onPointerMove={onMove}
+            onPointerUp={onUp}
+            onPointerCancel={onUp}
+            onDoubleClick={onDouble}
+            role="group"
+            aria-label="Parametric EQ. Tab to a band node; arrow keys move frequency and gain, plus and minus change Q, Delete removes. Drag nodes with the mouse, wheel for Q, double-click to add a band."
+          >
+            <defs>
+              <linearGradient id={`${uid}-curve`} x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stopColor="#2F8BFF" />
+                <stop offset="45%" stopColor="#C04CFF" />
+                <stop offset="70%" stopColor="#D4A84A" />
+                <stop offset="100%" stopColor="#8B5CFF" />
+              </linearGradient>
+              <linearGradient id={`${uid}-spec`} x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stopColor="#2F8BFF" />
+                <stop offset="30%" stopColor="#C04CFF" />
+                <stop offset="50%" stopColor="#D4A84A" />
+                <stop offset="75%" stopColor="#C04CFF" />
+                <stop offset="100%" stopColor="#2F8BFF" />
+              </linearGradient>
+              <filter id={`${uid}-glow`} x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="2.2" result="b" />
+                <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+            </defs>
+            {consoleGridF.map((f) => (
+              <line key={f} x1={fToX(f)} x2={fToX(f)} y1={0} y2={H} className="syn-ceq-grid" />
+            ))}
+            {[-12, -6, 0, 6, 12].map((g) => (
+              <line key={g} x1={0} x2={W} y1={gToY(g)} y2={gToY(g)} className={g === 0 ? 'syn-ceq-grid is-zero' : 'syn-ceq-grid'} />
+            ))}
+            <g opacity={0.6} fill={`url(#${uid}-spec)`}>
+              {spectrumBars.map((bar, i) => (
+                <rect key={i} x={bar.x} y={H - bar.h} width={Math.max(0.6, bar.w)} height={bar.h} rx={0.6} />
+              ))}
+            </g>
+            <path
+              d={total.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')}
+              fill="none"
+              stroke={`url(#${uid}-curve)`}
+              strokeWidth={2.4}
+              filter={`url(#${uid}-glow)`}
+            />
+            {bands.map((b, i) => {
+              const x = fToX(Math.max(F_MIN, Math.min(F_MAX, b.freq)));
+              const y = nodeY(b);
+              const color = palette[i % palette.length];
+              return (
+                <g key={b.id} opacity={b.enabled ? 1 : 0.35}>
+                  <line x1={x} x2={x} y1={y} y2={H} stroke={color} strokeOpacity={0.25} strokeDasharray="2 3" />
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r={b.id === sel ? 9 : 7.5}
+                    fill="#05070D"
+                    stroke={color}
+                    strokeWidth={2.4}
+                    className="syn-ceq-node"
+                    style={{ cursor: 'grab', color }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Band ${i + 1}, ${SHAPE_LABEL[b.shape]}, ${fmtF(b.freq)} Hz${usesGain(b.shape) ? `, ${b.gain.toFixed(1)} dB` : ''}, Q ${b.q.toFixed(2)}${b.enabled ? '' : ', off'}`}
+                    aria-pressed={b.id === sel}
+                    onFocus={() => setSel(b.id)}
+                    onKeyDown={(e) => nudgeBand(b, e)}
+                    onPointerDown={onNodeDown(b)}
+                    data-band-id={b.id}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      if (usesGain(b.shape)) setBand(b.id, { gain: 0 });
+                    }}
+                  />
+                  <text x={x} y={y + 3} fontSize={8} textAnchor="middle" fill={color} fontWeight={800} pointerEvents="none">{i + 1}</text>
+                </g>
+              );
+            })}
+          </svg>
+          <div className="syn-ceq-ylabels" aria-hidden="true">
+            {[12, 6, 0, -6, -12].map((g) => (
+              <span key={g} style={{ top: `${(gToY(g) / H) * 100}%` }}>{g > 0 ? `+${g}` : g}</span>
+            ))}
+          </div>
+          <div className="syn-ceq-xlabels" aria-hidden="true">
+            {consoleGridF.map((f) => (
+              <span key={f} className={f === 50 || f === 200 || f === 2000 ? 'is-minor' : undefined} style={{ left: `${(fToX(f) / W) * 100}%` }}>{f >= 1000 ? `${f / 1000}k` : f}</span>
+            ))}
+          </div>
+        </div>
+        <div className="syn-ceq-axis-x" aria-hidden="true">FREQUENCY (Hz)</div>
+
+        <div className="syn-ceq-table" role="list" aria-label="EQ bands">
+          {bands.map((b, i) => {
+            const color = palette[i % palette.length];
+            return (
+              <div
+                key={b.id}
+                role="listitem"
+                className={`syn-ceq-band${b.id === sel ? ' is-sel' : ''}${b.enabled ? '' : ' is-off'}`}
+                style={{ ['--band-color' as string]: color }}
+                onClick={() => setSel(b.id)}
+              >
+                <div className="syn-ceq-band-head">
+                  <label className="syn-ceq-band-on">
+                    <input type="checkbox" checked={b.enabled} onChange={(e) => setBand(b.id, { enabled: e.target.checked })} aria-label={`Band ${i + 1} enabled`} />
+                    <span>{i + 1}</span>
+                  </label>
+                  <select value={b.shape} onChange={(e) => setBand(b.id, { shape: e.target.value as EQBandShape })} aria-label={`Band ${i + 1} type`}>
+                    {SHAPES.map((sh) => (
+                      <option key={sh} value={sh}>{SHAPE_SHORT[sh]}</option>
+                    ))}
+                  </select>
+                </div>
+                <label className="syn-ceq-row">
+                  <span>FREQ</span>
+                  <input type="number" min={F_MIN} max={F_MAX} value={b.freq} aria-label={`Band ${i + 1} frequency (Hz)`} onChange={(e) => setBand(b.id, { freq: Math.max(F_MIN, Math.min(F_MAX, Number(e.target.value) || 1000)) })} />
+                </label>
+                <label className="syn-ceq-row">
+                  <span>GAIN</span>
+                  <input type="number" step={0.1} min={-G_MAX} max={G_MAX} value={b.gain} disabled={!usesGain(b.shape)} aria-label={`Band ${i + 1} gain (dB)`} onChange={(e) => setBand(b.id, { gain: Math.max(-G_MAX, Math.min(G_MAX, Number(e.target.value) || 0)) })} />
+                </label>
+                <label className="syn-ceq-row">
+                  <span>Q</span>
+                  <input type="number" step={0.05} min={0.1} max={18} value={b.q} aria-label={`Band ${i + 1} Q`} className="is-q" onChange={(e) => setBand(b.id, { q: Math.max(0.1, Math.min(18, Number(e.target.value) || 1)) })} />
+                </label>
+                <button type="button" className="syn-ceq-del" aria-label={`Delete band ${i + 1}`} onClick={(e) => { e.stopPropagation(); onChange({ ...params, bands: bands.filter((x) => x.id !== b.id) }); }}>
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            );
+          })}
+          {bands.length < 8 && (
+            <button type="button" className="syn-ceq-add" onClick={addBand}>+ Band</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="syn2-peq">
       <svg
@@ -193,7 +408,7 @@ export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, o
         <path d={total.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')} fill="none" stroke="#FFE08A" strokeWidth={2} />
         {bands.map((b, i) => {
           const x = fToX(Math.max(F_MIN, Math.min(F_MAX, b.freq)));
-          const y = usesGain(b.shape) ? gToY(b.gain) : b.shape === 'notch' ? gToY(-G_MAX + 2) : gToY(6 * Math.log2(b.q / 0.707));
+          const y = nodeY(b);
           return (
             <g key={b.id} opacity={b.enabled ? 1 : 0.35}>
               <circle

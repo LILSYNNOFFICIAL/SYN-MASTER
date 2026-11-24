@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Maximize2,
+  Menu,
   Minimize2,
   Pause,
   Play,
@@ -120,7 +121,7 @@ const SettingsModal = React.lazy(() => import('./components/Modals').then(({ Set
 import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 import { WorkspaceHero } from './components/WorkspaceHero';
 import { ImportScreen } from './components/studio/ImportScreen';
-import { StudioWelcome } from './components/studio/StudioWelcome';
+import { MasterConsole } from './components/console/MasterConsole';
 import { FixItStage } from './components/studio/FixItStage';
 import { FxRackWindow } from './components/studio/FxRackWindow';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
@@ -208,6 +209,7 @@ export default function App() {
   const [targetPresetId, setTargetPresetId] = useState<string | null>(null);
   const [postPeaksHi, setPostPeaksHi] = useState<number[] | null>(null);
   const [rackWindowOpen, setRackWindowOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const [projectId, setProjectId] = useState(() => `proj-${Date.now()}`);
   const [projectName, setProjectName] = useState('Untitled Mastering Session');
@@ -2287,6 +2289,44 @@ export default function App() {
     setShowWorkstationWithoutTrack(typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
   };
 
+  const masterConsole = (
+    <MasterConsole
+      chain={chain}
+      chainBypassed={chainBypassed}
+      onChangeChain={(next) => {
+        updateChainWithHistory(next);
+        recordCorrection('Console Edit', next, { coalesceManual: true });
+      }}
+      sampleRate={activeTrack?.sampleRate ?? 48000}
+      source={activeTrack?.analysis ?? null}
+      master={postAnalysisState.status === 'ready' ? postAnalysis : null}
+      referenceAnalysis={referenceTrack?.analysis ?? null}
+      scopeChannels={postChannelsRef.current}
+      waveformPeaks={activeTrack?.peaks ?? []}
+      durationSec={activeTrack?.durationSec ?? 0}
+      hasTrack={Boolean(activeTrack)}
+      running={directorRunning}
+      stage={directorStage}
+      pass={directorPass}
+      maxPasses={10}
+      report={directorReport}
+      onFix={() => { setOperatingMode('autonomous'); void handleRunMasterDirector(true); }}
+      onStop={() => { directorStopRef.current = true; }}
+      onDemo={() => handleLoadDemoSource('main-mix')}
+      onImport={handleUploadSourceFile}
+      targetPresetId={targetPresetId}
+      targetLabel={targetLabel}
+      targetLufs={activeObjective.targetLufs}
+      maxTruePeakDb={activeObjective.maxTruePeakDb}
+      onTargetPreset={handleTargetPreset}
+      presets={MASTERING_PRESETS}
+      onApplyPreset={handleApplyPreset}
+      onOpenRack={() => setRackWindowOpen(true)}
+      onOpenStereoLab={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
+      notice={statusNotice}
+    />
+  );
+
   if (!activeTrack && !showWorkstationWithoutTrack) {
     return (
       <ImportScreen
@@ -2301,19 +2341,24 @@ export default function App() {
     <div className="syn-workstation min-h-screen lg:h-screen w-full flex flex-col bg-[#070709] text-[#F7F8FA] lg:overflow-hidden">
       {/* Zone 3-Part Top Bar Contract */}
       <header className="syn-app-header h-14 shrink-0 px-4 border-b border-[#242732] bg-[#0B0C10] flex items-center justify-between gap-8">
-        {/* Zone 1: Single-line Brand Lockup */}
-        <div className="flex items-center gap-2.5 whitespace-nowrap shrink-0">
-          <img
-            src="/assets/aistudio/SYN_MASTER_Neon_Chrome_Logo_533a2f19.png"
-            alt="SYN MASTER Logo"
-            referrerPolicy="no-referrer"
-            className="h-8 w-auto object-contain rounded-sm"
-          />
-          <div className="flex min-w-0 flex-col leading-none">
-            <span className="font-display text-base font-extrabold tracking-tight text-[#F7F8FA]">
-              SYN <span className="text-[#F2CA52]">MASTER</span>
+        {/* Zone 1: Library drawer toggle + serif wordmark (reference-mockup lockup) */}
+        <div className="syn-brand-zone">
+          <button
+            type="button"
+            className="syn-icon-btn syn-library-toggle"
+            aria-label={libraryOpen ? 'Close audio library' : 'Open audio library, presets, chains and projects'}
+            aria-expanded={libraryOpen}
+            aria-controls="syn-library-drawer"
+            onClick={() => setLibraryOpen((v) => !v)}
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <div className="syn-wordmark" aria-label="SYN-MASTER Web Mastering Suite">
+            <span className="syn-wordmark-row">
+              <img src="brand/syn-master-mark.webp" alt="" width={256} height={256} decoding="async" className="syn-wordmark-mark" />
+              <span className="syn-wordmark-name">SYN-MASTER</span>
             </span>
-            <span className="mt-1 hidden text-[8px] font-semibold tracking-[.17em] text-[#8DAFC4] sm:block">PROFESSIONAL AUDIO MASTERING SUITE</span>
+            <span className="syn-wordmark-sub"><span className="syn-wordmark-sub-web">WEB </span>MASTERING SUITE</span>
           </div>
         </div>
 
@@ -2375,8 +2420,17 @@ export default function App() {
           </nav>
         </div>
 
-        {/* Zone 3: Primary CTA */}
-        <div className="flex items-center shrink-0">
+        {/* Zone 3: session readout + primary CTA */}
+        <div className="syn-header-right flex items-center shrink-0">
+          <div className="syn-header-session" aria-label="Session">
+            <span className="syn-header-project">PROJECT: {projectName}</span>
+            <span className="syn-header-lufs">
+              {(postAnalysisState.status === 'ready' && postAnalysis ? postAnalysis : activeTrack?.analysis)?.integratedLufs.toFixed(1) ?? '--.-'} LUFS
+            </span>
+          </div>
+          <button type="button" aria-label="Open Settings" onClick={() => setSettingsModalOpen(true)} className="syn-icon-btn syn-header-settings">
+            <Settings className="w-4 h-4" />
+          </button>
           <button
             type="button"
             onClick={() => setExportModalOpen(true)}
@@ -2391,7 +2445,7 @@ export default function App() {
       <div
         role="toolbar"
         aria-label="Session Controls"
-        className="px-4 py-2 border-b border-[#222530] bg-[#101116] flex flex-wrap items-center justify-between gap-3 shrink-0"
+        className="syn-session-ribbon px-4 py-2 border-b border-[#222530] bg-[#101116] flex flex-wrap items-center justify-between gap-3 shrink-0"
       >
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <input
@@ -2431,7 +2485,7 @@ export default function App() {
 
         <div className="flex flex-wrap items-center gap-2">
           {statusNotice && (
-            <span className="hidden xl:inline text-[11px] text-[#D4AF37] truncate max-w-xs">
+            <span className="hidden 2xl:inline text-[11px] text-[#D4AF37] truncate max-w-xs">
               {statusNotice}
             </span>
           )}
@@ -2503,7 +2557,12 @@ export default function App() {
 
       {/* Main 3-Column Workstation Body */}
       <div className={`syn-daw-body flex-1 lg:min-h-0 flex flex-col lg:flex-row lg:overflow-hidden${fullscreenWorkspace ? ' is-fullscreen' : ''}`}>
+        {libraryOpen && (
+          <button type="button" className="syn-library-backdrop" aria-label="Close audio library" onClick={() => setLibraryOpen(false)} />
+        )}
         {!fullscreenWorkspace && (
+          <div id="syn-library-drawer" className="syn-library-drawer" data-open={libraryOpen ? 'true' : 'false'}
+            onKeyDown={(e) => { if (e.key === 'Escape') setLibraryOpen(false); }}>
           <LeftLibraryPanel
             activeTrack={activeTrack}
             referenceTrack={referenceTrack}
@@ -2521,6 +2580,7 @@ export default function App() {
             onOpenProject={handleOpenProject}
             onDeleteProject={handleDeleteProject}
           />
+          </div>
         )}
 
         {/* Center Mastering Stage */}
@@ -2562,29 +2622,12 @@ export default function App() {
               </div>
             </section>
           )}
-          <div className="syn-daw-global-tabs">
-            <WorkspaceNavigation
-              activeTab={activeTab}
-              onSelect={setActiveTab}
-              onOpenRack={() => setRackWindowOpen(true)}
-              onExport={() => setExportModalOpen(true)}
-              onSettings={() => setSettingsModalOpen(true)}
-              onStereoWorkspace={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
-            />
-          </div>
 
 
 
           {/* Transport & Waveform Stage (Full waveform on Studio & Reference; compact transport bar on other tabs) */}
           {!activeTrack && (activeTab === 'plugins' || activeTab === 'stems') ? null : !activeTrack && activeTab === 'studio' ? (
-            <StudioWelcome
-              projectCount={projects.length}
-              processorCount={chain.length}
-              presetCount={MASTERING_PRESETS.length}
-              onDemo={() => handleLoadDemoSource('main-mix')}
-              onCalibration={() => handleLoadDemoSource('sine-sweep')}
-              onOpenAI={() => setActiveTab('ai')}
-            />
+            masterConsole
           ) : !activeTrack ? null : activeTab === 'studio' ? null : activeTab === 'reference' ? (
             <section className="p-3.5 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
               {/* Track Metadata + A/B Switch */}
@@ -2839,57 +2882,7 @@ export default function App() {
               </div>
             }
           >
-          {activeTab === 'studio' && activeTrack && (
-            <section data-testid="central-spectrum" aria-label="Master spectrum and EQ"
-              className="syn-daw-spectrum p-3.5 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-xs font-bold uppercase tracking-[.18em] text-[#E4C477]">
-                    PRAGMATIC EQ
-                  </h2>
-                  <p className="text-[11px] text-[#9CB5C8]">
-                    Blue glow: imported audio waveform (time-domain) · Spectrum and EQ response: frequency-domain
-                  </p>
-                </div>
-                <div className="flex items-center gap-1 p-0.5 rounded bg-[#090A0E] border border-[#242732]">
-                  <button
-                    type="button"
-                    onClick={() => setSpectrumMode('spectrum')}
-                    className={`px-2.5 py-1 rounded text-[11px] font-semibold ${
-                      spectrumMode === 'spectrum'
-                        ? 'bg-[#D4AF37] text-[#070709]'
-                        : 'text-[#9CA3AF] hover:text-[#F7F8FA]'
-                    }`}
-                  >
-                    Spectrum + EQ
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSpectrumMode('spectrogram')}
-                    className={`px-2.5 py-1 rounded text-[11px] font-semibold ${
-                      spectrumMode === 'spectrogram'
-                        ? 'bg-[#D4AF37] text-[#070709]'
-                        : 'text-[#9CA3AF] hover:text-[#F7F8FA]'
-                    }`}
-                  >
-                    Spectrogram
-                  </button>
-                </div>
-              </div>
-
-              <SpectrumAndEQCanvas
-                preAnalysis={activeTrack.analysis}
-                postAnalysis={postAnalysis}
-                referenceAnalysis={referenceTrack?.analysis ?? null}
-                chain={chainBypassed ? [] : chain}
-                sampleRate={activeTrack.sampleRate}
-                mode={spectrumMode}
-                waveformPeaks={activeTrack.peaks}
-                durationSec={activeTrack.durationSec}
-                heightClass="h-64"
-              />
-            </section>
-          )}
+          {activeTab === 'studio' && activeTrack && masterConsole}
 
           {activeTab === 'studio' && activeTrack && diagnosticLog && (
             <FixItStage
@@ -2923,6 +2916,7 @@ export default function App() {
               onFix={() => { setOperatingMode('autonomous'); void handleRunMasterDirector(true); }}
               onOpenRack={() => setRackWindowOpen(true)}
               onNewTrack={handleNewTrack}
+              hideCenterpiece
             />
           )}
 
@@ -3156,6 +3150,18 @@ export default function App() {
           </React.Suspense>
         </main>
 
+      </div>
+
+      {/* Bottom tab bar (fixed on touch layouts) */}
+      <div className="syn-daw-global-tabs syn-bottom-tabs">
+            <WorkspaceNavigation
+              activeTab={activeTab}
+              onSelect={setActiveTab}
+              onOpenRack={() => setRackWindowOpen(true)}
+              onExport={() => setExportModalOpen(true)}
+              onSettings={() => setSettingsModalOpen(true)}
+              onStereoWorkspace={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
+            />
       </div>
 
       {/* Bottom Meter Bridge */}

@@ -32,16 +32,16 @@ export const ImportScreen: React.FC<Props> = ({ onFile, onDemo, onOpenWorkstatio
   return (
     <div className="syn2-import">
       <div className="syn2-import-glow" aria-hidden="true" />
-      <header className="syn2-import-brand">
+      <header className="syn2-import-brand syn-splash-brand">
         <img
-          src="/assets/aistudio/SYN_MASTER_Neon_Chrome_Logo_533a2f19.png"
-          alt=""
-          referrerPolicy="no-referrer"
-          className="h-9 w-auto object-contain mix-blend-screen"
+          src="brand/syn-master-logo.webp"
+          alt="SYN-MASTER"
+          width={768}
+          height={768}
+          decoding="async"
+          className="syn-splash-logo"
         />
-        <span>
-          SYN <b>MASTER</b>
-        </span>
+        <span className="syn-splash-sub">MASTERING SUITE</span>
       </header>
 
       <main className="syn2-import-main">

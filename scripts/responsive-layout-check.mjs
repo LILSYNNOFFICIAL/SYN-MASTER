@@ -3,8 +3,8 @@ import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
 
-const baseUrl = 'http://127.0.0.1:4180';
-const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4180', '--strictPort'], {
+const baseUrl = `http://127.0.0.1:${process.env.SYN_RESPONSIVE_PORT ?? 4180}`;
+const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(process.env.SYN_RESPONSIVE_PORT ?? 4180), '--strictPort'], {
   stdio: 'ignore',
   env: process.env,
 });
@@ -112,12 +112,12 @@ async function runViewport(browser, width, height, mobile) {
     if (mobile) {
       await page.getByRole('button', { name: /Try the demo mix/i }).click({ timeout: 15000 });
     } else {
-      await page.locator('.syn-dashboard-welcome').waitFor({ state: 'visible', timeout: 15000 });
-      assert.equal(await page.locator('.syn-dashboard-visual').isVisible(), true, 'Desktop must open on the designed visual mastering dashboard, not the import splash');
-      assert.equal(await page.locator('.syn-signal-art').isVisible(), true, 'Desktop dashboard must include the signal graphic');
-      for (const selector of ['.syn-fix-orbit', '.syn-meter-instrument', '.syn-vectorscope', '.syn-dashboard-loudness', '.syn-chain-flow']) {
-        assert.equal(await page.locator(selector).isVisible(), true, `Desktop mastering cockpit must include ${selector}`);
+      await page.locator('[data-testid="syn-console"]').waitFor({ state: 'visible', timeout: 15000 });
+      assert.equal(await page.locator('.syn-wordmark').isVisible(), true, 'Desktop must show the SYN-MASTER serif wordmark');
+      for (const selector of ['.syn-fixai', '.syn-scope', '.syn-card-loud', '.syn-ribbons', '[data-testid="central-spectrum"]', '.syn-bottom-tabs']) {
+        assert.equal(await page.locator(selector).first().isVisible(), true, `Desktop console must include ${selector}`);
       }
+      assert.equal(await page.locator('.syn-fixai').isDisabled(), true, 'FIX ALL AI must be disabled until a track is loaded');
       await page.locator('.syn-primary-nav-more').click();
       await page.locator('.syn-workspace-menu-item').filter({ hasText: 'AI Director' }).click();
       await page.locator('.syn-ai-hero').waitFor({ state: 'visible', timeout: 10000 });
@@ -150,7 +150,7 @@ async function runViewport(browser, width, height, mobile) {
     await page.locator('.syn2-stage').waitFor({ state: 'visible', timeout: 30000 });
     await page.locator('.syn-meter-bridge').waitFor({ state: 'visible', timeout: 10000 });
     assert.equal(await page.locator('[data-syn-skin="instrument"][data-workspace="rack"]').isVisible(), true, 'Mastering Rack must use the shared instrument surface');
-    assert.equal(await page.locator('[data-syn-skin="instrument"][data-workspace="library"]').isVisible(), true, 'Audio Library must use the shared instrument surface');
+    assert.equal(await page.locator('#syn-library-drawer [data-syn-skin="instrument"][data-workspace="library"]').count(), 1, 'Audio Library must use the shared instrument surface inside the library drawer');
 
     if (!mobile) {
       assert.equal(await page.locator('.syn-mobile-command-menu > label').isVisible(), false, 'Desktop must retain the full command bar instead of the mobile Menu button');
@@ -163,13 +163,20 @@ async function runViewport(browser, width, height, mobile) {
       assert.equal(await menu.locator(':scope > label').isVisible(), true, 'Mobile header must show the single Menu control');
       const exportButton = page.locator('.syn-header-export');
       assert.equal(await exportButton.isVisible(), true, 'Mobile header must keep Export visible');
-      const logoBox = await page.locator('.syn-app-header > div:first-child').boundingBox();
+      const logoBox = await page.locator('.syn-wordmark').boundingBox();
       const menuBox = await menu.locator(':scope > label').boundingBox();
       const exportBox = await exportButton.boundingBox();
-      assert.ok(logoBox && menuBox && exportBox, 'Mobile header controls must have measurable boxes');
-      assert.ok(logoBox.x + logoBox.width <= menuBox.x + 1, `Mobile logo must not overlap Menu: ${JSON.stringify({ logoBox, menuBox, exportBox })}`);
-      assert.ok(menuBox.x + menuBox.width <= exportBox.x + 1, `Mobile Menu must not overlap Export: ${JSON.stringify({ logoBox, menuBox, exportBox })}`);
-      assert.ok(exportBox.x + exportBox.width <= width + 1, 'Mobile Export button must remain inside the viewport');
+      const burgerBox = await page.locator('.syn-library-toggle').boundingBox();
+      assert.ok(logoBox && menuBox && exportBox && burgerBox, 'Mobile header controls must have measurable boxes');
+      const overlaps = (a, b) => a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
+      const header = { logoBox, menuBox, exportBox, burgerBox };
+      assert.ok(!overlaps(logoBox, menuBox) && !overlaps(logoBox, exportBox) && !overlaps(logoBox, burgerBox), `Mobile wordmark must not overlap header controls: ${JSON.stringify(header)}`);
+      assert.ok(!overlaps(burgerBox, menuBox) && menuBox.x + menuBox.width <= exportBox.x + 1, `Mobile header controls must not overlap: ${JSON.stringify(header)}`);
+      assert.ok(exportBox.x + exportBox.width <= width + 1 && logoBox.x >= -1 && logoBox.x + logoBox.width <= width + 1, 'Mobile header must remain inside the viewport');
+      for (const box of [burgerBox, menuBox, exportBox]) assert.ok(box.height >= 44, `Mobile header touch targets must be at least 44 px: ${JSON.stringify(header)}`);
+      const tabBar = await page.locator('.syn-bottom-tabs').boundingBox();
+      const viewportHeight = await page.evaluate(() => window.innerHeight);
+      assert.ok(tabBar && Math.abs(tabBar.y + tabBar.height - viewportHeight) <= 2, `Mobile tab bar must be fixed to the bottom of the viewport: ${JSON.stringify(tabBar)}`);
       const menuToggle = menu.locator(':scope > .syn-mobile-menu-toggle');
       await menu.locator(':scope > label').click();
       assert.equal(await menuToggle.isChecked(), true, 'Mobile Menu checkbox must toggle open');
@@ -190,6 +197,15 @@ async function runViewport(browser, width, height, mobile) {
     }
 
     assert.equal(await page.locator('.syn2-fix-centerpiece').isVisible(), true, 'FIX ALL AI must appear as a separate centerpiece below the EQ workspace');
+    assert.equal(await page.locator('.syn-fixai').isEnabled(), true, 'FIX ALL AI must be enabled once a track is loaded');
+    const knobs = page.locator('.syn-console [role="slider"]:visible');
+    assert.ok((await knobs.count()) >= 2, 'Console must expose labelled, keyboard-focusable knobs/faders');
+    const firstKnob = knobs.first();
+    const before = await firstKnob.getAttribute('aria-valuenow');
+    await firstKnob.focus();
+    await page.keyboard.press('ArrowUp');
+    assert.notEqual(await firstKnob.getAttribute('aria-valuenow'), before, 'Console knob must respond to the keyboard');
+    await page.keyboard.press('ArrowDown');
     assert.equal(await page.locator('.syn2-wave-wrap').count(), 0, 'The default mastering workspace must use the unified waveform-behind-EQ visualization, not a second stacked waveform panel');
     const eqPrecedesFix = await page.evaluate(() => {
       const eq = document.querySelector('[data-testid="central-spectrum"]');
@@ -204,6 +220,8 @@ async function runViewport(browser, width, height, mobile) {
     await page.getByRole('button', { name: /Hide timeline & fades/ }).click();
     assert.equal(await page.locator('.syn2-wave-wrap').count(), 0, 'Collapsing the timeline must restore the unified default visualization');
 
+    await page.locator('.syn-library-toggle').click();
+    await page.locator('.syn-library-drawer[data-open="true"]').waitFor({ state: 'visible', timeout: 5000 });
     const library = page.locator('aside[aria-label="Audio Library and Presets"]');
     for (const [index, label] of ['Audio', 'Presets', 'Chains', 'Projects'].entries()) {
       const libraryTab = library.locator(':scope > div:first-child button').nth(index);
@@ -211,6 +229,8 @@ async function runViewport(browser, width, height, mobile) {
       assert.equal(await libraryTab.getAttribute('aria-pressed'), 'true', `${label} library tab must expose its selected state accessibly`);
       await inspectLayout(page, width, `library-${label.toLowerCase()}`);
     }
+    await page.keyboard.press('Escape');
+    await page.locator('.syn-library-drawer[data-open="false"]').waitFor({ state: 'attached', timeout: 5000 });
 
     const workspaces = [
       ['ai', 'AI Director'],
@@ -237,13 +257,14 @@ async function runViewport(browser, width, height, mobile) {
         assert.equal(await workspaceHero.locator('[data-testid="workspace-hero-graphic"]').isVisible(), true, `${label} must display its workspace-specific instrument graphic`);
       }
       await inspectLayout(page, width, id);
-      const expectedPrimary = id === 'lab' ? 'Stereo' : id === 'qc' ? 'Loudness' : id === 'studio' ? 'Dashboard' : 'More';
+      const expectedPrimary = id === 'lab' ? 'Imager' : id === 'qc' ? 'Loudness' : id === 'studio' ? 'Dashboard' : 'More';
       if (expectedPrimary === 'More') {
         await page.locator('.syn-primary-nav-more[data-active="true"]').waitFor({ state: 'visible', timeout: 3000 });
       }
+      await page.locator('.syn-primary-nav-item[data-active="true"]').filter({ hasText: new RegExp(expectedPrimary, 'i') }).waitFor({ state: 'visible', timeout: 3000 });
       const activePrimary = page.locator('.syn-primary-nav-item[data-active="true"]');
       assert.equal(await activePrimary.count(), 1, `${label} must have exactly one active primary navigation item`);
-      assert.equal((await activePrimary.innerText()).includes(expectedPrimary), true, `${label} must mark ${expectedPrimary} as the active navigation item`);
+      assert.equal((await activePrimary.innerText()).toLowerCase().includes(expectedPrimary.toLowerCase()), true, `${label} must mark ${expectedPrimary} as the active navigation item`);
 
       if (id === 'ai') {
         const modeGrid = page.getByText('Operating Mode', { exact: true }).locator('xpath=following-sibling::div[1]');

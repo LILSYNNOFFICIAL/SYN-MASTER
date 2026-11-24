@@ -35,6 +35,8 @@ interface Props {
   onFix: () => void;
   onOpenRack: () => void;
   onNewTrack: () => void;
+  /** The console renders the FIX ALL AI centerpiece; the stage then only shows run state and details. */
+  hideCenterpiece?: boolean;
 }
 
 const Stat: React.FC<{ label: string; src: string; out?: string | null; good?: boolean | null }> = ({ label, src, out, good }) => (
@@ -98,7 +100,7 @@ export const FixItStage: React.FC<Props> = (p) => {
         </div>
       </div>
 
-      {!pressed && (
+      {!pressed && !p.hideCenterpiece && (
         <div className="syn2-fix-centerpiece">
           <button type="button" className="syn2-fix-btn" onClick={p.onFix}>
             <Sparkles className="w-6 h-6" />

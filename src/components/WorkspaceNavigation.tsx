@@ -40,13 +40,13 @@ const ADVANCED_GROUPS: { label: string; items: { id: WorkspaceTab; label: string
 ];
 
 const PRIMARY_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { key: 'equalizer', label: 'Equalizer', icon: SlidersHorizontal },
-  { key: 'dynamics', label: 'Dynamics', icon: Activity },
-  { key: 'stereo', label: 'Stereo', icon: AudioWaveform },
-  { key: 'loudness', label: 'Loudness', icon: Gauge },
-  { key: 'exciter', label: 'Exciter', icon: Zap },
-  { key: 'limiter', label: 'Limiter', icon: ShieldCheck },
+  { key: 'dashboard', label: 'Dashboard', short: 'Dashboard', icon: LayoutDashboard, touch: true },
+  { key: 'equalizer', label: 'Equalizer', short: 'EQ', icon: SlidersHorizontal, touch: true },
+  { key: 'dynamics', label: 'Dynamics', short: 'Dynamics', icon: Activity, touch: true },
+  { key: 'stereo', label: 'Imager', short: 'Imager', icon: AudioWaveform, touch: true },
+  { key: 'loudness', label: 'Loudness', short: 'Loudness', icon: Gauge, touch: true },
+  { key: 'exciter', label: 'Exciter', short: 'Exciter', icon: Zap, touch: false },
+  { key: 'limiter', label: 'Limiter', short: 'Limiter', icon: ShieldCheck, touch: false },
 ] as const;
 
 export const WorkspaceNavigation: React.FC<Props> = ({
@@ -100,21 +100,22 @@ export const WorkspaceNavigation: React.FC<Props> = ({
             <button
               key={item.key}
               type="button"
-              className="syn-primary-nav-item"
+              className={`syn-primary-nav-item${item.touch ? '' : ' syn-nav-wide-only'}`}
               data-active={active ? 'true' : 'false'}
               aria-current={active ? 'page' : undefined}
               onClick={() => choosePrimary(item.key)}
             >
-              <Icon size={15} strokeWidth={1.9} />
-              <span>{item.label}</span>
+              <Icon size={18} strokeWidth={1.7} aria-hidden="true" />
+              <span className="syn-nav-label-long">{item.label}</span>
+              {item.short !== item.label && <span className="syn-nav-label-short" aria-hidden="true">{item.short}</span>}
             </button>
           );
         })}
-        <button type="button" className="syn-primary-nav-item" onClick={onExport}>
-          <Download size={15} strokeWidth={1.9} /><span>Export</span>
+        <button type="button" className="syn-primary-nav-item syn-nav-wide-only" onClick={onExport}>
+          <Download size={18} strokeWidth={1.7} aria-hidden="true" /><span>Export</span>
         </button>
-        <button type="button" className="syn-primary-nav-item" onClick={onSettings}>
-          <Settings size={15} strokeWidth={1.9} /><span>Settings</span>
+        <button type="button" className="syn-primary-nav-item syn-nav-wide-only" onClick={onSettings}>
+          <Settings size={18} strokeWidth={1.7} aria-hidden="true" /><span>Settings</span>
         </button>
         <button
           type="button"
@@ -125,7 +126,7 @@ export const WorkspaceNavigation: React.FC<Props> = ({
           aria-expanded={advancedOpen}
           onClick={() => setAdvancedOpen(true)}
         >
-          <MoreHorizontal size={16} /><span>More</span>
+          <MoreHorizontal size={18} aria-hidden="true" /><span>More</span>
         </button>
       </nav>
 
