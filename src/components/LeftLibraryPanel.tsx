@@ -67,7 +67,9 @@ export const LeftLibraryPanel: React.FC<Props> = React.memo(({
   return (
     <aside
       aria-label="Audio Library and Presets"
-      className="w-full lg:w-[272px] shrink-0 bg-[#0D0E13] border-b lg:border-b-0 lg:border-r border-[#222530] flex flex-col lg:h-full overflow-visible lg:overflow-hidden"
+      data-syn-skin="instrument"
+      data-workspace="library"
+      className="syn-library-shell w-full lg:w-[272px] shrink-0 bg-[#0D0E13] border-b lg:border-b-0 lg:border-r border-[#222530] flex flex-col lg:h-full overflow-visible lg:overflow-hidden"
     >
       {/* Library Tabs */}
       <div className="grid grid-cols-4 border-b border-[#222530] bg-[#111217]">
