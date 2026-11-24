@@ -824,10 +824,10 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   }
   .syn-app-header > div:first-child img,
   .syn-workstation > header.syn-app-header > div:first-child img {
-    width: 38px;
-    max-width: 38px;
+    width: auto;
+    max-width: 84px;
     height: 28px;
-    flex: 0 0 38px;
+    flex: 0 0 auto;
   }
   .syn-app-header > div:first-child > span,
   .syn-workstation > header.syn-app-header > div:first-child > span {
