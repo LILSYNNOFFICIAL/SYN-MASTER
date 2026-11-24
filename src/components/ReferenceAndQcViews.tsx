@@ -268,7 +268,7 @@ export const QualityControlView: React.FC<QcProps> = ({
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="p-3 rounded bg-[#111217] border border-[#242732]">
               <div className="text-[11px] uppercase text-[#9CA3AF]">Overall Validation</div>
               <div
