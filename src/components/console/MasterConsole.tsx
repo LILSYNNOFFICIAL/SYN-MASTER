@@ -69,6 +69,8 @@ export interface MasterConsoleProps {
   onAskAi?: () => void;
   /** Session "Mode" from the ribbon (MasteringMode). Shown on the console and used to suggest a preset. */
   mode?: string;
+  /** Drag the target marker on the loudness meter: sets a custom integrated-loudness target. */
+  onTargetLufs?: (lufs: number) => void;
 }
 
 /**
@@ -131,6 +133,66 @@ const AddModule: React.FC<{ type: ProcessorType; onAdd: (t: ProcessorType) => vo
     <Plus className="w-3.5 h-3.5" /> Add {LABEL_FOR[type] ?? type}
   </button>
 );
+
+const LOUD_MIN = -30;
+const LOUD_MAX = -5;
+const loudPct = (v: number) => Math.max(0, Math.min(100, ((v - LOUD_MIN) / (LOUD_MAX - LOUD_MIN)) * 100));
+
+/** Read-only integrated-loudness meter with a draggable target thumb (when onTarget is given). */
+const LoudnessBar: React.FC<{ lufs: number | null; targetLufs: number; disabled?: boolean; onTarget?: (v: number) => void }> = ({ lufs, targetLufs, disabled, onTarget }) => {
+  const trackRef = React.useRef<HTMLDivElement | null>(null);
+  const [drag, setDrag] = useState<number | null>(null);
+  const shownTarget = drag ?? targetLufs;
+  const fromX = (clientX: number) => {
+    const r = trackRef.current!.getBoundingClientRect();
+    const t = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    return Math.round((LOUD_MIN + t * (LOUD_MAX - LOUD_MIN)) * 2) / 2;
+  };
+  const editable = Boolean(onTarget) && !disabled;
+  return (
+    <div className="syn-loud-meter">
+      <div ref={trackRef} className="syn-loud-bar" role="meter" aria-label="Integrated loudness" aria-valuemin={LOUD_MIN} aria-valuemax={LOUD_MAX} aria-valuenow={lufs ?? LOUD_MIN}>
+        <span style={{ width: `${lufs !== null ? loudPct(lufs) : 0}%` }} />
+      </div>
+      <button
+        type="button"
+        className={`syn-loud-thumb${editable ? '' : ' is-static'}`}
+        style={{ left: `${loudPct(shownTarget)}%` }}
+        role="slider"
+        aria-label="Loudness target (drag or use arrow keys)"
+        aria-valuemin={LOUD_MIN}
+        aria-valuemax={LOUD_MAX}
+        aria-valuenow={shownTarget}
+        aria-valuetext={`${shownTarget} LUFS target`}
+        disabled={!editable}
+        onPointerDown={(e) => {
+          if (!editable) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setDrag(fromX(e.clientX));
+        }}
+        onPointerMove={(e) => {
+          if (drag !== null) setDrag(fromX(e.clientX));
+        }}
+        onPointerUp={() => {
+          if (drag !== null && onTarget && drag !== targetLufs) onTarget(drag);
+          setDrag(null);
+        }}
+        onPointerCancel={() => setDrag(null)}
+        onKeyDown={(e) => {
+          if (!editable || !onTarget) return;
+          const d = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 0.5 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -0.5 : 0;
+          if (d) {
+            e.preventDefault();
+            onTarget(Math.max(LOUD_MIN, Math.min(LOUD_MAX, targetLufs + d)));
+          }
+        }}
+      >
+        <span>{shownTarget}</span>
+      </button>
+      <div className="syn-loud-scale" aria-hidden="true"><span>-30</span><span>-20</span><span>-14</span><span>-9</span><span>-5</span></div>
+    </div>
+  );
+};
 
 export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
   const [eqView, setEqView] = useState<'eq' | 'spectrum' | 'spectrogram'>('eq');
@@ -390,10 +452,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
         <Card title="Loudness" area="loud" className="syn-card-loud">
           <div className="syn-loud-value"><strong>{lufs !== null ? lufs.toFixed(1) : '—'}</strong> <span>LUFS</span></div>
           <div className="syn-loud-target">Target {p.targetLufs} LUFS · TP {tp !== null ? tp.toFixed(2) : '—'} / {p.maxTruePeakDb} dBTP</div>
-          <div className="syn-loud-bar" role="meter" aria-label="Integrated loudness" aria-valuemin={-30} aria-valuemax={-5} aria-valuenow={lufs ?? -30}>
-            <span style={{ width: `${lufs !== null ? Math.max(0, Math.min(100, ((lufs + 30) / 25) * 100)) : 0}%` }} />
-            <i style={{ left: `${Math.max(0, Math.min(100, ((p.targetLufs + 30) / 25) * 100))}%` }} />
-          </div>
+          <LoudnessBar lufs={lufs} targetLufs={p.targetLufs} disabled={p.running} onTarget={p.onTargetLufs} />
           <div className="syn-loud-src">{p.master ? 'Measured on the rendered master' : p.source ? 'Source measurement' : 'No signal'}</div>
         </Card>
       </div>

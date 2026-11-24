@@ -2375,6 +2375,12 @@ export default function App() {
       notice={statusNotice}
       onAskAi={() => setActiveTab('ai')}
       mode={mode}
+      onTargetLufs={(lufs) => {
+        setTargetPresetId(null);
+        setCustomObjective((prev) => ({ ...prev, targetLufs: lufs }));
+        setObjectiveId('custom');
+        setStatusNotice(`Custom loudness target: ${lufs} LUFS.`);
+      }}
       blanketPeaks={chainBypassed || auditionTarget === 'original' ? prePeaksHi : postPeaksHi ?? prePeaksHi}
       timeline={
         <TimelinePlayer
