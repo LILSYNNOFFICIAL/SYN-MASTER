@@ -200,7 +200,9 @@ async function runViewport(browser, width, height, mobile) {
 
     const library = page.locator('aside[aria-label="Audio Library and Presets"]');
     for (const [index, label] of ['Audio', 'Presets', 'Chains', 'Projects'].entries()) {
-      await library.locator(':scope > div:first-child button').nth(index).click();
+      const libraryTab = library.locator(':scope > div:first-child button').nth(index);
+      await libraryTab.click();
+      assert.equal(await libraryTab.getAttribute('aria-pressed'), 'true', `${label} library tab must expose its selected state accessibly`);
       await inspectLayout(page, width, `library-${label.toLowerCase()}`);
     }
 
@@ -229,6 +231,10 @@ async function runViewport(browser, width, height, mobile) {
         assert.equal(await workspaceHero.locator('[data-testid="workspace-hero-graphic"]').isVisible(), true, `${label} must display its workspace-specific instrument graphic`);
       }
       await inspectLayout(page, width, id);
+      const activePrimary = page.locator('.syn-primary-nav-item[data-active="true"]');
+      const expectedPrimary = id === 'lab' ? 'Stereo' : id === 'qc' ? 'Loudness' : id === 'studio' ? 'Dashboard' : 'More';
+      assert.equal(await activePrimary.count(), 1, `${label} must have exactly one active primary navigation item`);
+      assert.equal((await activePrimary.innerText()).includes(expectedPrimary), true, `${label} must mark ${expectedPrimary} as the active navigation item`);
 
       if (id === 'ai') {
         const modeGrid = page.getByText('Operating Mode', { exact: true }).locator('xpath=following-sibling::div[1]');
