@@ -3,14 +3,14 @@
 
 :root {
   color-scheme: dark;
-  --syn-bg: #070604;
-  --syn-surface: #100D06;
-  --syn-elevated: #191307;
-  --syn-border: #392D13;
-  --syn-border-gold: #745817;
-  --syn-gold: #D4AF37;
-  --syn-gold-bright: #F2CA52;
-  --syn-gold-dim: #9C7C2B;
+  --syn-bg: #08080A;
+  --syn-surface: #111114;
+  --syn-elevated: #1A1A1A;
+  --syn-border: #262118;
+  --syn-border-gold: #8A6508;
+  --syn-gold: #F5B82E;
+  --syn-gold-bright: #FFF3CC;
+  --syn-gold-dim: #8A6508;
   --syn-text: #F7F1E2;
   --syn-muted: #B6A780;
   --syn-font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
@@ -489,7 +489,7 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 }
 .syn2-float { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
 .syn2-float-body { overscroll-behavior: contain; }
-@media (max-width: 1120px) {
+@media (max-width: 1023px) {
   .syn-daw-body { grid-template-columns: minmax(208px, 232px) minmax(0, 1fr); }
   .syn-daw-main { grid-template-columns: minmax(0, 1fr); }
   .syn-daw-spectrum,
@@ -499,7 +499,7 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
     max-height: none;
   }
 }
-@media (max-width: 1024px) {
+@media (max-width: 1023px) {
   .syn-workstation {
     min-height: 100dvh;
     height: auto !important;
@@ -638,7 +638,7 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   .syn2-result { min-width: 0; }
   .syn-workstation button { touch-action: manipulation; }
 }
-@media (max-width: 380px) {
+@media (max-width: 359px) {
   .syn-daw-main { padding: 8px; }
   .syn2-stats { grid-template-columns: minmax(0, 1fr); }
   .syn2-stat-val { font-size: 12px; }
@@ -652,4 +652,309 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* ==========================================================================
+   Flagship hardware finish and cross-workspace responsive contract
+   ========================================================================== */
+.syn-workstation {
+  background: #08080A;
+  color: #F7F1E2;
+  min-width: 0;
+}
+.syn-workstation .font-mono-tabular,
+.syn-workstation output,
+.syn-workstation [data-numeric-readout] {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.syn-daw-body > *,
+.syn-daw-main > *,
+.syn-daw-main [data-testid],
+.syn-daw-main section,
+.syn-daw-main article {
+  min-width: 0;
+}
+.syn-daw-main { width: 100%; max-width: 100%; }
+.syn-daw-main:not([data-layout="studio"]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.syn-workstation .syn2-stage,
+.syn-workstation .syn-control-desk,
+.syn-workstation .syn-daw-spectrum,
+.syn-workstation [data-testid="central-mastering-rack"],
+.syn-workstation [data-testid="measured-before-after-telemetry"] {
+  background-color: #111114;
+  border-color: #262118;
+  box-shadow: inset 0 1px 0 rgba(255, 215, 110, .06), 0 14px 36px rgba(0, 0, 0, .34);
+}
+.syn-workstation .syn2-wave-wrap,
+.syn-workstation .syn-daw-spectrum canvas,
+.syn-workstation .syn2-stat,
+.syn-workstation .syn-meter-bar-track,
+.syn-workstation .syn-meter-phase-track {
+  background-color: #050507;
+  border: 1px solid #1C1914;
+  box-shadow: inset 0 1px 0 rgba(255, 215, 110, .035);
+}
+.syn-workstation .syn-daw-spectrum canvas {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-height: 240px;
+}
+.syn-workstation .syn2-wave-wrap { width: 100%; max-width: 100%; min-width: 0; }
+.syn-workstation .syn2-track {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.syn-workstation input[type="range"],
+.syn-workstation [role="slider"] {
+  min-height: 40px;
+  accent-color: #F5B82E;
+}
+.syn-workstation [role="switch"],
+.syn-workstation button[data-testid^="bypass-btn-"],
+.syn-workstation .syn2-ab button {
+  min-height: 40px;
+}
+.syn-workstation .syn2-ab button.is-on {
+  color: #08080A;
+  background: #F5B82E;
+  box-shadow: 0 0 0 1px rgba(255, 243, 204, .45), 0 0 16px rgba(245, 184, 46, .24);
+}
+.syn-workstation [role="switch"][aria-checked="true"] {
+  border-color: #8A6508;
+  box-shadow: inset 0 1px 0 rgba(255, 243, 204, .08), 0 0 12px rgba(245, 184, 46, .12);
+}
+.syn-workstation :focus-visible {
+  outline-color: #FFF3CC;
+}
+.syn-workstation .syn-meter-bridge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 14px;
+  border-top: 1px solid #262118;
+  background: linear-gradient(180deg, #111114, #08080A);
+  box-shadow: inset 0 1px 0 rgba(255, 215, 110, .06);
+}
+.syn-meter-stereo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.syn-meter-stereo-main { flex: 1 1 auto; min-width: 0; }
+.syn-meter-stereo-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px 10px;
+  min-width: 0;
+  font: 10px var(--syn-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.syn-meter-kicker { color: #F5B82E; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.syn-meter-live-readout { color: #B6A780; white-space: nowrap; }
+.syn-meter-qc { color: #B6A780; white-space: nowrap; }
+.syn-meter-qc strong { margin-left: 3px; color: #FFF3CC; }
+.syn-meter-qc strong.is-fail { color: #F28B82; }
+.syn-meter-qc strong.is-warning { color: #F5B82E; }
+.syn-meter-stereo-bars { display: flex; flex-direction: column; gap: 5px; margin-top: 5px; }
+.syn-meter-bar-row { display: flex; align-items: center; gap: 8px; min-width: 0; color: #B6A780; font: 10px var(--syn-font-mono); }
+.syn-meter-bar-row > span { width: 10px; flex: 0 0 10px; }
+.syn-meter-bar-track { height: 9px; flex: 1 1 auto; min-width: 0; overflow: hidden; border-radius: 3px; }
+.syn-meter-bar-track > div { height: 100%; }
+.syn-meter-monitor { display: flex; align-items: center; gap: 8px; flex: 0 0 138px; min-width: 0; }
+.syn-meter-readouts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: center;
+  gap: 10px;
+  flex: 1.4 1 500px;
+  min-width: 0;
+  font-family: var(--syn-font-mono);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.syn-meter-metric { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.syn-meter-label { color: #A99A74; font-size: 9px; line-height: 1.2; letter-spacing: .09em; text-transform: uppercase; }
+.syn-meter-value { color: #F7F1E2; font-size: 12px; line-height: 1.25; font-weight: 750; white-space: nowrap; }
+.syn-meter-value.is-primary { color: #FFF3CC; font-size: 14px; text-shadow: 0 0 12px rgba(245, 184, 46, .16); }
+.syn-meter-phase-head { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+.syn-meter-phase-value.is-warning { color: #F5B82E; }
+.syn-meter-phase-value.is-good { color: #FFF3CC; }
+.syn-meter-phase-track { position: relative; height: 8px; width: 100%; border-radius: 3px; overflow: visible; }
+.syn-meter-phase-center { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #5B5140; }
+.syn-meter-phase-marker { position: absolute; top: 0; bottom: 0; width: 8px; border-radius: 2px; background: #F5B82E; box-shadow: 0 0 8px rgba(245, 184, 46, .35); }
+
+.syn-mobile-command-menu { display: contents; }
+.syn-mobile-command-menu > summary { display: none; }
+.syn-mobile-command-menu > .syn-menubar { display: flex !important; }
+
+@media (max-width: 1023px) {
+  .syn-app-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 58px;
+    height: auto !important;
+    padding: 8px 10px;
+  }
+  .syn-app-header > div:first-child { grid-column: 1; grid-row: 1; min-width: 0; gap: 6px; }
+  .syn-app-header > div:first-child img { max-width: 38px; height: 28px; }
+  .syn-app-header > div:first-child span { font-size: 13px; }
+  .syn-mobile-command-menu {
+    display: block;
+    position: relative;
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+  .syn-mobile-command-menu > summary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 64px;
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid #8A6508;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #1A1A1A, #111114);
+    color: #FFF3CC;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    list-style: none;
+    cursor: pointer;
+  }
+  .syn-mobile-command-menu > summary::-webkit-details-marker { display: none; }
+  .syn-mobile-command-menu[open] > summary { background: #F5B82E; color: #08080A; }
+  .syn-mobile-command-menu > .syn-menubar,
+  .syn-mobile-command-menu:not([open]) > .syn-menubar { display: none !important; }
+  .syn-mobile-command-menu[open] > .syn-menubar {
+    position: absolute;
+    z-index: 120;
+    top: calc(100% + 8px);
+    right: 0;
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 4px;
+    width: min(320px, calc(100vw - 20px));
+    max-height: min(72dvh, 560px);
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid #8A6508;
+    border-radius: 12px;
+    background: #111114;
+    box-shadow: 0 22px 55px rgba(0, 0, 0, .78), inset 0 1px 0 rgba(255, 243, 204, .06);
+  }
+  .syn-mobile-command-menu .syn-menu-group { width: 100%; }
+  .syn-mobile-command-menu .syn-menu-group > summary { width: 100%; min-height: 40px; padding: 9px 12px; }
+  .syn-mobile-command-menu .syn-menu-panel,
+  .syn-mobile-command-menu .syn-menu-group:not([open]) > .syn-menu-panel {
+    position: static;
+    display: none;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    margin: 3px 0 7px;
+    padding: 4px;
+    border-radius: 8px;
+    box-shadow: none;
+    background: #08080A;
+  }
+  .syn-mobile-command-menu .syn-menu-group[open] > .syn-menu-panel { display: flex; }
+  .syn-mobile-command-menu .syn-menu-panel button { min-height: 40px; white-space: normal; }
+  .syn-app-header > div:last-child { grid-column: 3; grid-row: 1; min-width: 0; }
+  .syn-header-export { min-height: 40px; padding: 0 12px !important; font-size: 11px !important; }
+  .syn-daw-body,
+  .syn-daw-body.is-fullscreen { display: flex; flex-direction: column; min-width: 0; }
+  .syn-daw-main {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    padding: 10px;
+    gap: 10px;
+  }
+  .syn-daw-main > * { width: 100%; max-width: 100%; min-width: 0; }
+  .syn-daw-body > aside[aria-label="Audio Library and Presets"] {
+    order: 2;
+    width: 100% !important;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .syn-daw-spectrum,
+  .syn-daw-main > [data-testid="central-mastering-rack"],
+  .syn-daw-main > [data-testid="mastering-control-desk"],
+  .syn-daw-global-tabs {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    position: static;
+    max-height: none;
+  }
+  .syn-daw-spectrum { min-height: 240px; }
+  .syn-daw-spectrum canvas { min-height: 240px; }
+  .syn2-wave-wrap { width: 100%; min-width: 0; }
+  .syn2-stage { width: 100%; max-width: 100%; min-width: 0; }
+  .syn2-stage-head { align-items: flex-start; }
+  .syn2-track { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .syn2-stage-tools { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .syn2-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .syn2-stat { min-width: 0; padding: 9px; }
+  .syn2-stat-val { flex-wrap: wrap; overflow-wrap: anywhere; }
+  .syn-control-desk-layout { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 10px; }
+  .syn-control-desk-info { width: 100%; min-width: 0; }
+  .syn-control-desk-track { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .syn-control-desk-actions { display: flex; flex-wrap: wrap; width: 100%; min-width: 0; gap: 8px; }
+  .syn-control-desk-actions button { flex: 1 1 132px; min-width: 0; min-height: 40px; justify-content: center; }
+  .syn2-fix-btn { width: 100%; max-width: 420px; min-height: 48px; justify-content: center; padding: 14px 16px; font-size: clamp(14px, 4vw, 20px); }
+  .syn2-fix-hint { max-width: 100%; padding-inline: 8px; text-align: center; }
+  .syn-workstation [role="slider"],
+  .syn-workstation [role="switch"],
+  .syn-workstation button[data-testid^="bypass-btn-"],
+  .syn-workstation .syn2-ab button,
+  .syn-workstation select { min-height: 40px; }
+  .syn-workstation > footer { position: sticky; bottom: 0; z-index: 30; width: 100%; padding-bottom: env(safe-area-inset-bottom, 0px); }
+}
+@media (max-width: 767px) {
+  .syn-app-header { grid-template-columns: minmax(0, 1fr) auto auto; padding-inline: 9px; gap: 6px; }
+  .syn-app-header > div:first-child { gap: 5px; }
+  .syn-app-header > div:first-child span { font-size: 12px; }
+  .syn-header-export { padding-inline: 10px !important; }
+  .syn-workstation [role="toolbar"] { align-items: stretch; gap: 8px; padding: 8px 10px; }
+  .syn-workstation [role="toolbar"] > * { min-width: 0; max-width: 100%; }
+  .syn-control-desk { padding: 12px !important; }
+  .syn-meter-bridge { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; padding: 8px 10px; }
+  .syn-meter-stereo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(104px, .42fr); gap: 10px; align-items: center; }
+  .syn-meter-stereo-head { justify-content: flex-start; column-gap: 8px; }
+  .syn-meter-kicker { font-size: 9px; }
+  .syn-meter-live-readout { font-size: 9px; }
+  .syn-meter-monitor { width: 100%; flex-basis: auto; gap: 5px; }
+  .syn-meter-monitor [data-testid="meter-bridge-monitor-volume"] { min-width: 0; }
+  .syn-meter-readouts { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; width: 100%; }
+  .syn-meter-label { font-size: 8px; letter-spacing: .025em; overflow-wrap: anywhere; }
+  .syn-meter-value { font-size: 9px; letter-spacing: -.035em; }
+  .syn-meter-value.is-primary { font-size: 10px; }
+  .syn-meter-phase-head { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .syn-meter-phase-track { margin-top: 2px; }
+}
+@media (max-width: 359px) {
+  .syn-meter-readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .syn2-stats { grid-template-columns: minmax(0, 1fr); }
 }
