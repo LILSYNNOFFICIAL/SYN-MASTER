@@ -458,7 +458,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
 
         ctx.fillStyle = '#7B8291';
         ctx.textAlign = fm === 30 ? 'left' : fm === 20000 ? 'right' : 'center';
-        ctx.fillText(fm >= 1000 ? `${fm / 1000}k` : `${fm}`, x, h - 6);
+        ctx.fillText(fm === 20 ? '20 Hz' : fm >= 1000 ? `${fm / 1000}k` : `${fm}`, x, h - 6);
         ctx.textAlign = 'center';
       }
 
