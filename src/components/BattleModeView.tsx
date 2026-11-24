@@ -41,7 +41,7 @@ export const BattleModeView: React.FC<Props> = ({
 
   if (!preAnalysis) {
     return (
-      <div className="p-8 rounded bg-[#111217] border border-[#242732] text-center">
+      <div data-testid="workspace-empty-state" data-workspace="battle" className="syn-workspace-empty p-8 rounded bg-[#111217] border border-[#242732] text-center">
         <p className="text-sm font-semibold text-[#F7F8FA]">SYN MASTER Battle Mode</p>
         <p className="mt-1 text-xs text-[#9CA3AF]">
           Load an audio track to generate three independently configured mastering philosophies (Transparent, Commercial Punch, Warm Analog).
