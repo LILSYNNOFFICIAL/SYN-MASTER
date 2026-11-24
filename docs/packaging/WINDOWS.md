@@ -6,7 +6,7 @@ The first Electron-based workstation shell and unsigned NSIS x64 installer pipel
 
 The native companion remains independently built: syn-plugin-host.exe, syn-plugin-scanner.exe, and syn-plugin-worker.exe. The desktop preparation script stages these binaries, the built Vite application, and a bundled production Express server before electron-builder produces the NSIS installer.
 
-The app requests authenticated graceful shutdown from the VST3 host before a bounded forced-stop fallback. The native validation harness verifies the shutdown endpoint returns HTTP 202 and the host process exits with code 0.
+The app requests authenticated graceful shutdown from the VST3 host before a bounded forced-stop fallback. The native validation harness now asserts that the shutdown endpoint returns HTTP 202 and the host process exits with code 0; this new assertion is pending the current Windows CI run.
 
 ## Pipeline
 

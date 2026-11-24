@@ -394,6 +394,12 @@ The live `/api/health` response only verifies configuration presence, not full A
 - [ ] **Hosted deployment verification:** set the separate `SYN_MASTER_AI_ACCESS_TOKEN` deployment secret, sync the source into AI Studio, inspect Cloud Run/IAM/IAP, and verify unauthorized calls are rejected without billable Gemini usage.
 
 
+
+
+### Hosted AI access-token limitations
+
+The client-entered cloud token is a shared bearer credential, not individual user authentication. It does not provide per-account identity, entitlements, per-user revocation, or account-level quotas. Keep the value in the deployment secret manager and distribute it only through a controlled operator channel. Before public multi-user distribution, replace or wrap this gate with an identity-backed session model or a verified upstream IAM/IAP boundary, and add user-level quota/abuse controls. A successful local CI check proves the route middleware works, not that the hosted AI Studio/Cloud Run edge is configured correctly.
+
 ## Parallel execution status — November 23, 2026
 
 - [x] **Hosted AI access protection (source):** bearer-token guard, settings field, and unit coverage are committed. This intentionally fails closed in production when `SYN_MASTER_AI_ACCESS_TOKEN` is not configured. Set a cryptographically random token (for example, `openssl rand -hex 32`) as a deployment secret and enter the same value under Settings → AI Provider → Built-in Gemini → Cloud AI access token. Do not use the Gemini API key as this token.
