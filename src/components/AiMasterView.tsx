@@ -264,7 +264,7 @@ export const AiMasterView: React.FC<Props> = ({
 
   if (!preAnalysis) {
     return (
-      <div className="syn-ai-workspace" data-testid="workspace-empty-state">
+      <div className="syn-ai-workspace" data-testid="workspace-empty-state" data-workspace="ai">
         <section className="syn-ai-hero" data-testid="workspace-hero" data-workspace="ai">
           <div className="syn-ai-hero-copy">
             <span className="syn-ai-eyebrow"><Sparkles size={14}/> SYN MASTER INTELLIGENCE</span>
