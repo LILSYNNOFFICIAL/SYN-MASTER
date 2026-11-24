@@ -802,16 +802,46 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   .syn-app-header,
   .syn-workstation > header.syn-app-header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) 64px max-content;
     align-items: center;
     gap: 8px;
     min-height: 58px;
     height: auto !important;
     padding: 8px 10px;
   }
-  .syn-app-header > div:first-child { grid-column: 1; grid-row: 1; min-width: 0; gap: 6px; }
-  .syn-app-header > div:first-child img { max-width: 38px; height: 28px; }
-  .syn-app-header > div:first-child span { font-size: 13px; }
+  .syn-app-header > div:first-child,
+  .syn-workstation > header.syn-app-header > div:first-child {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    gap: 6px;
+    overflow: hidden;
+    white-space: normal;
+  }
+  .syn-app-header > div:first-child img,
+  .syn-workstation > header.syn-app-header > div:first-child img {
+    width: 38px;
+    max-width: 38px;
+    height: 28px;
+    flex: 0 0 38px;
+  }
+  .syn-app-header > div:first-child > span,
+  .syn-workstation > header.syn-app-header > div:first-child > span {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+  .syn-workstation > header.syn-app-header > details.syn-mobile-command-menu {
+    width: 64px;
+    justify-self: center;
+  }
+  .syn-workstation > header.syn-app-header > div:last-child { justify-self: end; width: max-content; }
   .syn-mobile-command-menu {
     display: block;
     position: relative;
@@ -937,7 +967,7 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 }
 @media (max-width: 767px) {
   .syn-app-header,
-  .syn-workstation > header.syn-app-header { grid-template-columns: minmax(0, 1fr) auto auto; padding-inline: 9px; gap: 6px; }
+  .syn-workstation > header.syn-app-header { grid-template-columns: minmax(0, 1fr) 64px max-content; padding-inline: 9px; gap: 6px; }
   .syn-app-header > div:first-child { gap: 5px; }
   .syn-app-header > div:first-child span { font-size: 12px; }
   .syn-header-export { padding-inline: 10px !important; }
