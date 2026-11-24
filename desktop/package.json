@@ -1,0 +1,57 @@
+{
+  "name": "syn-master-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SYN MASTER Windows workstation shell",
+  "main": "main.cjs",
+  "scripts": {
+    "dist:win": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@google/genai": "^2.32.0",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "electron": "45.4.1",
+    "electron-builder": "26.17.0"
+  },
+  "build": {
+    "appId": "com.lilsynn.synmaster",
+    "productName": "SYN MASTER",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "server.production.mjs",
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "native",
+        "to": "native",
+        "filter": ["**/*"]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SYN MASTER"
+    }
+  }
+}
