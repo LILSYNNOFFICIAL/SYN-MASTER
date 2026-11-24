@@ -68,6 +68,7 @@ import { validateChainAgainstInventory } from './director/processorInventory';
 import { encodeWavBlob } from './dsp/wavEncoder';
 import { DEFAULT_EXPORT_CONFIG } from './dsp/exportDefaults';
 import { encodeMidiTempoFile } from './dsp/midiEncoder';
+import { createZipBlob, type ZipFileEntry } from './dsp/zipArchive';
 import {
   createTemporaryMasteringWorkspace,
   listMasteringDiagnosticRuns,
@@ -289,6 +290,7 @@ export default function App() {
   const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
   const [exportDownloadName, setExportDownloadName] = useState<string | null>(null);
   const [exportDeliveryCheck, setExportDeliveryCheck] = useState<{ text: string; warning: boolean } | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [diagnosticRuns, setDiagnosticRuns] = useState<MasteringDiagnosticRunSummary[]>([]);
   const [latestDiagnosticRun, setLatestDiagnosticRun] = useState<MasteringDiagnosticRunSummary | null>(null);
@@ -1869,23 +1871,42 @@ export default function App() {
 
   const handleRenderExport = async () => {
     const src = getRenderSource();
-    if (!src || !activeTrack) return;
-    setRenderingExport(true);
-    try {
-      const safeStem = (exportConfig.filename.trim() || 'SYN_Master').replace(/[<>:"/\\|?*]/g, '_');
-      let blob: Blob;
-      let extension: string;
-      let deliveryCheck: { text: string; warning: boolean } | null = null;
+    if (!src || !activeTrack) {
+      const message = 'Load an audio track before starting an export.';
+      setExportError(message);
+      setStatusNotice(message);
+      return;
+    }
+    if (renderingExport) return;
 
-      if (exportConfig.format === 'mid') {
-        blob = encodeMidiTempoFile(safeStem, activeTrack.durationSec, exportConfig.midiTempoBpm ?? 120, exportConfig.saveLoopMarkers ?? true);
-        extension = 'mid';
-      } else {
+    setRenderingExport(true);
+    setExportError(null);
+    setExportDeliveryCheck(null);
+    try {
+      const safeStem = (exportConfig.filename.trim() || 'SYN_Master').replace(/[<>:"/\\|?*]/g, '_').replace(/^\.+$/, 'SYN_Master');
+      const selectedFormats = Array.from(new Set(
+        (exportConfig.selectedFormats?.length ? exportConfig.selectedFormats : [exportConfig.format])
+          .filter((format) => ['wav', 'mp3', 'ogg', 'flac', 'm4a', 'mid', 'webm-opus'].includes(format)),
+      ));
+      if (selectedFormats.length === 0) throw new Error('Select at least one output format.');
+
+      const entries: ZipFileEntry[] = [];
+      const outputManifest: Array<{ file: string; format: string; bytes: number; integratedLufs?: number | null; truePeakDbtp?: number | null }> = [];
+      const deliveryMessages: string[] = [];
+      const audioFormats = selectedFormats.filter((format) => format !== 'mid');
+
+      if (selectedFormats.includes('mid')) {
+        const midiBlob = encodeMidiTempoFile(safeStem, activeTrack.durationSec, exportConfig.midiTempoBpm ?? 120, exportConfig.saveLoopMarkers ?? true);
+        const midiName = safeStem + '.mid';
+        entries.push({ name: safeStem + '/' + midiName, data: midiBlob });
+        outputManifest.push({ file: midiName, format: 'MIDI', bytes: midiBlob.size });
+      }
+
+      if (audioFormats.length > 0) {
+        // Render the active mastering chain exactly once. Every codec is encoded from
+        // this identical 32-bit float intermediate so format selection cannot alter DSP.
         const effectiveChain = exportConfig.includeMasteringChain !== false && !chainBypassed ? chain : [];
         const processed = await renderMixedChain(src, activeTrack.sampleRate, effectiveChain, processExternalStage, getPostFades());
-
-        // Pass an untouched 32-bit float source-rate WAV to FFmpeg. It performs the
-        // selected 512-point sinc sample-rate conversion and final PCM/codec encoding.
         const intermediateConfig: ExportConfig = {
           ...exportConfig,
           format: 'wav',
@@ -1894,61 +1915,118 @@ export default function App() {
           dither: 'none',
         };
         const intermediateWav = encodeWavBlob(processed.channels, activeTrack.sampleRate, intermediateConfig);
-        const params = new URLSearchParams({
-          format: exportConfig.format,
-          sampleRate: String(exportConfig.sampleRate),
+
+        for (const format of audioFormats) {
+          const params = new URLSearchParams({
+            format,
+            sampleRate: String(exportConfig.sampleRate),
+            channels: exportConfig.channels,
+            wavBitDepth: String(exportConfig.wavBitDepth),
+            flacBitDepth: String(exportConfig.flacBitDepth ?? 24),
+            flacCompression: String(exportConfig.flacCompression ?? 5),
+            mp3BitrateKbps: String(exportConfig.mp3BitrateKbps ?? 320),
+            oggBitrateKbps: String(exportConfig.oggBitrateKbps ?? 192),
+            aacBitrateKbps: String(exportConfig.aacBitrateKbps ?? 320),
+            opusBitrateKbps: String(exportConfig.opusBitrateKbps ?? 192),
+            // A Dither module in the rack already dithered the master: never dither twice.
+            dither: effectiveChain.some((m) => m.type === 'dither' && m.enabled && !m.bypassed) ? 'none' : exportConfig.dither,
+            metadataTitle: exportConfig.metadataTitle ?? '',
+            metadataArtist: exportConfig.metadataArtist ?? '',
+            ceilingDb: String(exportConfig.ceilingDb),
+          });
+          const response = await fetch('/api/export/encode?' + params.toString(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: intermediateWav,
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({})) as { error?: string };
+            throw new Error((payload.error || 'Audio export failed (HTTP ' + response.status + ').') + ' [' + format.toUpperCase() + ']');
+          }
+
+          const blob = await response.blob();
+          if (blob.size === 0) throw new Error(format.toUpperCase() + ' encoder returned an empty file.');
+          const extension = format === 'webm-opus' ? 'webm' : format;
+          const fileName = safeStem + '.' + extension;
+          entries.push({ name: safeStem + '/' + fileName, data: blob });
+
+          const measuredLufsHeader = response.headers.get('X-Syn-Integrated-Lufs');
+          const measuredTpHeader = response.headers.get('X-Syn-True-Peak-Dbtp');
+          const measuredLufs = measuredLufsHeader === null ? null : Number(measuredLufsHeader);
+          const measuredTp = measuredTpHeader === null ? null : Number(measuredTpHeader);
+          const hasPeak = measuredTp !== null && Number.isFinite(measuredTp);
+          const overCeiling = hasPeak && measuredTp! > exportConfig.ceilingDb + 0.05;
+          if (!hasPeak) {
+            deliveryMessages.push(format.toUpperCase() + ': encoded file could not be measured.');
+          } else {
+            deliveryMessages.push(
+              format.toUpperCase() + ': ' +
+              (measuredLufs !== null && Number.isFinite(measuredLufs) ? measuredLufs.toFixed(1) + ' LUFS, ' : '') +
+              measuredTp!.toFixed(1) + ' dBTP' +
+              (overCeiling ? ' (over ceiling).' : ' (within ceiling).'),
+            );
+          }
+          outputManifest.push({
+            file: fileName,
+            format: format.toUpperCase(),
+            bytes: blob.size,
+            integratedLufs: measuredLufs !== null && Number.isFinite(measuredLufs) ? measuredLufs : null,
+            truePeakDbtp: hasPeak ? measuredTp : null,
+          });
+        }
+      }
+
+      const manifest = {
+        application: 'SYN MASTER',
+        package: safeStem,
+        createdAt: new Date().toISOString(),
+        source: { name: activeTrack.name, durationSec: activeTrack.durationSec, sampleRate: activeTrack.sampleRate },
+        render: {
+          sampleRate: exportConfig.sampleRate,
           channels: exportConfig.channels,
-          wavBitDepth: String(exportConfig.wavBitDepth),
-          flacBitDepth: String(exportConfig.flacBitDepth ?? 24),
-          flacCompression: String(exportConfig.flacCompression ?? 5),
-          mp3BitrateKbps: String(exportConfig.mp3BitrateKbps ?? 320),
-          oggBitrateKbps: String(exportConfig.oggBitrateKbps ?? 192),
-          aacBitrateKbps: String(exportConfig.aacBitrateKbps ?? 320),
-          opusBitrateKbps: String(exportConfig.opusBitrateKbps ?? 192),
-          // A Dither module in the rack already dithered the master: never dither twice.
-          dither: effectiveChain.some((m) => m.type === 'dither' && m.enabled && !m.bypassed) ? 'none' : exportConfig.dither,
+          resampler: exportConfig.resampler ?? 'sinc-512',
+          masteringChainIncluded: exportConfig.includeMasteringChain !== false && !chainBypassed,
+          dither: exportConfig.dither,
+          truePeakCeilingDbtp: exportConfig.ceilingDb,
           metadataTitle: exportConfig.metadataTitle ?? '',
           metadataArtist: exportConfig.metadataArtist ?? '',
-          ceilingDb: String(exportConfig.ceilingDb),
-        });
-        const response = await fetch('/api/export/encode?' + params.toString(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: intermediateWav,
-        });
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({})) as { error?: string };
-          throw new Error(payload.error || 'Audio export failed (HTTP ' + response.status + ').');
-        }
-        blob = await response.blob();
-        // Delivery check: the server measures the encoded file itself, after resampling and codec.
-        const measuredLufs = Number(response.headers.get('X-Syn-Integrated-Lufs'));
-        const measuredTp = Number(response.headers.get('X-Syn-True-Peak-Dbtp'));
-        if (response.headers.has('X-Syn-True-Peak-Dbtp') && Number.isFinite(measuredTp)) {
-          const overCeiling = measuredTp > exportConfig.ceilingDb + 0.05;
-          deliveryCheck = {
-            warning: overCeiling,
-            text:
-              `Encoded file: ${Number.isFinite(measuredLufs) ? measuredLufs.toFixed(1) + ' LUFS integrated, ' : ''}${measuredTp.toFixed(1)} dBTP true peak` +
-              (overCeiling
-                ? ` (over the ${exportConfig.ceilingDb.toFixed(1)} dBTP ceiling after encoding; lower the ceiling or limiter output and re-render).`
-                : ` (within the ${exportConfig.ceilingDb.toFixed(1)} dBTP ceiling).`),
-          };
-        } else {
-          deliveryCheck = { warning: true, text: 'Encoded file could not be measured; check true peak before delivery.' };
-        }
-        extension = exportConfig.format === 'webm-opus' ? 'webm' : exportConfig.format;
+        },
+        outputs: outputManifest,
+      };
+      entries.push({ name: safeStem + '/render-manifest.json', data: JSON.stringify(manifest, null, 2) });
+
+      const zipBlob = await createZipBlob(entries);
+      if (zipBlob.size < 22) throw new Error('ZIP packaging failed: archive is unexpectedly small.');
+      const zipHeader = new Uint8Array(await zipBlob.slice(0, 4).arrayBuffer());
+      if (zipHeader[0] !== 0x50 || zipHeader[1] !== 0x4b || zipHeader[2] !== 0x03 || zipHeader[3] !== 0x04) {
+        throw new Error('ZIP packaging failed: archive signature is invalid.');
       }
 
       if (exportDownloadUrl) URL.revokeObjectURL(exportDownloadUrl);
-      const url = URL.createObjectURL(blob);
-      const safeName = safeStem + '.' + extension;
+      const url = URL.createObjectURL(zipBlob);
+      const zipName = safeStem + '.zip';
       setExportDownloadUrl(url);
-      setExportDownloadName(safeName);
-      setExportDeliveryCheck(deliveryCheck);
-      setStatusNotice('Rendered ' + exportConfig.format.toUpperCase() + ' master "' + safeName + '".');
+      setExportDownloadName(zipName);
+      setExportDeliveryCheck({
+        warning: deliveryMessages.some((message) => message.includes('could not be measured') || message.includes('(over ceiling).')),
+        text: deliveryMessages.length ? deliveryMessages.join('  ') : 'MIDI conductor file packaged successfully.',
+      });
+
+      // Start the download while the export action is still active. Keep the visible
+      // fallback link in the modal for browsers that block programmatic downloads.
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = zipName;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+
+      setStatusNotice('Packaged ' + outputManifest.length + ' output file(s) in "' + zipName + '".');
     } catch (err) {
-      setStatusNotice(err instanceof Error ? err.message : 'Master export failed');
+      const message = err instanceof Error ? err.message : 'Master export failed.';
+      setExportError(message);
+      setStatusNotice(message);
     } finally {
       setRenderingExport(false);
     }
@@ -2990,6 +3068,7 @@ export default function App() {
             downloadUrl={exportDownloadUrl}
             downloadFilename={exportDownloadName}
             deliveryCheck={exportDeliveryCheck}
+            renderError={exportError}
             hasTrack={Boolean(activeTrack)}
             onChange={setExportConfig}
             onRender={handleRenderExport}
