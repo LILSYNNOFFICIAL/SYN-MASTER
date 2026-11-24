@@ -4,7 +4,7 @@
 
 **Goal:** Carry the approved premium SYN MASTER visual language across every workspace so the desktop application feels like one coherent professional mastering instrument, with real controls and honest data states.
 
-**Architecture:** Add one small shared workspace identity header with workspace-specific SVG instrumentation, then refine the individual empty states and existing panels without replacing the current DSP, AI, QC, reference, plugin-host, or export behavior. Keep graphics in SVG/CSS so they are crisp, accessible, fast, and can later be bound to live telemetry.
+**Architecture:** Add a shared workspace identity header with workspace-specific SVG instrumentation, while preserving the AI Director's existing purpose-built orb/pipeline hero. Refine individual empty states and existing panels without replacing DSP, AI, QC, reference, plugin-host, or export behavior. Keep graphics in SVG/CSS so they are crisp, accessible, fast, and can later be bound to live telemetry.
 
 **Tech Stack:** React 19, TypeScript, Vite, Tailwind CSS 4, Lucide icons, Playwright responsive smoke checks.
 
@@ -40,35 +40,14 @@
 
 **Interfaces:**
 - Consumes: `WorkspaceTab`, current `activeTrack` presence, existing app layout.
-- Produces: `WorkspaceHero({ workspace, hasTrack })`, rendered above non-studio workspace content with `data-testid="workspace-hero"` and a workspace-specific SVG graphic.
+- Produces: `WorkspaceHero({ workspace, hasTrack })` for Lab, Stems, Battle, Reference, QC and Plugins. AI Director retains its native orb/pipeline hero. All workspace identity elements use `data-testid="workspace-hero"` and workspace-specific graphics.
 
-- [ ] Add Playwright assertions for all seven non-studio workspace headers and the AI pre-import state.
-- [ ] Run responsive CI and observe the expected missing-header failure.
-- [ ] Implement the shared component with distinct visual motifs for AI, Lab, Stems, Battle, Reference, QC and Plugins.
-- [ ] Integrate the header without moving or replacing existing functional workspace content.
-- [ ] Add responsive styles and truthful idle/source status labels.
-- [ ] Run the complete web CI.
-
-### Task 2: Section-specific empty states and visual hierarchy
-
-**Files:**
-- Modify: `src/components/SynLabView.tsx`
-- Modify: `src/components/BattleModeView.tsx`
-- Modify: `src/components/ReferenceAndQcViews.tsx`
-- Modify: `src/components/StemIntelligencePanel.tsx`
-- Modify: `src/components/PluginManagerView.tsx`
-- Modify: `src/index.css`
-- Test: `scripts/responsive-layout-check.mjs`
-
-**Interfaces:**
-- Consumes: existing view props and existing action callbacks.
-- Produces: section-specific, useful pre-import states; consistent blue signal / gold action hierarchy; no fake analysis values.
-
-- [ ] Add targeted browser assertions for each no-source empty state.
-- [ ] Verify expected failure before implementation.
-- [ ] Refine empty states with purpose-built SVG/CSS instrument art and direct next actions.
-- [ ] Preserve existing loaded-source controls and results.
-- [ ] Run complete web CI and inspect responsive logs.
+- [x] Add Playwright assertions for all seven non-studio workspace headers and the AI pre-import state.
+- [x] Run responsive CI and observe the expected missing-header failure.
+- [x] Implement the shared component with distinct visual motifs for AI, Lab, Stems, Battle, Reference, QC and Plugins.
+- [x] Integrate the header without moving or replacing existing functional workspace content.
+- [x] Add responsive styles and truthful idle/source status labels.
+- [x] Run the complete web CI.
 
 ### Task 3: Navigation, library and cross-workspace consistency
 
@@ -83,10 +62,10 @@
 - Consumes: existing navigation callbacks, rack state, library callbacks.
 - Produces: consistent selected states, visual tokens and readable section hierarchy without changing processing behavior.
 
-- [ ] Add regression checks for navigation state and library controls.
-- [ ] Verify expected failure before implementation.
-- [ ] Refine nav, library and rack presentation with blue signal states and restrained gold action states.
-- [ ] Run complete web CI.
+- [x] Add regression checks for navigation state and library controls.
+- [x] Verify expected failure before implementation.
+- [x] Refine nav, library and rack presentation with blue signal states and restrained gold action states.
+- [x] Run complete web CI.
 
 ### Task 4: Whole-application review
 
@@ -95,3 +74,15 @@
 - [ ] Run latest Web CI and inspect all jobs/logs.
 - [ ] Check Windows native workflow status separately; report it independently from web UI verification.
 - [ ] Record any unverified visual/manual-audio acceptance items honestly.
+
+
+## Execution notes
+
+- All code changes were made directly on `main`; the branch list was verified to contain only `main`.
+- AI Director uses its native orb and pipeline rather than a second duplicate workspace hero.
+- Each specialist workspace now has an honest no-source/no-host state and a dedicated instrument graphic.
+- The Audio Library, Mastering Rack and all specialist workspaces carry the shared instrument skin.
+- Active primary navigation and library selection are exposed accessibly. The advanced drawer is layered above transport/A-B controls.
+- The Analysis Lab tabs and AI signal visualization remain usable on narrow mobile widths.
+- Latest completed web verification at the time of this plan update: workflow [45461173378](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/runs/45461173378), success on source revision `d8b2116a`.
+- Manual pixel-level comparison against the owner's reference screenshots and physical Android acceptance remain open. Automated browser checks do not establish pixel-perfect visual fidelity or real-audio acceptance.
