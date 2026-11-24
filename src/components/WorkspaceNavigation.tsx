@@ -119,6 +119,8 @@ export const WorkspaceNavigation: React.FC<Props> = ({
         <button
           type="button"
           className="syn-primary-nav-item syn-primary-nav-more"
+          data-active={selectedPrimary === 'more' ? 'true' : 'false'}
+          aria-current={selectedPrimary === 'more' ? 'page' : undefined}
           aria-haspopup="dialog"
           aria-expanded={advancedOpen}
           onClick={() => setAdvancedOpen(true)}
