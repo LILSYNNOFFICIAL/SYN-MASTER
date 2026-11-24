@@ -1124,3 +1124,9 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 @media (prefers-reduced-motion: reduce) {
   .syn-primary-nav-item { transition:none; }
 }
+
+
+.syn2-fix-label { display:flex; flex-direction:column; align-items:center; gap:1px; line-height:.95; }
+.syn2-fix-label > span { font:900 clamp(17px,2.1vw,24px) var(--syn-font-display); letter-spacing:.11em; }
+.syn2-fix-label small { font:900 12px var(--syn-font-display); letter-spacing:.42em; padding-left:.42em; color:#18314A; }
+.syn2-fix-hint { color:#C4D8E8 !important; font-size:11px !important; font-weight:800; letter-spacing:.14em; }
