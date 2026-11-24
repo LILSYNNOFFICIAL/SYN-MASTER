@@ -113,7 +113,8 @@ const QualityControlView = React.lazy(() =>
 const PluginManagerView = React.lazy(() =>
   import('./components/PluginManagerView').then(({ PluginManagerView }) => ({ default: PluginManagerView })),
 );
-import { ExportModal, SettingsModal } from './components/Modals';
+const ExportModal = React.lazy(() => import('./components/Modals').then(({ ExportModal }) => ({ default: ExportModal })));
+const SettingsModal = React.lazy(() => import('./components/Modals').then(({ SettingsModal }) => ({ default: SettingsModal })));
 import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 import { ImportScreen } from './components/studio/ImportScreen';
 import { FixItStage } from './components/studio/FixItStage';
@@ -2976,29 +2977,37 @@ export default function App() {
         sampleRate={activeTrack?.sampleRate ?? 48000}
         spectrum={postAnalysisState.status === 'ready' ? postAnalysis : activeTrack?.analysis ?? null}
       />
-      <ExportModal
-        open={exportModalOpen}
-        config={exportConfig}
-        rendering={renderingExport}
-        downloadUrl={exportDownloadUrl}
-        downloadFilename={exportDownloadName}
-        deliveryCheck={exportDeliveryCheck}
-        hasTrack={Boolean(activeTrack)}
-        onChange={setExportConfig}
-        onRender={handleRenderExport}
-        onClose={() => setExportModalOpen(false)}
-      />
-      <SettingsModal
-        open={settingsModalOpen}
-        settings={settings}
-        onChange={(next) => {
-          setSettings(next);
-          void saveAppSettings(next);
-        }}
-        onClose={() => setSettingsModalOpen(false)}
-      >
-        <AiProviderPanel />
-      </SettingsModal>
+      {exportModalOpen && (
+        <React.Suspense fallback={null}>
+          <ExportModal
+            open={true}
+            config={exportConfig}
+            rendering={renderingExport}
+            downloadUrl={exportDownloadUrl}
+            downloadFilename={exportDownloadName}
+            deliveryCheck={exportDeliveryCheck}
+            hasTrack={Boolean(activeTrack)}
+            onChange={setExportConfig}
+            onRender={handleRenderExport}
+            onClose={() => setExportModalOpen(false)}
+          />
+        </React.Suspense>
+      )}
+      {settingsModalOpen && (
+        <React.Suspense fallback={null}>
+          <SettingsModal
+            open={true}
+            settings={settings}
+            onChange={(next) => {
+              setSettings(next);
+              void saveAppSettings(next);
+            }}
+            onClose={() => setSettingsModalOpen(false)}
+          >
+            <AiProviderPanel />
+          </SettingsModal>
+        </React.Suspense>
+      )}
     </div>
   );
 }

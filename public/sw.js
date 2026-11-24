@@ -4,7 +4,17 @@ const NEVER_CACHE = /(?:^\/api\/|\.onnx(?:$|\?)|\.ort(?:$|\?)|\/models?\/|\/demu
 const MAX_CACHEABLE_BYTES = 8 * 1024 * 1024;
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    // Prime a minimal installable shell. Hashed JavaScript/CSS assets are cached as
+    // they are fetched after a successful load; AI APIs and model files never enter cache.
+    try {
+      await cache.addAll(['/', '/manifest.webmanifest', '/icons/syn-master-192.png', '/icons/syn-master-512.png']);
+    } catch {
+      // Keep installation resilient when the origin is temporarily unavailable.
+    }
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
@@ -30,8 +40,9 @@ self.addEventListener('fetch', (event) => {
     const cache = await caches.open(CACHE_NAME);
     try {
       const response = await fetch(request);
-      const length = Number(response.headers.get('content-length') || 0);
-      const cacheable = response.ok && (!length || length <= MAX_CACHEABLE_BYTES);
+      const lengthHeader = response.headers.get('content-length');
+      const length = lengthHeader === null ? Number.POSITIVE_INFINITY : Number(lengthHeader);
+      const cacheable = response.ok && Number.isFinite(length) && length >= 0 && length <= MAX_CACHEABLE_BYTES;
       if (cacheable) await cache.put(request, response.clone());
       return response;
     } catch {

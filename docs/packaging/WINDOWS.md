@@ -1,23 +1,25 @@
-# Windows desktop packaging plan
+# Windows desktop packaging
 
-## What exists today
+## Current implementation
 
-The repository already builds and tests `syn-plugin-host.exe`, `syn-plugin-scanner.exe`, and `syn-plugin-worker.exe`. These are the native VST3 companion, not the SYN MASTER workstation. The main application remains the browser UI; `server.ts` owns the Express API and static-file delivery.
+The first Electron-based workstation shell and unsigned NSIS x64 installer pipeline are now in the repository. Electron starts the Express production runtime on a random loopback port, injects a per-launch bearer token through a narrow preload IPC bridge, opens the browser workstation inside an isolated renderer, and launches the native VST3 companion when its staged binaries are present. It uses Electron 45.4.1 and electron-builder 26.17.0.
 
-## Required lifecycle work
+The native companion remains independently built: syn-plugin-host.exe, syn-plugin-scanner.exe, and syn-plugin-worker.exe. The desktop preparation script stages these binaries, the built Vite application, and a bundled production Express server before electron-builder produces the NSIS installer.
 
-A complete workstation installer must package and verify:
+The app requests authenticated graceful shutdown from the VST3 host before a bounded forced-stop fallback. The native validation harness verifies the shutdown endpoint returns HTTP 202 and the host process exits with code 0.
 
-- The React/Vite production build and a managed local Express server.
-- Loopback-only API binding and a secure browser-to-local-server boundary.
-- FFmpeg availability plus codec licensing and redistribution decisions.
-- Native host/scanner/worker, VST3 plugin paths, process supervision and shutdown.
-- WASAPI device selection and recovery when devices disappear.
-- User/project data preservation, upgrades, uninstall, code signing and release distribution.
-- An installed-app smoke test: launch, import audio, play, render, export and close cleanly.
+## Pipeline
 
-## Packaging direction
+The Windows workflow builds the native VST3 companion, runs plugin discovery/audio/fault-isolation checks, builds the React app and server runtime, then produces an unsigned Windows x64 NSIS installer. The installer artifact is not code-signed.
 
-Electron is the first candidate for a packaging spike because the app already depends on Node/Express and the native host is a separate Windows executable. Tauri remains a smaller-shell alternative but still needs a defined Node server lifecycle and native-host integration. This is a provisional direction, not a completed EXE or installer.
+## Remaining release gates
 
-Do not mark desktop packaging complete from the native VST3 CI artifact. A signed installer and an end-to-end Windows acceptance run are required.
+- Verify the Windows workflow completes and inspect the uploaded installer artifact.
+- Install and launch that artifact on a real Windows 11 x64 machine.
+- Test import, playback, seek, Fix All, cancellation/rollback, export, WASAPI selection/recovery, VST3 discovery/hosting, and clean app shutdown.
+- Verify app data survives upgrade and uninstall behaviour is correct.
+- Decide FFmpeg redistribution and codec licensing; confirm any external FFmpeg deployment or runtime dependency.
+- Add release signing and installer provenance before public distribution.
+- Validate native host startup failure, server startup failure, occupied port recovery, and app forced termination.
+
+Do not equate a successful compiler or installer build with an installed-app acceptance pass.

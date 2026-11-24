@@ -390,7 +390,7 @@ The live `/api/health` response only verifies configuration presence, not full A
 
 ## Parallel execution update — November 23, 2026
 
-- [x] **Production Gemini access gate (server-side):** production `/api/ai/*` routes now have a separate bearer-token gate in `src/server/aiAccess.ts`. The gate fails closed when the configured token is absent/too short, rejects missing or incorrect credentials before JSON parsing/Gemini work, and compares credentials with a constant-time byte comparison. The Gemini API key remains server-only. Middleware regression tests are included. The browser Settings field and production secret wiring are the next commit; this source change alone is not a deploy-ready configuration.
+- [x] **Production Gemini access gate:** server-side bearer validation, built-in Gemini Settings token entry, session/local persistence controls, and non-billable production-mode route tests are committed. The Gemini key remains server-only. Production secret configuration and hosted Cloud Run/AI Studio validation remain open.
 - [ ] **Hosted deployment verification:** set the separate `SYN_MASTER_AI_ACCESS_TOKEN` deployment secret, sync the source into AI Studio, inspect Cloud Run/IAM/IAP, and verify unauthorized calls are rejected without billable Gemini usage.
 
 
@@ -408,10 +408,13 @@ The live `/api/health` response only verifies configuration presence, not full A
 **CI hardening follow-up:** Web CI now runs the JavaScript bundle budget check after production build and starts production with a throwaway test-only `SYN_MASTER_AI_ACCESS_TOKEN`. Its smoke test posts empty (invalid, non-billable) payloads to both `/api/ai/master` and `/api/ai/refine`: unauthenticated requests must receive 401, while the valid test bearer token must pass the gate and reach payload validation (400). This validates the server boundary without sending a Gemini request. The test-only token is not a repository secret and is not reused for deployment.
 
 
-- [x] **Windows desktop shell scaffold:** `desktop/main.cjs` starts the bundled Express server on a randomly selected loopback port, generates a per-launch AI access token (passed to the renderer only through a narrow preload IPC bridge), and starts/pairs the native VST3 companion when its three binaries are staged. The native pairing file is deleted after the HTTP listener is confirmed ready. This is source scaffolding; packaging scripts, CI installer build, Windows smoke tests, signing, and user-device validation are still open.
+- [x] **Windows desktop packaging scaffold:** Electron shell, bundled Express runtime build, staged native VST3 companions, NSIS x64 installer config, CI installer job, localhost-only server binding, per-launch AI token, automatic VST3 pairing, and authenticated graceful host shutdown are committed. The Windows job is now building this package; only a successful uploaded installer artifact will count as build-verified. Code signing, installed-app smoke tests, and physical Windows acceptance remain open.
 
 
 **Desktop runtime resilience:** the Electron shell waits for the native host HTTP listener after reading the pairing file (the native host writes that file before listening), and continues in browser-only mastering mode with a visible warning if the VST3 companion cannot start. The loopback port allocator retries distinct ports without leaving its Promise pending.
 
 
 **Native companion cleanup:** the VST3 host now exposes `POST /v1/host/shutdown` only to the current bearer session. It signals the host's normal shutdown loop, which stops audition, unloads plugin workers, and stops its HTTP/WebSocket listeners. The Windows validation script now verifies HTTP 202 and a clean process exit; Electron requests this graceful shutdown before its bounded forced-stop fallback.
+
+- [x] **First-load chunking:** Export and Preferences dialogs now use React lazy imports and mount only when opened, keeping the initial workstation bundle from loading those dialog modules up front. The updated JS chunk sizes will be recorded from the next Web CI run.
+- [x] **PWA shell caching:** service-worker installation now primes the navigation shell, manifest, and 192/512 icons, and only caches responses with a known content length below 8 MiB. AI endpoints and model files remain excluded.
