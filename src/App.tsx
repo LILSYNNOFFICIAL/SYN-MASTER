@@ -119,6 +119,7 @@ const ExportModal = React.lazy(() => import('./components/Modals').then(({ Expor
 const SettingsModal = React.lazy(() => import('./components/Modals').then(({ SettingsModal }) => ({ default: SettingsModal })));
 import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 import { ImportScreen } from './components/studio/ImportScreen';
+import { StudioWelcome } from './components/studio/StudioWelcome';
 import { FixItStage } from './components/studio/FixItStage';
 import { FxRackWindow } from './components/studio/FxRackWindow';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
@@ -201,7 +202,7 @@ export default function App() {
   const [spectrumMode, setSpectrumMode] = useState<'spectrum' | 'spectrogram'>('spectrum');
   const [fullscreenWorkspace, setFullscreenWorkspace] = useState(false);
   // New one-button flow: import screen first, then the Fix-It stage.
-  const [showWorkstationWithoutTrack, setShowWorkstationWithoutTrack] = useState(false);
+  const [showWorkstationWithoutTrack, setShowWorkstationWithoutTrack] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
   const [fades, setFades] = useState<FadeSettings>(NO_FADES);
   const [targetPresetId, setTargetPresetId] = useState<string | null>(null);
   const [postPeaksHi, setPostPeaksHi] = useState<number[] | null>(null);
@@ -2575,38 +2576,14 @@ export default function App() {
 
           {/* Transport & Waveform Stage (Full waveform on Studio & Reference; compact transport bar on other tabs) */}
           {!activeTrack && (activeTab === 'plugins' || activeTab === 'stems') ? null : !activeTrack ? (
-            <section className="p-8 rounded bg-[#111217] border border-[#D4AF37]/30 flex flex-col items-center text-center gap-4">
-              <img
-                src="/assets/aistudio/SYN_MASTER_Neon_Chrome_Logo_533a2f19.png"
-                alt="SYN MASTER Workstation"
-                referrerPolicy="no-referrer"
-                className="h-24 w-auto object-contain mix-blend-screen"
-              />
-              <div className="max-w-xl">
-                <h1 className="font-display text-2xl font-bold text-[#F7F8FA]">
-                  Load Audio to Begin Mastering
-                </h1>
-                <p className="mt-1.5 text-sm text-[#9CA3AF]">
-                  Import a WAV, FLAC, MP3, AAC, or OGG file from the left library, or load our synthesized 118 BPM multi-stem mix to test real-time DSP, ITU-R BS.1770 LUFS metering, and AI mastering immediately.
-                </p>
-              </div>
-              <div className="flex flex-wrap justify-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleLoadDemoSource('main-mix')}
-                  className="px-5 py-2.5 rounded bg-[#D4AF37] text-[#070709] text-xs font-bold hover:bg-[#F2CA52]"
-                >
-                  Load Demo Mix (118 BPM)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleLoadDemoSource('sine-sweep')}
-                  className="px-4 py-2.5 rounded bg-[#181A22] border border-[#2E3240] text-xs font-semibold text-[#F7F8FA] hover:border-[#D4AF37]"
-                >
-                  Load Calibration Sweep
-                </button>
-              </div>
-            </section>
+            <StudioWelcome
+              projectCount={projects.length}
+              processorCount={chain.length}
+              presetCount={MASTERING_PRESETS.length}
+              onDemo={() => handleLoadDemoSource('main-mix')}
+              onCalibration={() => handleLoadDemoSource('sine-sweep')}
+              onOpenAI={() => setActiveTab('ai')}
+            />
           ) : activeTab === 'studio' ? null : activeTab === 'reference' ? (
             <section className="p-3.5 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
               {/* Track Metadata + A/B Switch */}
