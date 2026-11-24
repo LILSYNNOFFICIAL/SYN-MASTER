@@ -7,6 +7,9 @@ on:
       - 'server.ts'
       - 'package.json'
       - 'vite.config.ts'
+      - 'index.html'
+      - 'public/**'
+      - 'scripts/check-bundle-budget.mjs'
       - 'tsconfig.json'
       - '.github/workflows/web-ci.yml'
   push:
@@ -16,6 +19,9 @@ on:
       - 'server.ts'
       - 'package.json'
       - 'vite.config.ts'
+      - 'index.html'
+      - 'public/**'
+      - 'scripts/check-bundle-budget.mjs'
       - 'tsconfig.json'
       - '.github/workflows/web-ci.yml'
   workflow_dispatch:
