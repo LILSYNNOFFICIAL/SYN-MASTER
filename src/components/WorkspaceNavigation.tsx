@@ -142,7 +142,7 @@ export const WorkspaceNavigation: React.FC<Props> = ({
           <aside className="syn-workspace-menu" role="dialog" aria-modal="true" aria-label="Advanced SYN MASTER workspaces">
             <div className="syn-workspace-menu-header">
               <div>
-                <div className="syn-workspace-menu-brand">SYN MASTER</div>
+                <div className="syn-workspace-menu-brand">SYN-MASTER</div>
                 <div className="syn-workspace-menu-caption">Advanced workspaces</div>
               </div>
               <button type="button" className="syn-workspace-menu-close" aria-label="Close menu" onClick={() => setAdvancedOpen(false)}>
