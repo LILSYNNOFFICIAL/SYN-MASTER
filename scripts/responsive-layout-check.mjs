@@ -78,7 +78,7 @@ async function inspectLayout(page, width, workspace) {
 
   assert.equal(report.viewport, width, `${workspace}: browser viewport mismatch`);
   assert.ok(report.documentWidth <= width + 1, `${workspace} at ${width}px: document width ${report.documentWidth} exceeds viewport`);
-  assert.ok(report.workstationWidth <= report.workstationClientWidth + 1, `${workspace} at ${width}px: workstation overflows horizontally`);
+  assert.ok(report.workstationWidth <= report.workstationClientWidth + 1, `${workspace} at ${width}px: workstation overflows horizontally: ${JSON.stringify(report)}`);
   assert.ok(report.mainWidth <= report.mainClientWidth + 1, `${workspace} at ${width}px: main workspace overflows horizontally`);
   assert.ok(report.footerWidth <= report.footerClientWidth + 1, `${workspace} at ${width}px: meter bridge overflows horizontally`);
   assert.deepEqual(report.offenders, [], `${workspace} at ${width}px: visible elements escape the viewport: ${JSON.stringify(report.offenders)}`);
