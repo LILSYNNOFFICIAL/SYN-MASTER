@@ -442,9 +442,8 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
         }
       }
 
-      const freqMarkers = [30, 60, 100, 250, 500, 1000, 2000, 5000, 10000, 16000];
-      ctx.font = '10px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
+      const freqMarkers = [30, 60, 100, 250, 500, 1000, 2000, 5000, 10000, 20000];
+      ctx.font = w < 420 ? '8px "JetBrains Mono", monospace' : '10px "JetBrains Mono", monospace';
       for (const fm of freqMarkers) {
         const x = freqToX(fm);
         ctx.strokeStyle = 'rgba(255,255,255,0.06)';
