@@ -505,3 +505,20 @@ Owner feedback round 2 ("more blue glow everywhere"). Skin lives in `src/skin/sk
 - [ ] Plugins & Host tab restyle (companion status, scanned plugins, add-to-chain, parameters/editor button).
 - [ ] Re-run `scripts/responsive-layout-check.mjs` in CI (updated for the new layout; passed locally at 360–1440 px, the run did not exit cleanly afterwards) and final screenshots.
 - **Re-import into AI Studio:** pull `main`, import the GitHub repo into Google AI Studio, then build and republish. No new build steps: same entry files, assets live in `public/`.
+
+## ChatGPT handoff — next steps (Nov 24, 2026, after commit 9e58e66)
+
+Current state: GUI redesign rounds 1–3 are on `main` (skin in `src/skin/skin.css`, guided 1–4 console flow, TimelinePlayer with seek + S-curve fades, real EQ waveform blanket, Ask AI under FIX ALL, Ozone-style imager, live QC loudness, Dynamic EQ tab, Mode sent to the AI as its own line). Build, lint and 215/215 tests pass. See the "GUI redesign status" sections above.
+
+Open items, in priority order:
+1. **Verify in a real browser:** a full WAV export contains the timeline fades and the Dynamic EQ (unit tests cover the render path, but no download has been clicked through). Run Fix All end to end with the new Mode line.
+2. **Dynamic EQ ratio knob:** the engine ratio is fixed at about 2.9:1 and the band only cuts. Add a ratio param (and optional boost) in the DSP behind defaults that keep the current output bit-identical, then expose it in the Dynamic EQ tab.
+3. **EQ live preview jump:** the drag-time estimate ignores the limiter/maximizer, so the waveform jumps and then settles. Estimate post-limiter level, or hold the previous size while dragging.
+4. **Mobile checks:** drag-seek on a real phone, mobile menubar dropdown positions, glow performance on slow devices, prefers-reduced-motion.
+5. **Live spectrum sample rate:** it assumes a 48 kHz context, so read `audioContext.sampleRate`.
+6. **AI Assistant page:** reskinned only. Rebuild its layout to match the console.
+7. **Plugins & Host tab + Windows companion:** restyle the tab (connection status, plugin list, add-to-chain, params, Open Editor). Give the companion window a JUCE LookAndFeel in the same skin. Add a release workflow `.github/workflows/windows-companion-release.yml` and tag v0.1.0. Ports: HTTP 127.0.0.1:47832, WS 127.0.0.1:47833; pairing code SYN-XXXX-XXXX. See docs/VST_COMPANION.md.
+8. **BYO-AI leftovers:** shimmer calibration on real audio, best-candidate fallback when every pass is rejected, BYO docs, and checking that the model names (`claude-sonnet-4-5`, `grok-4`) are current.
+9. **Cleanup:** leftover old-dashboard CSS and the duplicate `:root` block in `src/index.css`, and native `assert` tests.
+
+Rules: commit small working changes straight to `main`. Stay AI Studio compatible: same entry files, assets under `public/`, no new backend or build steps, Gemini key server-only. Don't change the DSP defaults, the default Gemini provider, or the Fix-All verification loop unless an item says to. Run `npm run lint`, `npm run build` and `npx tsx --test` on touched tests. Update this README as you go.
