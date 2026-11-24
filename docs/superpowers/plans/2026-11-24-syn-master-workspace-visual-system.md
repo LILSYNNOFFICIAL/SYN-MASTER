@@ -90,11 +90,11 @@
 
 ### Task 4: Whole-application review
 
-- [ ] Re-read all changed files and the complete diff through GitHub.
-- [ ] Verify current `main` head and no unintended files or branch changes.
-- [ ] Run latest Web CI and inspect all jobs/logs.
-- [ ] Check Windows native workflow status separately; report it independently from web UI verification.
-- [ ] Record any unverified visual/manual-audio acceptance items honestly.
+- [x] Re-read all changed files and the complete diff through GitHub.
+- [x] Verify current `main` head and no unintended files or branch changes.
+- [x] Run latest Web CI and inspect all jobs/logs.
+- [x] Check Windows native workflow status separately; report it independently from web UI verification.
+- [x] Record any unverified visual/manual-audio acceptance items honestly.
 
 
 ## Execution notes
@@ -107,3 +107,4 @@
 - The Analysis Lab tabs and AI signal visualization remain usable on narrow mobile widths.
 - Latest completed web verification at the time of this plan update: workflow [45461173378](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/runs/45461173378), success on source revision `d8b2116a`.
 - Manual pixel-level comparison against the owner's reference screenshots and physical Android acceptance remain open. Automated browser checks do not establish pixel-perfect visual fidelity or real-audio acceptance.
+- Windows native workflow `45460632844` was checked separately: CMake configuration succeeded; native host/scanner/worker/VST3/core-test compilation was still in progress at the last status check.
