@@ -77,3 +77,25 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-console-bottom [aria-current="page"],.syn-console-bottom .is-active{color:var(--skin-gold) !important;}
 
 @media (prefers-reduced-motion:reduce){.syn-fixai.is-running{animation:none}.syn-fixai{transition:none}}
+
+/* ==========================================================================
+   GLOBAL LAYER SCALE (one source of truth). Overlays render through
+   src/ui/Portal.tsx into document.body, so these values compare directly.
+   ========================================================================== */
+:root{
+  --z-base:0; --z-content:1; --z-sticky:20;
+  --z-bottombar:60; --z-header:70; --z-menubar:900;
+  --z-drawer:1000; --z-float:1100; --z-modal:1200; --z-popover:1300; --z-toast:1400;
+}
+.syn-workstation > .syn-app-header{position:relative;z-index:var(--z-header) !important;}
+.syn-workstation > .syn-app-header:has(.syn-menu-group[open]),
+.syn-workstation > .syn-app-header:has(.syn-mobile-menu-toggle:checked){z-index:var(--z-menubar) !important;}
+.syn-daw-global-tabs,.syn-workstation > .syn-bottom-tabs{z-index:var(--z-bottombar) !important;}
+.syn-daw-global-tabs .syn-primary-nav-more,.syn-daw-global-tabs [role="menu"]{z-index:auto !important;}
+.syn-library-backdrop{z-index:calc(var(--z-drawer) - 1) !important;}
+.syn-library-drawer{z-index:var(--z-drawer) !important;}
+.syn-workspace-menu-backdrop{z-index:calc(var(--z-drawer) - 1) !important;}
+.syn-workspace-menu{z-index:var(--z-drawer) !important;}
+.syn2-float{z-index:var(--z-float) !important;}
+.syn-modal-backdrop{z-index:var(--z-modal) !important;}
+.syn2-addmenu-pop{z-index:var(--z-popover) !important;}

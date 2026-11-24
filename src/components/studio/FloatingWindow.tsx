@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Minus, X, Maximize2 } from 'lucide-react';
+import { Portal } from '../../ui/Portal';
 
 interface Rect {
   x: number;
@@ -87,6 +88,7 @@ export const FloatingWindow: React.FC<Props> = ({ id, title, open, onClose, init
 
   if (!open) return null;
   return (
+    <Portal>
     <div
       className="syn2-float"
       role="dialog"
@@ -113,5 +115,6 @@ export const FloatingWindow: React.FC<Props> = ({ id, title, open, onClose, init
         </>
       )}
     </div>
+    </Portal>
   );
 };

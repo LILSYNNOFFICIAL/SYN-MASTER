@@ -1,6 +1,7 @@
 import React from 'react';
 import { Download, X } from 'lucide-react';
 import type { AppSettings, ExportConfig } from '../types/mastering';
+import { Portal } from '../ui/Portal';
 import { changeViewMode, parseViewMode, readViewMode } from '../ui/viewMode';
 
 interface ExportModalProps {
@@ -45,9 +46,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   return (
+    <Portal>
     <div role="dialog" aria-modal="true" aria-label="Export Master Audio"
-      className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-xl bg-[#090806] border border-[#D4AF37]/70 shadow-[0_24px_90px_rgba(0,0,0,.8)]">
+      className="syn-modal-backdrop syn-export-backdrop fixed inset-0 bg-black/85 flex items-center justify-center p-4"
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+      <div className="syn-modal syn-export-modal w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-xl bg-[#090806] border border-[#D4AF37]/70 shadow-[0_24px_90px_rgba(0,0,0,.8)]">
         <div className="sticky top-0 z-10 px-5 py-4 border-b border-[#5A4519] flex items-center justify-between bg-[#100D06]">
           <div>
             <h2 className="text-sm font-black text-[#F2CA52] uppercase tracking-[.16em]">SYN-RENDER · High-Quality Export</h2>
@@ -297,6 +300,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
       </div>
     </div>
+    </Portal>
   );
 };
 
@@ -319,13 +323,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!open) return null;
 
   return (
+    <Portal>
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Workstation Settings"
-      className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+      className="syn-modal-backdrop syn-settings-backdrop fixed inset-0 bg-black/75 flex items-center justify-center p-4"
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
     >
-      <div className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded bg-[#111217] border border-[#D4AF37]/45 shadow-2xl">
+      <div className="syn-modal syn-settings-modal w-full max-w-lg max-h-[92vh] overflow-y-auto rounded bg-[#111217] border border-[#D4AF37]/45 shadow-2xl">
         <div className="px-5 py-3.5 border-b border-[#242732] flex items-center justify-between bg-[#151720]">
           <h2 className="text-sm font-bold text-[#F2CA52] uppercase tracking-wider">
             Workstation Preferences
@@ -409,5 +415,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
       </div>
     </div>
+    </Portal>
   );
 };

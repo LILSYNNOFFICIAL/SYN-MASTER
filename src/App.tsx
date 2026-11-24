@@ -122,6 +122,7 @@ import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 import { WorkspaceHero } from './components/WorkspaceHero';
 import { ImportScreen } from './components/studio/ImportScreen';
 import { MasterConsole } from './components/console/MasterConsole';
+import { Portal } from './ui/Portal';
 import { FixItStage } from './components/studio/FixItStage';
 import { FxRackWindow } from './components/studio/FxRackWindow';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
@@ -2557,6 +2558,7 @@ export default function App() {
 
       {/* Main 3-Column Workstation Body */}
       <div className={`syn-daw-body flex-1 lg:min-h-0 flex flex-col lg:flex-row lg:overflow-hidden${fullscreenWorkspace ? ' is-fullscreen' : ''}`}>
+        <Portal>
         {libraryOpen && (
           <button type="button" className="syn-library-backdrop" aria-label="Close audio library" onClick={() => setLibraryOpen(false)} />
         )}
@@ -2582,6 +2584,7 @@ export default function App() {
           />
           </div>
         )}
+        </Portal>
 
         {/* Center Mastering Stage */}
         <main data-layout={activeTab} data-syn-skin={activeTab === 'studio' ? 'studio' : 'instrument'} data-workspace={activeTab} className="syn-daw-main lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">

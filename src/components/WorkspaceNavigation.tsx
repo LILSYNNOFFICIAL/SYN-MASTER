@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import type { WorkspaceTab } from '../types/mastering';
+import { Portal } from '../ui/Portal';
 
 type Props = {
   activeTab: WorkspaceTab;
@@ -131,7 +132,7 @@ export const WorkspaceNavigation: React.FC<Props> = ({
       </nav>
 
       {advancedOpen && (
-        <>
+        <Portal>
           <button
             type="button"
             className="syn-workspace-menu-backdrop"
@@ -179,7 +180,7 @@ export const WorkspaceNavigation: React.FC<Props> = ({
             </nav>
             <div className="syn-workspace-menu-footer">ADVANCED TOOLS · SESSION WORKSPACES</div>
           </aside>
-        </>
+        </Portal>
       )}
     </div>
   );
