@@ -426,6 +426,8 @@ export type ExportAudioFormat = 'wav' | 'mp3' | 'ogg' | 'flac' | 'm4a' | 'mid' |
 export interface ExportConfig {
   filename: string;
   format: ExportAudioFormat;
+  /** Audio/MIDI outputs to include in the next ZIP package. */
+  selectedFormats?: ExportAudioFormat[];
   wavBitDepth: 16 | 24 | 32;
   flacBitDepth?: 16 | 24;
   flacCompression?: number;
