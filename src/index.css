@@ -799,7 +799,8 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 .syn-mobile-command-menu > .syn-menubar { display: flex !important; }
 
 @media (max-width: 1023px) {
-  .syn-app-header {
+  .syn-app-header,
+  .syn-workstation > header.syn-app-header {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
@@ -875,7 +876,8 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   }
   .syn-mobile-command-menu .syn-menu-group[open] > .syn-menu-panel { display: flex; }
   .syn-mobile-command-menu .syn-menu-panel button { min-height: 40px; white-space: normal; }
-  .syn-app-header > div:last-child { grid-column: 3; grid-row: 1; min-width: 0; }
+  .syn-app-header > div:last-child,
+  .syn-workstation > header.syn-app-header > div:last-child { grid-column: 3; grid-row: 1; min-width: 0; }
   .syn-header-export { min-height: 40px; padding: 0 12px !important; font-size: 11px !important; }
   .syn-daw-body,
   .syn-daw-body.is-fullscreen { display: flex; flex-direction: column; min-width: 0; }
@@ -934,7 +936,8 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   .syn-workstation > footer { position: sticky; bottom: 0; z-index: 30; width: 100%; padding-bottom: env(safe-area-inset-bottom, 0px); }
 }
 @media (max-width: 767px) {
-  .syn-app-header { grid-template-columns: minmax(0, 1fr) auto auto; padding-inline: 9px; gap: 6px; }
+  .syn-app-header,
+  .syn-workstation > header.syn-app-header { grid-template-columns: minmax(0, 1fr) auto auto; padding-inline: 9px; gap: 6px; }
   .syn-app-header > div:first-child { gap: 5px; }
   .syn-app-header > div:first-child span { font-size: 12px; }
   .syn-header-export { padding-inline: 10px !important; }
