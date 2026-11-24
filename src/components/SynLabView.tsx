@@ -94,7 +94,7 @@ export const SynLabView: React.FC<Props> = React.memo(({
             mode="spectrum"
             heightClass="h-64"
           />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="p-3.5 rounded bg-[#111217] border border-[#232632]">
               <h3 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37] mb-2.5">
                 Spectral Zone Balance (Pre vs Master)
@@ -105,9 +105,9 @@ export const SynLabView: React.FC<Props> = React.memo(({
                   const delta = z.post - z.pre;
                   return (
                     <div key={z.label} className="flex flex-col gap-1">
-                      <div className="flex justify-between text-[11px] font-mono-tabular">
-                        <span className="text-[#C5CDD8]">{z.label}</span>
-                        <span className="text-[#F7F8FA]">
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3 text-[11px] font-mono-tabular min-w-0">
+                        <span className="min-w-0 break-words text-[#C5CDD8]">{z.label}</span>
+                        <span className="text-right whitespace-nowrap text-[#F7F8FA]">
                           {z.post.toFixed(1)} dB ({delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1)})
                         </span>
                       </div>
@@ -135,11 +135,11 @@ export const SynLabView: React.FC<Props> = React.memo(({
                   {active.resonances.map((r, i) => (
                     <div
                       key={`${r.freqHz}-${i}`}
-                      className="flex items-center justify-between text-xs font-mono-tabular py-1 border-b border-[#1D202A]"
+                      className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 text-xs font-mono-tabular py-1 border-b border-[#1D202A]"
                     >
-                      <span className="text-[#F7F8FA]">{r.freqHz} Hz</span>
-                      <span className="text-[#F59E0B]">+{r.excessDb} dB peak</span>
-                      <span className="uppercase text-[10px] text-[#9CA3AF]">{r.severity}</span>
+                      <span className="min-w-0 whitespace-nowrap text-[#F7F8FA]">{r.freqHz} Hz</span>
+                      <span className="whitespace-nowrap text-right text-[#F59E0B]">+{r.excessDb} dB peak</span>
+                      <span className="col-span-2 sm:col-span-1 text-right uppercase text-[10px] text-[#9CA3AF]">{r.severity}</span>
                     </div>
                   ))}
                 </div>
