@@ -41,7 +41,7 @@ export const SynLabView: React.FC<Props> = React.memo(({
 
   if (!active || !preAnalysis) {
     return (
-      <div data-testid="workspace-empty-state" data-workspace="lab" className="syn-workspace-empty p-8 rounded bg-[#111217] border border-[#242732] text-center">
+      <div data-testid="workspace-empty-state" data-workspace="lab" data-syn-skin="instrument" className="syn-workspace-empty p-8 rounded bg-[#111217] border border-[#242732] text-center">
         <p className="text-sm font-semibold text-[#F7F8FA]">SYN MASTER LAB</p>
         <p className="mt-1 text-xs text-[#9CA3AF]">
           Import an audio file or load the Demo Mix to inspect Frequency, Dynamics, Stereo, and Distortion diagnostics.
@@ -61,7 +61,7 @@ export const SynLabView: React.FC<Props> = React.memo(({
   ];
 
   return (
-    <div className="flex flex-col gap-4">
+    <div data-syn-skin="instrument" data-workspace="lab" className="syn-lab-workspace flex flex-col gap-4">
       {/* Sub-lab selector */}
       <div className="syn-lab-tab-nav flex items-center gap-1 p-1 rounded bg-[#111217] border border-[#242732] w-fit">
         {(
