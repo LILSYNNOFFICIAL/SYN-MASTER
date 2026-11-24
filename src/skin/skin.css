@@ -1,0 +1,79 @@
+/* SYN-MASTER skin layer. Presentation only. Imported after index.css. */
+:root{
+  --skin-base:#060608; --skin-glass:rgba(10,10,14,.72); --skin-glass-2:rgba(16,16,22,.82);
+  --skin-gold:#F5B82E; --skin-gold-bright:#FFF3CC; --skin-gold-dim:#8A6508;
+  --skin-gold-line:rgba(245,184,46,.45); --skin-gold-glow:rgba(245,184,46,.28);
+  --skin-blue:#2EA8FF; --skin-cyan:#3FE0FF; --skin-magenta:#E040FB; --skin-purple:#8B5CF6;
+  --skin-text:#F7F1E2; --skin-muted:#B6A780; --skin-radius:20px;
+}
+body{background:var(--skin-base) !important;color:var(--skin-text);}
+
+/* Header */
+.syn-app-header{background:linear-gradient(180deg,rgba(8,8,10,.96),rgba(8,8,10,.82)) !important;
+  border-bottom:1px solid var(--skin-gold-line) !important;box-shadow:0 1px 18px var(--skin-gold-glow);backdrop-filter:blur(8px);}
+.syn-header-project,.syn-header-lufs{color:var(--skin-gold) !important;letter-spacing:.08em;}
+
+/* Console background art */
+.syn-console{background:var(--skin-base) url('/skin/bg-desktop.webp') center/cover no-repeat fixed !important;}
+@media (max-width:1023px){.syn-console{background-image:url('/skin/bg-mobile.webp') !important;background-attachment:scroll !important;}}
+.syn-console-ribbons,.syn-ribbons{opacity:.35;}
+
+/* Glass cards */
+.syn-card,.syn-eq-panel{background:var(--skin-glass) !important;border:1px solid var(--skin-gold-line) !important;
+  border-radius:var(--skin-radius) !important;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  box-shadow:0 0 0 1px rgba(0,0,0,.4) inset,0 0 22px var(--skin-gold-glow),0 10px 30px rgba(0,0,0,.55);}
+.syn-card-title,.syn-eq-title{color:var(--skin-gold) !important;text-transform:uppercase;letter-spacing:.14em;font-size:.72rem;font-weight:700;}
+.syn-eq-sub,.syn-card-note,.syn-preset-desc{color:var(--skin-muted) !important;}
+
+/* Arc knob */
+.syn-arcknob-ring{fill:none;stroke:var(--skin-gold);stroke-width:2.2;filter:drop-shadow(0 0 5px var(--skin-gold-glow));}
+.syn-arcknob-cap{fill:#0d0d12;stroke:#2a2418;stroke-width:1;}
+.syn-arcknob-track{fill:none;stroke:rgba(255,255,255,.08);stroke-width:6;stroke-linecap:round;}
+.syn-arcknob-arc{fill:none;stroke:var(--skin-cyan);stroke-width:6;stroke-linecap:round;filter:drop-shadow(0 0 6px var(--skin-blue)) drop-shadow(0 0 2px var(--skin-cyan));}
+.syn-arcknob-tip{fill:#fff;filter:drop-shadow(0 0 4px var(--skin-cyan));}
+.syn-arcknob-value,.syn-arcknob-readout{color:#fff !important;font-variant-numeric:tabular-nums;font-weight:700;}
+.syn-arcknob-unit{color:var(--skin-gold) !important;font-size:.7em;margin-left:2px;}
+.syn-arcknob-label,.syn-arcknob-caption{color:var(--skin-gold) !important;text-transform:uppercase;letter-spacing:.12em;font-size:.68rem;}
+.syn-arcknob-range{color:var(--skin-muted) !important;font-size:.65rem;}
+
+/* FIX ALL AI */
+.syn-fixai{position:relative;border-radius:50% !important;background:radial-gradient(circle at 50% 40%,#1b1710 0%,#0a0a0d 62%,#050506 100%) !important;
+  border:2px solid var(--skin-gold) !important;box-shadow:0 0 0 6px rgba(245,184,46,.10),0 0 0 8px var(--skin-gold-line),0 0 38px var(--skin-gold-glow),inset 0 0 26px rgba(245,184,46,.18) !important;
+  color:var(--skin-gold) !important;min-width:44px;min-height:44px;transition:transform .15s ease,box-shadow .2s ease;}
+.syn-fixai:hover{transform:scale(1.02);box-shadow:0 0 0 6px rgba(245,184,46,.14),0 0 0 8px var(--skin-gold),0 0 52px rgba(245,184,46,.4),inset 0 0 30px rgba(245,184,46,.25) !important;}
+.syn-fixai-ring{border-color:var(--skin-gold-line) !important;}
+.syn-fixai-text span{color:var(--skin-gold-bright);letter-spacing:.18em;font-size:.72rem;}
+.syn-fixai-text strong{color:var(--skin-gold) !important;text-shadow:0 0 14px var(--skin-gold-glow);}
+.syn-fixai-icon{color:var(--skin-gold) !important;filter:drop-shadow(0 0 6px var(--skin-gold-glow));}
+.syn-fixai-wave path,.syn-fixai-wave polyline{stroke:var(--skin-cyan) !important;filter:drop-shadow(0 0 3px var(--skin-blue));}
+.syn-fixai-status{color:var(--skin-muted) !important;}
+.syn-fixai.is-running{animation:skin-pulse 1.6s ease-in-out infinite;}
+@keyframes skin-pulse{0%,100%{box-shadow:0 0 0 8px var(--skin-gold-line),0 0 30px var(--skin-gold-glow)}50%{box-shadow:0 0 0 8px var(--skin-gold),0 0 60px rgba(245,184,46,.55)}}
+
+/* Faders */
+.syn-fader-track{background:rgba(255,255,255,.07) !important;border-radius:999px;}
+.syn-fader-fill{background:linear-gradient(90deg,var(--skin-blue),var(--skin-cyan)) !important;box-shadow:0 0 10px var(--skin-blue);border-radius:999px;}
+.syn-fader-cap{background:var(--skin-gold) !important;box-shadow:0 0 8px var(--skin-gold-glow);border:1px solid var(--skin-gold-bright);}
+.syn-fader-label{color:var(--skin-muted) !important;} .syn-fader-value{color:#fff !important;font-variant-numeric:tabular-nums;}
+
+/* Loudness */
+.syn-loud-bar{background:linear-gradient(90deg,var(--skin-blue),var(--skin-cyan),var(--skin-magenta)) !important;box-shadow:0 0 10px rgba(46,168,255,.5);}
+.syn-loud-value{color:#fff !important;} .syn-loud-target{color:var(--skin-gold) !important;}
+.syn-progress{accent-color:var(--skin-gold);}
+
+/* EQ glow */
+.syn-eq-panel svg path{filter:drop-shadow(0 0 4px rgba(224,64,251,.55));}
+.syn-eq-panel svg circle{filter:drop-shadow(0 0 4px var(--skin-cyan));}
+
+/* Buttons & inputs */
+.syn-btn-ghost,.syn-file-btn,.syn-scope-btn,.syn-card-add{border:1px solid var(--skin-gold-line) !important;color:var(--skin-gold) !important;background:rgba(245,184,46,.06) !important;border-radius:12px !important;min-height:44px;}
+.syn-btn-ghost:hover,.syn-file-btn:hover,.syn-scope-btn:hover,.syn-card-add:hover{background:rgba(245,184,46,.14) !important;box-shadow:0 0 12px var(--skin-gold-glow);}
+.syn-field,.syn-preset-select{background:var(--skin-glass-2) !important;border:1px solid var(--skin-gold-line) !important;color:var(--skin-text) !important;border-radius:10px !important;}
+.syn-seg{border:1px solid var(--skin-gold-line) !important;border-radius:12px !important;}
+.syn-seg [aria-pressed="true"],.syn-seg [aria-selected="true"],.syn-seg .is-active{background:var(--skin-gold) !important;color:#0a0a0a !important;}
+
+/* Mobile bottom bar */
+.syn-console-bottom,nav[class*="bottom"]{background:rgba(8,8,12,.88) !important;border-top:1px solid var(--skin-gold-line) !important;backdrop-filter:blur(10px);}
+.syn-console-bottom [aria-current="page"],.syn-console-bottom .is-active{color:var(--skin-gold) !important;}
+
+@media (prefers-reduced-motion:reduce){.syn-fixai.is-running{animation:none}.syn-fixai{transition:none}}

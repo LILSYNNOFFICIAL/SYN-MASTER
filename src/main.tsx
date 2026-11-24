@@ -1,6 +1,7 @@
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import './skin/skin.css';
 import { MobileViewFrame } from './ui/MobileViewFrame';
 import { applyStoredViewMode } from './ui/viewMode';
 
