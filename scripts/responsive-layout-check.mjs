@@ -164,12 +164,16 @@ async function runViewport(browser, width, height, mobile) {
       ['reference', 'Reference Match'],
       ['qc', 'Quality Control'],
       ['plugins', 'Plugin Manager'],
-      ['studio', 'Mastering Studio'],
+      ['studio', 'Dashboard'],
     ];
 
     for (const [id, label] of workspaces) {
-      await page.locator('.syn-workspace-menu-trigger').click();
-      await page.locator('.syn-workspace-menu-item').filter({ hasText: label }).click();
+      if (id === 'studio') {
+        await page.locator('.syn-primary-nav-item').filter({ hasText: 'Dashboard' }).click();
+      } else {
+        await page.locator('.syn-primary-nav-more').click();
+        await page.locator('.syn-workspace-menu-item').filter({ hasText: label }).click();
+      }
       await page.locator(`main[data-layout="${id}"]`).waitFor({ state: 'attached', timeout: 10000 });
       await delay(120);
       await inspectLayout(page, width, id);
