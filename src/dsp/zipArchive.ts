@@ -21,7 +21,9 @@ async function asBlob(data: ZipFileEntry['data']): Promise<Blob> {
   if (data instanceof Blob) return data;
   if (typeof data === 'string') return new Blob([encoder.encode(data)]);
   if (data instanceof ArrayBuffer) return new Blob([data]);
-  return new Blob([data]);
+  const copy = new Uint8Array(data.byteLength);
+  copy.set(data);
+  return new Blob([copy.buffer]);
 }
 
 async function crc32Blob(blob: Blob): Promise<number> {
@@ -41,6 +43,12 @@ async function crc32Blob(blob: Blob): Promise<number> {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 function write16(view: DataView, offset: number, value: number): void {
   view.setUint16(offset, value, true);
 }
@@ -55,7 +63,7 @@ export async function createZipBlob(entries: ZipFileEntry[]): Promise<Blob> {
   if (entries.length > 0xffff) throw new Error('ZIP archive contains too many files.');
 
   const parts: BlobPart[] = [];
-  const centralParts: Uint8Array[] = [];
+  const centralParts: ArrayBuffer[] = [];
   let offset = 0;
 
   for (const entry of entries) {
@@ -78,7 +86,7 @@ export async function createZipBlob(entries: ZipFileEntry[]): Promise<Blob> {
     write16(localView, 26, name.length);
     write16(localView, 28, 0);
     local.set(name, 30);
-    parts.push(local, data);
+    parts.push(toArrayBuffer(local), data);
     
     const central = new Uint8Array(46 + name.length);
     const centralView = new DataView(central.buffer);
@@ -100,7 +108,7 @@ export async function createZipBlob(entries: ZipFileEntry[]): Promise<Blob> {
     write32(centralView, 38, 0);
     write32(centralView, 42, offset);
     central.set(name, 46);
-    centralParts.push(central);
+    centralParts.push(toArrayBuffer(central));
     offset += local.byteLength + data.size;
   }
 
