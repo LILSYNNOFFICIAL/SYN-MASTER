@@ -1227,3 +1227,6 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 @media(max-width:850px){.syn-workspace-hero{grid-template-columns:minmax(0,1fr) minmax(190px,.75fr);gap:12px}.syn-workspace-hero-art svg{height:118px}}
 @media(max-width:767px){.syn-workspace-hero{grid-template-columns:minmax(0,1fr);gap:12px;min-height:0;padding:16px;border-radius:11px}.syn-workspace-hero h1{font-size:clamp(21px,7vw,29px)}.syn-workspace-hero-art{padding:5px 9px 4px}.syn-workspace-hero-art svg{height:112px;max-height:112px}.syn-workspace-hero-index{right:12px;top:12px}.syn-workspace-hero-copy>p{font-size:9px}}
 @media(prefers-reduced-motion:reduce){.syn-workspace-hero *{scroll-behavior:auto}}
+
+.syn-lab-tab-nav{max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:#3c7899 #0a1520}
+.syn-lab-tab-nav>button{flex:0 0 auto}
