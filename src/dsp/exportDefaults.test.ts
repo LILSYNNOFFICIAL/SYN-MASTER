@@ -6,6 +6,7 @@ test('contract-confirmed default export settings remain unchanged', () => {
   assert.deepEqual(DEFAULT_EXPORT_CONFIG, {
     filename: 'SYN_Master_Output',
     format: 'wav',
+    selectedFormats: ['wav'],
     wavBitDepth: 24,
     flacBitDepth: 24,
     flacCompression: 5,
