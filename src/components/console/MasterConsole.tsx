@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { BrainCircuit, Plus, Square, Upload } from 'lucide-react';
+import { BrainCircuit, MessageSquareText, Plus, Square, Upload } from 'lucide-react';
 import type {
   AudioAnalysis,
   CompressorParams,
@@ -65,6 +65,8 @@ export interface MasterConsoleProps {
   blanketPeaks?: number[] | null;
   /** Timeline player rendered directly under the EQ panel. */
   timeline?: React.ReactNode;
+  /** Opens the AI Assistant (Mastering Director) workspace. Planning / explanations, not the one-click fix. */
+  onAskAi?: () => void;
 }
 
 const LOUDNESS_STAGES: ProcessorType[] = ['limiter', 'maximizer', 'multiband-maximizer', 'clipper', 'dither'];
@@ -204,6 +206,12 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
       <div id="syn-fixai-status" className="syn-fixai-status" role="status" aria-live="polite">
         {p.running ? statusLine : p.hasTrack ? 'AI POWERED · ADAPTIVE · VERIFIED' : 'IMPORT A TRACK TO ENABLE'}
       </div>
+      {p.onAskAi && (
+        <button type="button" className="syn-askai" onClick={p.onAskAi} aria-label="Ask AI: open the AI Assistant to plan, explain and review changes step by step">
+          <MessageSquareText className="w-4 h-4" aria-hidden="true" /> Ask AI
+          <small>Assistant · plan &amp; explain</small>
+        </button>
+      )}
       {p.running && (
         <button type="button" className="syn-fixai-stop" onClick={p.onStop}>
           <Square className="w-3 h-3" /> Stop

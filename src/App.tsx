@@ -2373,6 +2373,7 @@ export default function App() {
       onOpenRack={() => setRackWindowOpen(true)}
       onOpenStereoLab={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
       notice={statusNotice}
+      onAskAi={() => setActiveTab('ai')}
       blanketPeaks={chainBypassed || auditionTarget === 'original' ? prePeaksHi : postPeaksHi ?? prePeaksHi}
       timeline={
         <TimelinePlayer
@@ -2591,14 +2592,6 @@ export default function App() {
               : 'Host: Browser-Only'}
           </button>
           <AiProviderChip onOpen={() => setSettingsModalOpen(true)} />
-          <button
-            type="button"
-            onClick={() => setActiveTab('ai')}
-            className="px-2.5 py-1 rounded bg-[#D4AF37]/15 border border-[#D4AF37]/50 text-xs font-semibold text-[#F2CA52] hover:bg-[#D4AF37] hover:text-[#070709] flex items-center gap-1 whitespace-nowrap"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            AI Assistant
-          </button>
           <button
             type="button"
             aria-label="Open Settings"

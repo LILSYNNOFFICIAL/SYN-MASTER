@@ -38,6 +38,7 @@ import type {
 } from '../types/mastering';
 import type { ExplainableMasterPlan } from '../director/directorEngine';
 import { computeRegionEnergyDb } from '../director/analyzeIntelligence';
+import { LiveSpectrum } from './console/LiveSpectrum';
 import type { MasteringDiagnosticRunSummary } from '../director/tempMasteringWorkspace';
 
 interface Props {
@@ -326,7 +327,7 @@ export const AiMasterView: React.FC<Props> = ({
           <div className="syn-ai-state"><i className={directorRunning ? 'is-running' : ''}/>{directorRunning ? (directorStage || 'OPTIMIZATION IN PROGRESS').toUpperCase() : aiLifecycleState.toUpperCase()}</div>
         </div>
         <div className="syn-ai-mini-visual" data-testid="workspace-hero-graphic" aria-hidden="true">
-          <div className="syn-ai-mini-bars">{Array.from({length:36},(_,i)=><i key={i} style={{'--bar-height':(18+((i*17)%63))+'%'} as React.CSSProperties}/>)}</div>
+          <LiveSpectrum bars={36} height={72} className="syn-ai-livespec" />
           <div className="syn-ai-mini-caption"><span>INPUT</span><b>AI / DSP / QC</b><span>OUTPUT</span></div>
         </div>
         <div className="syn-ai-pipeline">
