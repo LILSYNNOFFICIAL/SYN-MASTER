@@ -139,6 +139,10 @@ async function runViewport(browser, width, height, mobile) {
         const emptyState = page.locator(`[data-testid="workspace-empty-state"][data-workspace="${id}"]`);
         await emptyState.waitFor({ state: 'visible', timeout: 10000 });
         assert.equal(await emptyState.isVisible(), true, `${label} must explain its no-source/no-host state`);
+        const instrumentSurface = page.locator(`[data-syn-skin="instrument"][data-workspace="${id}"]`);
+        assert.equal(await instrumentSurface.isVisible(), true, `${label} must render inside the shared instrument-grade workspace surface`);
+        const heroGraphic = page.locator(`[data-testid="workspace-hero"][data-workspace="${id}"] [data-testid="workspace-hero-graphic"]`);
+        assert.equal(await heroGraphic.isVisible(), true, `${label} must retain its purpose-built instrument graphic`);
       }
       await page.locator('.syn-primary-nav-item').filter({ hasText: 'Dashboard' }).click();
       await page.getByRole('button', { name: /LOAD DEMO SESSION/i }).click({ timeout: 15000 });
