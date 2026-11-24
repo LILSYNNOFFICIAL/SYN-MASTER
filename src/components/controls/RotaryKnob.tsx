@@ -69,7 +69,7 @@ export const RotaryKnob: React.FC<RotaryKnobProps> = ({
   bipolar = false,
   signed,
   size = 'sm',
-  accent = 'cyan',
+  accent = 'gold',
   disabled = false,
   readOnly = false,
   precision,
@@ -135,10 +135,10 @@ export const RotaryKnob: React.FC<RotaryKnobProps> = ({
           formatValue,
         });
 
-  const accentStroke = accent === 'gold' ? '#F2CA52' : '#38BDF8';
-  const accentTip = accent === 'gold' ? '#FDE68A' : '#7DD3FC';
+  const accentStroke = accent === 'gold' ? '#F5B82E' : '#38BDF8';
+  const accentTip = accent === 'gold' ? '#FFF3CC' : '#7DD3FC';
   const accentGlow =
-    accent === 'gold' ? 'rgba(242, 202, 82, 0.35)' : 'rgba(56, 189, 248, 0.38)';
+    accent === 'gold' ? 'rgba(245, 184, 46, 0.38)' : 'rgba(56, 189, 248, 0.38)';
 
   useEffect(() => {
     if (!dragState.active) return;
