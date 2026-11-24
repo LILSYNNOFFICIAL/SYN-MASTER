@@ -2559,7 +2559,13 @@ export default function App() {
             </section>
           )}
           <div className="syn-daw-global-tabs">
-            <WorkspaceNavigation activeTab={activeTab} onSelect={setActiveTab} />
+            <WorkspaceNavigation
+              activeTab={activeTab}
+              onSelect={setActiveTab}
+              onOpenRack={() => setRackWindowOpen(true)}
+              onExport={() => setExportModalOpen(true)}
+              onSettings={() => setSettingsModalOpen(true)}
+            />
           </div>
 
           {activeTab === 'studio' && activeTrack && diagnosticLog && (
