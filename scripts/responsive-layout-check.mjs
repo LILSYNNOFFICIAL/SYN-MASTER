@@ -206,12 +206,11 @@ async function runViewport(browser, width, height, mobile) {
         await page.locator('.syn-primary-nav-more').click();
         await page.locator('.syn-workspace-menu-item').filter({ hasText: label }).click();
       }
-      await page.locator(`main[data-layout="${id}"]`).waitFor({ state: 'attached', timeout: 10000 });
-      await delay(120);
+      await page.locator(`main[data-layout="${id}"]`).waitFor({ state: 'visible', timeout: 10000 });
       if (id !== 'studio') {
         const workspaceHero = page.locator(`[data-testid="workspace-hero"][data-workspace="${id}"]`);
-        assert.equal(await workspaceHero.isVisible(), true, `${label} must display the shared workspace identity header`);
-        assert.equal(await workspaceHero.locator('[data-testid="workspace-hero-graphic"]').isVisible(), true, `${label} must display its workspace-specific graphic`);
+        await workspaceHero.waitFor({ state: 'visible', timeout: 10000 });
+        assert.equal(await workspaceHero.locator('svg[role="img"]').isVisible(), true, `${label} must display its workspace-specific instrument graphic`);
       }
       await inspectLayout(page, width, id);
 
