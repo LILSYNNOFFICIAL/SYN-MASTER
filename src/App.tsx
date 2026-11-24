@@ -1898,6 +1898,41 @@ export default function App() {
     setStatusNotice(`Adjusted chain ceiling & loudness targets for ${activeQcProfile.name}.`);
   };
 
+  const handleSettingsChange = (next: AppSettings) => {
+    const previous = settings;
+    setSettings(next);
+    void saveAppSettings(next);
+    if (next.audioLatencyMode !== previous.audioLatencyMode) {
+      void engineRef.current!.setLatencyMode(next.audioLatencyMode).then(() => {
+        setAudioEngineInfo(engineRef.current!.getAudioEngineInfo());
+        setStatusNotice('Audio latency mode changed to ' + next.audioLatencyMode + '.');
+      }).catch((error) => {
+        const reverted = { ...next, audioLatencyMode: previous.audioLatencyMode };
+        setSettings(reverted);
+        void saveAppSettings(reverted);
+        setStatusNotice(error instanceof Error ? error.message : 'Could not change audio latency mode.');
+      });
+    }
+    if ((next.audioOutputDeviceId ?? '') !== (previous.audioOutputDeviceId ?? '')) {
+      void engineRef.current!.setOutputDevice(next.audioOutputDeviceId ?? '').then((supported) => {
+        setAudioEngineInfo(engineRef.current!.getAudioEngineInfo());
+        if (!supported) {
+          const reverted = { ...next, audioOutputDeviceId: previous.audioOutputDeviceId ?? '' };
+          setSettings(reverted);
+          void saveAppSettings(reverted);
+          setStatusNotice('This browser does not support programmatic audio output selection. The system default remains active.');
+        } else {
+          setStatusNotice('Audio output device updated.');
+        }
+      }).catch((error) => {
+        const reverted = { ...next, audioOutputDeviceId: previous.audioOutputDeviceId ?? '' };
+        setSettings(reverted);
+        void saveAppSettings(reverted);
+        setStatusNotice(error instanceof Error ? error.message : 'Could not change audio output device.');
+      });
+    }
+  };
+
   const handleRenderExport = async () => {
     const src = getRenderSource();
     if (!src || !activeTrack) {
@@ -3171,40 +3206,7 @@ export default function App() {
           <SettingsModal
             open={true}
             settings={settings}
-            onChange={(next) => {
-              const previous = settings;
-              setSettings(next);
-              void saveAppSettings(next);
-              if (next.audioLatencyMode !== previous.audioLatencyMode) {
-                void engineRef.current!.setLatencyMode(next.audioLatencyMode).then(() => {
-                  setAudioEngineInfo(engineRef.current!.getAudioEngineInfo());
-                  setStatusNotice('Audio latency mode changed to ' + next.audioLatencyMode + '.');
-                }).catch((error) => {
-                  const reverted = { ...next, audioLatencyMode: previous.audioLatencyMode };
-                  setSettings(reverted);
-                  void saveAppSettings(reverted);
-                  setStatusNotice(error instanceof Error ? error.message : 'Could not change audio latency mode.');
-                });
-              }
-              if ((next.audioOutputDeviceId ?? '') !== (previous.audioOutputDeviceId ?? '')) {
-                void engineRef.current!.setOutputDevice(next.audioOutputDeviceId ?? '').then((supported) => {
-                  setAudioEngineInfo(engineRef.current!.getAudioEngineInfo());
-                  if (!supported) {
-                    const reverted = { ...next, audioOutputDeviceId: previous.audioOutputDeviceId ?? '' };
-                    setSettings(reverted);
-                    void saveAppSettings(reverted);
-                    setStatusNotice('This browser does not support programmatic audio output selection. The system default remains active.');
-                  } else {
-                    setStatusNotice('Audio output device updated.');
-                  }
-                }).catch((error) => {
-                  const reverted = { ...next, audioOutputDeviceId: previous.audioOutputDeviceId ?? '' };
-                  setSettings(reverted);
-                  void saveAppSettings(reverted);
-                  setStatusNotice(error instanceof Error ? error.message : 'Could not change audio output device.');
-                });
-              }
-            }}
+            onChange={handleSettingsChange}
             onClose={() => setSettingsModalOpen(false)}
           >
             <section className="p-3 rounded bg-[#0C0D12] border border-[#5A4519] flex flex-col gap-3">
@@ -3217,7 +3219,7 @@ export default function App() {
                 <select
                   value={settings.audioOutputDeviceId ?? ''}
                   disabled={!audioEngineInfo.supportsOutputDeviceSelection}
-                  onChange={(event) => onChange({ ...settings, audioOutputDeviceId: event.target.value })}
+                  onChange={(event) => handleSettingsChange({ ...settings, audioOutputDeviceId: event.target.value })}
                   className="bg-[#090704] border border-[#5A4519] rounded px-2.5 py-1.5 text-xs text-[#F7F1E2] disabled:opacity-50"
                 >
                   <option value="">System Default</option>
@@ -3230,7 +3232,7 @@ export default function App() {
                 Latency Mode
                 <select
                   value={settings.audioLatencyMode}
-                  onChange={(event) => onChange({ ...settings, audioLatencyMode: event.target.value as AppSettings['audioLatencyMode'] })}
+                  onChange={(event) => handleSettingsChange({ ...settings, audioLatencyMode: event.target.value as AppSettings['audioLatencyMode'] })}
                   className="bg-[#090704] border border-[#5A4519] rounded px-2.5 py-1.5 text-xs text-[#F7F1E2]"
                 >
                   <option value="interactive">Interactive · lower monitoring latency</option>
