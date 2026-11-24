@@ -453,3 +453,76 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-lab-workspace [class*="text-[#D4AF37]"]{color:var(--lab-accent) !important;}
 .syn-lab-workspace .syn-lab-metric .text-lg{color:#fff !important;text-shadow:0 0 10px var(--lab-glow);}
 .syn-lab-workspace canvas,.syn-lab-canvas{border-color:color-mix(in srgb,var(--lab-accent) 50%,transparent) !important;border-radius:12px !important;box-shadow:0 0 22px var(--lab-glow),inset 0 0 20px rgba(46,168,255,.08);}
+
+/* ==========================================================================
+   Round 3 · GLOW EVERYWHERE: hover / active / focus glow for buttons, cards, knobs,
+   tabs, inputs and borders, plus subtle animated blue/purple accents.
+   Performance: hover glows are box-shadow transitions on interaction only; ambient
+   animation uses opacity on pseudo-elements (compositor-friendly) on a few large
+   surfaces. Everything animated stops under prefers-reduced-motion.
+   ========================================================================== */
+:root{--glow-purple:rgba(139,92,246,.55);--glow-purple-soft:rgba(139,92,246,.22);--glow-magenta:rgba(224,64,251,.5);}
+
+/* Buttons & tabs */
+.syn-workstation button:not(:disabled),.syn-workstation [role="tab"],.syn-workstation summary,.syn-workstation label[class*="btn"]{
+  transition:box-shadow .18s ease,border-color .18s ease,color .18s ease,background-color .18s ease,text-shadow .18s ease;}
+.syn-workstation button:not(:disabled):hover,.syn-workstation [role="tab"]:hover,.syn-workstation summary:hover,.syn-workstation label[class*="btn"]:hover{
+  box-shadow:0 0 0 1px rgba(63,224,255,.45),0 0 14px var(--glow-blue),0 0 26px var(--glow-purple-soft);text-shadow:0 0 8px var(--glow-cyan);}
+.syn-workstation button:not(:disabled):active{box-shadow:0 0 0 1px rgba(139,92,246,.8),0 0 18px var(--glow-purple),inset 0 0 10px var(--glow-blue-soft) !important;}
+.syn-workstation button[aria-pressed="true"],.syn-workstation button[aria-selected="true"],.syn-workstation [role="tab"][aria-selected="true"],
+.syn-workstation button[aria-current="page"],.syn-workstation button[data-active="true"]{
+  box-shadow:0 0 0 1px rgba(63,224,255,.6),0 0 16px var(--glow-blue),0 0 30px var(--glow-purple-soft);text-shadow:0 0 8px var(--glow-cyan);}
+.syn-workstation :is(button,select,input,[role="tab"],a,summary):focus-visible{outline:2px solid #3FE0FF;outline-offset:2px;box-shadow:0 0 0 4px rgba(46,168,255,.25),0 0 18px var(--glow-blue);}
+
+/* Inputs & selects */
+.syn-workstation select,.syn-workstation input[type="text"],.syn-workstation input[type="number"]{transition:box-shadow .18s ease,border-color .18s ease;}
+.syn-workstation select:hover,.syn-workstation input[type="text"]:hover,.syn-workstation input[type="number"]:hover{border-color:rgba(63,224,255,.6) !important;box-shadow:0 0 12px var(--glow-blue-soft);}
+.syn-workstation input[type="range"]{accent-color:#3FE0FF;}
+.syn-workstation input[type="range"]:hover{filter:drop-shadow(0 0 6px var(--glow-blue));}
+
+/* Cards & panels: border glow on hover */
+.syn-card,.syn-eq-panel,.syn-flow-fix,.syn-lab-metric,.syn-workstation section[class*="rounded"]{transition:box-shadow .22s ease,border-color .22s ease;}
+.syn-card:hover,.syn-lab-metric:hover{border-color:rgba(63,224,255,.55) !important;
+  box-shadow:0 0 0 1px rgba(63,224,255,.25) inset,0 0 26px rgba(46,168,255,.3),0 0 40px var(--glow-purple-soft),0 10px 30px rgba(0,0,0,.55) !important;}
+.syn-eq-panel:hover{box-shadow:0 0 0 1px rgba(0,0,0,.4) inset,0 0 36px rgba(46,168,255,.32),0 0 60px var(--glow-purple-soft),0 10px 30px rgba(0,0,0,.55) !important;}
+.syn-workstation section[class*="rounded"]:hover{box-shadow:0 0 22px rgba(46,168,255,.18),0 0 40px rgba(139,92,246,.1);}
+
+/* Knobs & faders */
+.syn-arcknob-dial{transition:filter .18s ease;}
+.syn-arcknob-dial:hover,.syn-arcknob-dial:focus-within{filter:drop-shadow(0 0 10px var(--glow-blue)) drop-shadow(0 0 18px var(--glow-purple-soft));}
+.syn-arcknob-dial:active{filter:drop-shadow(0 0 14px var(--glow-cyan)) drop-shadow(0 0 24px var(--glow-purple));}
+.syn-arcknob-arc{filter:drop-shadow(0 0 4px currentColor);}
+.syn-fader-track{transition:box-shadow .18s ease;}
+.syn-fader-track:hover{box-shadow:0 0 14px var(--glow-blue),0 0 24px var(--glow-purple-soft);}
+.syn-fader-cap{filter:drop-shadow(0 0 6px var(--glow-blue));}
+
+/* Nav */
+.syn-primary-nav-item{transition:color .18s ease,text-shadow .18s ease,filter .18s ease;}
+.syn-primary-nav-item:hover{filter:drop-shadow(0 0 8px var(--glow-blue));}
+.syn-primary-nav-item[data-active="true"]{filter:drop-shadow(0 0 10px var(--glow-cyan));}
+.syn-menu-panel{box-shadow:0 0 0 1px rgba(63,224,255,.3),0 0 30px rgba(46,168,255,.28),0 0 50px var(--glow-purple-soft),0 16px 40px rgba(0,0,0,.6) !important;}
+
+/* Ambient animated accents (opacity-only) */
+@keyframes syn-glow-breathe{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes syn-glow-sweep{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+.syn-console::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;border-radius:inherit;
+  background:radial-gradient(600px 220px at 15% 0%,rgba(46,168,255,.10),transparent 70%),radial-gradient(600px 240px at 85% 100%,rgba(139,92,246,.10),transparent 70%);
+  animation:syn-glow-breathe 7s ease-in-out infinite;will-change:opacity;}
+.syn-flow-fix::before,.syn-eq-panel::before{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;z-index:0;
+  box-shadow:0 0 0 1px rgba(63,224,255,.35),0 0 24px rgba(46,168,255,.35),0 0 44px rgba(139,92,246,.22);
+  animation:syn-glow-breathe 5.5s ease-in-out infinite;will-change:opacity;}
+.syn-flow-fix,.syn-eq-panel{position:relative;}
+.syn-eq-panel::before{animation-delay:-2.7s;}
+@keyframes syn-step-glow{0%,100%{box-shadow:0 0 8px var(--glow-blue)}50%{box-shadow:0 0 16px var(--glow-cyan),0 0 26px var(--glow-purple)}}
+.syn-step-num{animation:syn-step-glow 4s ease-in-out infinite;}
+.syn-app-header{position:relative;}
+.syn-app-header::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,#2EA8FF,#8B5CF6,#3FE0FF,#E040FB,transparent);background-size:200% 100%;
+  animation:syn-glow-sweep 9s linear infinite;box-shadow:0 0 10px rgba(46,168,255,.6);opacity:.8;}
+.syn-export-master{animation:syn-export-pulse 3.6s ease-in-out infinite;}
+@keyframes syn-export-pulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.14)}}
+
+@media (prefers-reduced-motion:reduce){
+  .syn-console::after,.syn-flow-fix::before,.syn-eq-panel::before,.syn-step-num,.syn-app-header::after,.syn-export-master{animation:none !important;}
+  .syn-workstation *{transition-duration:0s !important;}
+}
