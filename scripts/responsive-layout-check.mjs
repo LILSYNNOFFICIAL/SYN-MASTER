@@ -115,6 +115,11 @@ async function runViewport(browser, width, height, mobile) {
       await page.locator('.syn-dashboard-welcome').waitFor({ state: 'visible', timeout: 15000 });
       assert.equal(await page.locator('.syn-dashboard-visual').isVisible(), true, 'Desktop must open on the designed visual mastering dashboard, not the import splash');
       assert.equal(await page.locator('.syn-signal-art').isVisible(), true, 'Desktop dashboard must include the signal graphic');
+      await page.locator('.syn-primary-nav-more').click();
+      await page.locator('.syn-workspace-menu-item').filter({ hasText: 'AI Director' }).click();
+      await page.locator('.syn-ai-hero').waitFor({ state: 'visible', timeout: 10000 });
+      assert.equal(await page.getByText('WAITING FOR SOURCE AUDIO').isVisible(), true, 'AI Assistant must have a designed empty state before import');
+      await page.locator('.syn-primary-nav-item').filter({ hasText: 'Dashboard' }).click();
       await page.getByRole('button', { name: /LOAD DEMO SESSION/i }).click({ timeout: 15000 });
     }
     await page.locator('.syn2-stage').waitFor({ state: 'visible', timeout: 30000 });
