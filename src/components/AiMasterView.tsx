@@ -404,7 +404,7 @@ export const AiMasterView: React.FC<Props> = ({
             <div className="text-[11px] font-semibold uppercase tracking-wider text-[#9CA3AF]">
               Operating Mode
             </div>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               {MODE_LABELS.map((m) => (
                 <button
                   key={m.id}
@@ -950,7 +950,7 @@ export const AiMasterView: React.FC<Props> = ({
           data-testid="measured-before-after-telemetry"
           className="p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3"
         >
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-2">
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">
               Measured Before vs After Telemetry
             </h3>
@@ -958,7 +958,7 @@ export const AiMasterView: React.FC<Props> = ({
               {effectivePost ? 'Actual Reanalyzed Output' : postFallbackLabel}
             </span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono-tabular">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs font-mono-tabular">
             {[
               {
                 label: 'Integrated LUFS',
