@@ -2290,6 +2290,53 @@ export default function App() {
     setShowWorkstationWithoutTrack(typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
   };
 
+  // Desktop-style menubar: click opens, hover switches while one is open, outside click /
+  // Escape / choosing an item closes, arrow keys move between menus and items.
+  const MENU_ORDER = ['File', 'Edit', 'Workspace', 'View', 'Tools'] as const;
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const menubarRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!openMenu) return;
+    const onDown = (e: PointerEvent) => {
+      if (menubarRef.current && !menubarRef.current.contains(e.target as Node)) setOpenMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenMenu(null);
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [openMenu]);
+  const handleMenubarKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    const target = e.target as HTMLElement;
+    const group = target.closest<HTMLElement>('[data-menu]');
+    if (!group) return;
+    const name = group.dataset.menu as (typeof MENU_ORDER)[number];
+    const idx = MENU_ORDER.indexOf(name);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const next = MENU_ORDER[(idx + (e.key === 'ArrowRight' ? 1 : MENU_ORDER.length - 1)) % MENU_ORDER.length];
+      if (openMenu) setOpenMenu(next);
+      menubarRef.current?.querySelector<HTMLElement>(`[data-menu="${next}"] > summary`)?.focus();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (openMenu !== name) setOpenMenu(name);
+      window.requestAnimationFrame(() => {
+        const items = Array.from(group.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'));
+        if (!items.length) return;
+        const at = items.indexOf(target as HTMLButtonElement);
+        const nextAt = at < 0 ? (e.key === 'ArrowDown' ? 0 : items.length - 1) : (at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+        items[nextAt].focus();
+      });
+    } else if (e.key === 'Escape') {
+      setOpenMenu(null);
+      group.querySelector<HTMLElement>('summary')?.focus();
+    }
+  };
+
   const masterConsole = (
     <MasterConsole
       chain={chain}
@@ -2367,25 +2414,25 @@ export default function App() {
         <div className="syn-mobile-command-menu">
           <input type="checkbox" id="syn-mobile-menu-toggle" className="syn-mobile-menu-toggle" aria-label="Application menu" aria-controls="syn-application-menu" />
           <label htmlFor="syn-mobile-menu-toggle" className="syn-mobile-menu-trigger">Menu</label>
-          <nav id="syn-application-menu" aria-label="Application Menu" className="syn-menubar" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) { const toggle = event.currentTarget.parentElement?.querySelector<HTMLInputElement>(".syn-mobile-menu-toggle"); if (toggle) toggle.checked = false; } }}>
-          <details className="syn-menu-group">
-            <summary>File</summary>
+          <nav id="syn-application-menu" ref={menubarRef} aria-label="Application Menu" className="syn-menubar" onKeyDown={handleMenubarKeyDown} onClick={(event) => { if ((event.target as HTMLElement).closest("button")) { const toggle = event.currentTarget.parentElement?.querySelector<HTMLInputElement>(".syn-mobile-menu-toggle"); if (toggle) toggle.checked = false; } }}>
+          <details className="syn-menu-group" open={openMenu === 'File'} data-menu="File" onMouseEnter={() => { if (openMenu && openMenu !== 'File') setOpenMenu('File'); }}>
+            <summary aria-haspopup="menu" aria-expanded={openMenu === 'File'} onClick={(e) => { e.preventDefault(); setOpenMenu((m) => (m === 'File' ? null : 'File')); }}>File</summary>
             <div className="syn-menu-panel" role="menu" aria-label="File">
-              <button role="menuitem" type="button" onClick={(event) => { void handleSaveProject(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Save Project <kbd>Ctrl+S</kbd></button>
-              <button role="menuitem" type="button" onClick={(event) => { setExportModalOpen(true); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Export Master</button>
+              <button role="menuitem" type="button" onClick={(event) => { void handleSaveProject(); setOpenMenu(null); }}>Save Project <kbd>Ctrl+S</kbd></button>
+              <button role="menuitem" type="button" onClick={(event) => { setExportModalOpen(true); setOpenMenu(null); }}>Export Master</button>
             </div>
           </details>
-          <details className="syn-menu-group">
-            <summary>Edit</summary>
+          <details className="syn-menu-group" open={openMenu === 'Edit'} data-menu="Edit" onMouseEnter={() => { if (openMenu && openMenu !== 'Edit') setOpenMenu('Edit'); }}>
+            <summary aria-haspopup="menu" aria-expanded={openMenu === 'Edit'} onClick={(e) => { e.preventDefault(); setOpenMenu((m) => (m === 'Edit' ? null : 'Edit')); }}>Edit</summary>
             <div className="syn-menu-panel" role="menu" aria-label="Edit">
-              <button role="menuitem" type="button" disabled={undoStack.length === 0} onClick={(event) => { handleUndo(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Undo <kbd>Ctrl+Z</kbd></button>
-              <button role="menuitem" type="button" disabled={redoStack.length === 0} onClick={(event) => { handleRedo(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Redo <kbd>Ctrl+Y</kbd></button>
-              <button role="menuitem" type="button" onClick={(event) => { handleToggleChainBypass(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Toggle Chain Bypass</button>
-              <button role="menuitem" type="button" onClick={(event) => { handleResetChain(); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Reset Processing Chain</button>
+              <button role="menuitem" type="button" disabled={undoStack.length === 0} onClick={(event) => { handleUndo(); setOpenMenu(null); }}>Undo <kbd>Ctrl+Z</kbd></button>
+              <button role="menuitem" type="button" disabled={redoStack.length === 0} onClick={(event) => { handleRedo(); setOpenMenu(null); }}>Redo <kbd>Ctrl+Y</kbd></button>
+              <button role="menuitem" type="button" onClick={(event) => { handleToggleChainBypass(); setOpenMenu(null); }}>Toggle Chain Bypass</button>
+              <button role="menuitem" type="button" onClick={(event) => { handleResetChain(); setOpenMenu(null); }}>Reset Processing Chain</button>
             </div>
           </details>
-          <details className="syn-menu-group">
-            <summary>Workspace</summary>
+          <details className="syn-menu-group" open={openMenu === 'Workspace'} data-menu="Workspace" onMouseEnter={() => { if (openMenu && openMenu !== 'Workspace') setOpenMenu('Workspace'); }}>
+            <summary aria-haspopup="menu" aria-expanded={openMenu === 'Workspace'} onClick={(e) => { e.preventDefault(); setOpenMenu((m) => (m === 'Workspace' ? null : 'Workspace')); }}>Workspace</summary>
             <div className="syn-menu-panel" role="menu" aria-label="Workspace">
               {([
                 { id: 'studio', label: 'Mastering Workspace' },
@@ -2397,25 +2444,25 @@ export default function App() {
                 { id: 'qc', label: 'Quality Check' },
                 { id: 'plugins', label: 'Plugins & Host' },
               ] as const).map((item) => (
-                <button key={item.id} role="menuitem" type="button" aria-current={activeTab === item.id ? 'page' : undefined} onClick={(event) => { setActiveTab(item.id); event.currentTarget.closest('details')?.removeAttribute('open'); }}>
+                <button key={item.id} role="menuitem" type="button" aria-current={activeTab === item.id ? 'page' : undefined} onClick={(event) => { setActiveTab(item.id); setOpenMenu(null); }}>
                   {item.label}{activeTab === item.id ? <span aria-hidden="true">✓</span> : null}
                 </button>
               ))}
             </div>
           </details>
-          <details className="syn-menu-group">
-            <summary>View</summary>
+          <details className="syn-menu-group" open={openMenu === 'View'} data-menu="View" onMouseEnter={() => { if (openMenu && openMenu !== 'View') setOpenMenu('View'); }}>
+            <summary aria-haspopup="menu" aria-expanded={openMenu === 'View'} onClick={(e) => { e.preventDefault(); setOpenMenu((m) => (m === 'View' ? null : 'View')); }}>View</summary>
             <div className="syn-menu-panel" role="menu" aria-label="View">
-              <button role="menuitem" type="button" onClick={(event) => { setFullscreenWorkspace((value) => !value); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{fullscreenWorkspace ? 'Exit Fullscreen' : 'Fullscreen Workspace'}</button>
-              <button role="menuitem" type="button" onClick={(event) => { setSettingsModalOpen(true); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Preferences & Settings</button>
+              <button role="menuitem" type="button" onClick={(event) => { setFullscreenWorkspace((value) => !value); setOpenMenu(null); }}>{fullscreenWorkspace ? 'Exit Fullscreen' : 'Fullscreen Workspace'}</button>
+              <button role="menuitem" type="button" onClick={(event) => { setSettingsModalOpen(true); setOpenMenu(null); }}>Preferences & Settings</button>
             </div>
           </details>
-          <details className="syn-menu-group">
-            <summary>Tools</summary>
+          <details className="syn-menu-group" open={openMenu === 'Tools'} data-menu="Tools" onMouseEnter={() => { if (openMenu && openMenu !== 'Tools') setOpenMenu('Tools'); }}>
+            <summary aria-haspopup="menu" aria-expanded={openMenu === 'Tools'} onClick={(e) => { e.preventDefault(); setOpenMenu((m) => (m === 'Tools' ? null : 'Tools')); }}>Tools</summary>
             <div className="syn-menu-panel" role="menu" aria-label="Tools">
-              <button role="menuitem" type="button" onClick={(event) => { setActiveTab('plugins'); event.currentTarget.closest('details')?.removeAttribute('open'); }}>VST3 Plugin Manager</button>
-              <button role="menuitem" type="button" onClick={(event) => { setActiveTab('stems'); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Stem Intelligence</button>
-              <button role="menuitem" type="button" onClick={(event) => { setActiveTab('lab'); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Spectral Analysis</button>
+              <button role="menuitem" type="button" onClick={(event) => { setActiveTab('plugins'); setOpenMenu(null); }}>VST3 Plugin Manager</button>
+              <button role="menuitem" type="button" onClick={(event) => { setActiveTab('stems'); setOpenMenu(null); }}>Stem Intelligence</button>
+              <button role="menuitem" type="button" onClick={(event) => { setActiveTab('lab'); setOpenMenu(null); }}>Spectral Analysis</button>
             </div>
           </details>
           </nav>
