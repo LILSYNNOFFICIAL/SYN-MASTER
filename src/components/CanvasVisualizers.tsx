@@ -323,7 +323,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       const padB = 22;
       const plotW = w - padL - padR;
       const plotH = h - padT - padB;
-      const minF = 24;
+      const minF = 20;
       const maxF = 20000;
       const logSpan = Math.log10(maxF / minF);
       const sr = sampleRateRef.current;
@@ -422,7 +422,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       const padB = 22;
       const plotW = w - padL - padR;
       const plotH = h - padT - padB;
-      const minF = 24;
+      const minF = 20;
       const maxF = 20000;
       const freqToX = (f: number) =>
         padL + (Math.log10(Math.max(minF, Math.min(maxF, f)) / minF) / Math.log10(maxF / minF)) * plotW;
@@ -445,7 +445,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
         }
       }
 
-      const freqMarkers = [30, 60, 100, 250, 500, 1000, 2000, 5000, 10000, 20000];
+      const freqMarkers = [20, 30, 60, 100, 250, 500, 1000, 2000, 5000, 10000, 20000];
       ctx.font = w < 420 ? '8px "JetBrains Mono", monospace' : '10px "JetBrains Mono", monospace';
       for (const fm of freqMarkers) {
         const x = freqToX(fm);
@@ -641,7 +641,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       const padR = 14;
       const plotW = Math.max(1, rect.width - padL - padR);
       const x = Math.max(0, Math.min(plotW, e.clientX - rect.left - padL));
-      const freqHz = Math.round(24 * Math.pow(20000 / 24, x / plotW));
+      const freqHz = Math.round(20 * Math.pow(20000 / 20, x / plotW));
       const normY = Math.max(0, Math.min(1, (e.clientY - rect.top - 12) / Math.max(1, rect.height - 34)));
       const db = Number((6 - normY * 74).toFixed(1));
       setHoverInfo({ freqHz, db });
