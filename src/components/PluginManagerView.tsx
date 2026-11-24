@@ -245,7 +245,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
       : 0;
 
   return (
-    <div className="flex flex-col gap-4 pb-6">
+    <div data-syn-skin="instrument" data-workspace="plugins" className="syn-plugin-workspace flex flex-col gap-4 pb-6">
       {/* Header & Milestone 1 Scope Banner */}
       <section className="p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
