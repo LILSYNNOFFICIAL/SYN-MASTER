@@ -61,7 +61,7 @@ async function inspectLayout(page, width, workspace) {
     }
 
     const meterReadouts = document.querySelector('.syn-meter-readouts');
-    const meterColumns = meterReadouts ? getComputedStyle(meterReadouts).gridTemplateColumns.trim().split(/\\s+/).length : 0;
+    const meterColumns = meterReadouts ? getComputedStyle(meterReadouts).gridTemplateColumns.trim().split(/\s+/).length : 0;
     return {
       viewport,
       documentWidth: document.documentElement.scrollWidth,
@@ -88,7 +88,7 @@ async function inspectLayout(page, width, workspace) {
   }
   if (width === 1440 && workspace === 'studio') {
     const display = await page.locator('.syn-daw-main').evaluate((el) => getComputedStyle(el).display);
-    const columns = await page.locator('.syn-daw-main').evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\\s+/).length);
+    const columns = await page.locator('.syn-daw-main').evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length);
     assert.equal(display, 'grid', 'Desktop mastering workspace must retain its grid cockpit');
     assert.equal(columns, 2, 'Desktop mastering workspace must retain spectrum and rack lanes');
   }
@@ -158,11 +158,11 @@ async function runViewport(browser, width, height, mobile) {
 
       if (id === 'ai') {
         const modeGrid = page.getByText('Operating Mode', { exact: true }).locator('xpath=following-sibling::div[1]');
-        const modeColumns = await modeGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\\s+/).length);
+        const modeColumns = await modeGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length);
         assert.equal(modeColumns, mobile ? 1 : 3, 'AI Director operating mode cards must stack on mobile and use three desktop columns');
 
         const telemetryGrid = page.locator('[data-testid="measured-before-after-telemetry"] > div.grid');
-        const telemetryColumns = await telemetryGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\\s+/).length);
+        const telemetryColumns = await telemetryGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length);
         assert.equal(telemetryColumns, mobile ? 2 : 3, 'AI Director telemetry must use two mobile columns and three desktop columns');
 
         if (mobile) {
@@ -176,7 +176,7 @@ async function runViewport(browser, width, height, mobile) {
       if (id === 'lab') {
         const labHeading = page.getByText('Spectral Zone Balance (Pre vs Master)', { exact: true });
         const labGrid = labHeading.locator('xpath=ancestor::div[contains(@class,"grid-cols-1")][1]');
-        const labColumns = await labGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\\s+/).length);
+        const labColumns = await labGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length);
         assert.equal(labColumns, mobile ? 1 : 2, 'Analysis Lab spectral diagnostics must stack on mobile and use two desktop columns');
       }
     }
