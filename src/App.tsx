@@ -2105,8 +2105,10 @@ export default function App() {
         </div>
 
         {/* BlueNote-grade command menu: grouped actions, keyboard-friendly native disclosure menus */}
-        <details className="syn-mobile-command-menu"><summary>Menu</summary>
-          <nav aria-label="Application Menu" className="syn-menubar" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.closest("details")?.removeAttribute("open"); }}>
+        <div className="syn-mobile-command-menu">
+          <input type="checkbox" id="syn-mobile-menu-toggle" className="syn-mobile-menu-toggle" aria-label="Application menu" aria-controls="syn-application-menu" />
+          <label htmlFor="syn-mobile-menu-toggle" className="syn-mobile-menu-trigger">Menu</label>
+          <nav id="syn-application-menu" aria-label="Application Menu" className="syn-menubar" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) { const toggle = event.currentTarget.parentElement?.querySelector<HTMLInputElement>(".syn-mobile-menu-toggle"); if (toggle) toggle.checked = false; } }}>
           <details className="syn-menu-group">
             <summary>File</summary>
             <div className="syn-menu-panel" role="menu" aria-label="File">
@@ -2158,7 +2160,7 @@ export default function App() {
             </div>
           </details>
           </nav>
-        </details>
+        </div>
 
         {/* Zone 3: Primary CTA */}
         <div className="flex items-center shrink-0">
