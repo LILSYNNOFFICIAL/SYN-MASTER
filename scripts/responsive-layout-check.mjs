@@ -122,6 +122,8 @@ async function runViewport(browser, width, height, mobile) {
       await page.locator('.syn-workspace-menu-item').filter({ hasText: 'AI Director' }).click();
       await page.locator('.syn-ai-hero').waitFor({ state: 'visible', timeout: 10000 });
       assert.equal(await page.getByText('WAITING FOR SOURCE AUDIO').isVisible(), true, 'AI Assistant must have a designed empty state before import');
+      assert.equal(await page.locator('[data-testid="workspace-hero"][data-workspace="ai"]').isVisible(), true, 'AI Assistant must have the shared workspace identity header before source import');
+      assert.equal(await page.locator('[data-testid="workspace-hero-graphic"]').isVisible(), true, 'AI Assistant must show its own instrument graphic');
       await page.locator('.syn-primary-nav-item').filter({ hasText: 'Dashboard' }).click();
       await page.getByRole('button', { name: /LOAD DEMO SESSION/i }).click({ timeout: 15000 });
     }
@@ -206,6 +208,11 @@ async function runViewport(browser, width, height, mobile) {
       }
       await page.locator(`main[data-layout="${id}"]`).waitFor({ state: 'attached', timeout: 10000 });
       await delay(120);
+      if (id !== 'studio') {
+        const workspaceHero = page.locator(`[data-testid="workspace-hero"][data-workspace="${id}"]`);
+        assert.equal(await workspaceHero.isVisible(), true, `${label} must display the shared workspace identity header`);
+        assert.equal(await workspaceHero.locator('[data-testid="workspace-hero-graphic"]').isVisible(), true, `${label} must display its workspace-specific graphic`);
+      }
       await inspectLayout(page, width, id);
 
       if (id === 'ai') {
