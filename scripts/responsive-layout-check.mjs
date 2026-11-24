@@ -128,8 +128,8 @@ async function runViewport(browser, width, height, mobile) {
       const menuBox = await menu.locator(':scope > summary').boundingBox();
       const exportBox = await exportButton.boundingBox();
       assert.ok(logoBox && menuBox && exportBox, 'Mobile header controls must have measurable boxes');
-      assert.ok(logoBox.right <= menuBox.x + 1, 'Mobile logo must not overlap the Menu control');
-      assert.ok(menuBox.right <= exportBox.x + 1, 'Mobile Menu must not overlap Export');
+      assert.ok(logoBox.right <= menuBox.x + 1, `Mobile logo must not overlap Menu: ${JSON.stringify({ logoBox, menuBox, exportBox })}`);
+      assert.ok(menuBox.right <= exportBox.x + 1, `Mobile Menu must not overlap Export: ${JSON.stringify({ logoBox, menuBox, exportBox })}`);
       assert.ok(exportBox.right <= width + 1, 'Mobile Export button must remain inside the viewport');
       await menu.locator(':scope > summary').click();
       assert.equal(await menu.locator(':scope > .syn-menubar').isVisible(), true, 'Mobile command drawer must open');
