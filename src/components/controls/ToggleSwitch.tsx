@@ -19,7 +19,7 @@ export const ToggleSwitch: React.FC<ToggleSwitchProps> = ({
   checked,
   disabled = false,
   readOnly = false,
-  accent = 'cyan',
+  accent = 'gold',
   compact = false,
   onLabel = 'ON',
   offLabel = 'OFF',
@@ -27,8 +27,8 @@ export const ToggleSwitch: React.FC<ToggleSwitchProps> = ({
   testId,
 }) => {
   const isInteractive = !disabled && !readOnly;
-  const activeBg = accent === 'gold' ? 'bg-[#D4AF37]/25 border-[#F2CA52]/70' : 'bg-[#0EA5E9]/20 border-[#38BDF8]/70';
-  const activeLed = accent === 'gold' ? 'bg-[#F2CA52]' : 'bg-[#38BDF8]';
+  const activeBg = accent === 'gold' ? 'bg-[#F5B82E]/25 border-[#F5B82E]/80' : 'bg-[#0EA5E9]/20 border-[#38BDF8]/70';
+  const activeLed = accent === 'gold' ? 'bg-[#F5B82E]' : 'bg-[#38BDF8]';
 
   return (
     <button
@@ -54,7 +54,7 @@ export const ToggleSwitch: React.FC<ToggleSwitchProps> = ({
         checked
           ? 'bg-[#121620] border-[#334155] text-[#F7F8FA]'
           : 'bg-[#0B0D12] border-[#222632] text-[#94A3B8]'
-      } ${disabled ? 'opacity-45 cursor-not-allowed' : readOnly ? 'cursor-default' : 'cursor-pointer hover:border-[#475569]'} focus:outline-none focus-visible:ring-2 focus-visible:ring-[#38BDF8]`}
+      } ${disabled ? 'opacity-45 cursor-not-allowed' : readOnly ? 'cursor-default' : 'cursor-pointer hover:border-[#475569]'} focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F5B82E]`}
     >
       <span className="truncate font-medium">{label}</span>
 
@@ -71,7 +71,7 @@ export const ToggleSwitch: React.FC<ToggleSwitchProps> = ({
           <span
             className={`w-2.5 h-2.5 rounded-full transition-transform duration-150 ${
               checked
-                ? `translate-x-4 ${activeLed} shadow-[0_0_6px_rgba(56,189,248,0.5)]`
+                ? `translate-x-4 ${activeLed} ${accent === 'gold' ? 'shadow-[0_0_8px_rgba(245,184,46,0.45)]' : 'shadow-[0_0_6px_rgba(56,189,248,0.5)]'}`
                 : 'translate-x-0 bg-[#64748B]'
             }`}
           />
