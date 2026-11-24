@@ -409,3 +409,6 @@ The live `/api/health` response only verifies configuration presence, not full A
 
 
 - [x] **Windows desktop shell scaffold:** `desktop/main.cjs` starts the bundled Express server on a randomly selected loopback port, generates a per-launch AI access token (passed to the renderer only through a narrow preload IPC bridge), and starts/pairs the native VST3 companion when its three binaries are staged. The native pairing file is deleted after the HTTP listener is confirmed ready. This is source scaffolding; packaging scripts, CI installer build, Windows smoke tests, signing, and user-device validation are still open.
+
+
+**Desktop runtime resilience:** the Electron shell waits for the native host HTTP listener after reading the pairing file (the native host writes that file before listening), and continues in browser-only mastering mode with a visible warning if the VST3 companion cannot start. The loopback port allocator retries distinct ports without leaving its Promise pending.

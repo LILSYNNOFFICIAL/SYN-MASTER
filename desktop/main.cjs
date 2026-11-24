@@ -13,6 +13,8 @@ let aiAccessToken = null;
 let backendPromise = null;
 let appOrigin = null;
 let nativePairing = null;
+let nativeHostWarning = null;
+let nativeProcessError = null;
 let quitting = false;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,7 +33,7 @@ function getFreeLoopbackPort(excluded = []) {
       const port = address.port;
       probe.close((error) => {
         if (error) reject(error);
-        else if (excluded.includes(port)) getFreeLoopbackPort(excluded);
+        else if (excluded.includes(port)) getFreeLoopbackPort(excluded).then(resolve, reject);
         else resolve(port);
       });
     });
@@ -81,6 +83,7 @@ async function waitForNativeHttpPort(port, child) {
 
 async function waitForNativePairing(pairingPath, child) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (nativeProcessError) throw nativeProcessError;
     if (child.exitCode !== null) {
       throw new Error(`Native VST3 host exited during startup (code ${child.exitCode}).`);
     }
@@ -146,6 +149,7 @@ async function startBackend() {
       const pairingPath = path.join(nativeDataDir, 'host_pairing.json');
       await fs.mkdir(nativeDataDir, { recursive: true });
       await fs.rm(pairingPath, { force: true });
+      nativeProcessError = null;
       nativeProcess = spawn(nativeHostPath, [
         '--port', String(httpPort),
         '--ws-port', String(wsPort),
@@ -153,12 +157,20 @@ async function startBackend() {
         '--allow-origin', appOrigin,
       ], { windowsHide: true, stdio: 'ignore' });
       nativeProcess.once('error', (error) => {
+        nativeProcessError = error;
         console.error('[SYN MASTER] Native host process error:', error.message);
       });
-      nativePairing = await waitForNativePairing(pairingPath, nativeProcess);
+      try {
+        nativePairing = await waitForNativePairing(pairingPath, nativeProcess);
+      } catch (error) {
+        nativeHostWarning = error instanceof Error ? error.message : String(error);
+        if (nativeProcess && nativeProcess.exitCode === null) nativeProcess.kill();
+        nativeProcess = null;
+        nativePairing = null;
+      }
     }
 
-    return { origin: appOrigin, pairing: nativePairing };
+    return { origin: appOrigin, pairing: nativePairing, nativeWarning: nativeHostWarning };
   })();
   try {
     return await backendPromise;
@@ -216,6 +228,14 @@ async function createMainWindow() {
     ? `#pairToken=${encodeURIComponent(backend.pairing.sessionToken)}&hostPort=${backend.pairing.httpPort}`
     : '';
   await window.loadURL(`${backend.origin}/${hash}`);
+  if (backend.nativeWarning) {
+    await dialog.showMessageBox(window, {
+      type: 'warning',
+      title: 'VST3 companion unavailable',
+      message: 'SYN MASTER is open, but native VST3 hosting did not start.',
+      detail: backend.nativeWarning,
+    });
+  }
 }
 
 ipcMain.handle('syn-master:get-ai-access-token', () => aiAccessToken);
