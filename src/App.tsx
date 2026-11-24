@@ -2571,40 +2571,7 @@ export default function App() {
             />
           </div>
 
-          {activeTab === 'studio' && activeTrack && diagnosticLog && (
-            <FixItStage
-              trackName={activeTrack.name}
-              durationSec={activeTrack.durationSec}
-              sampleRate={activeTrack.sampleRate}
-              source={activeTrack.analysis}
-              master={postAnalysisState.status === 'ready' ? postAnalysis : null}
-              prePeaks={prePeaksHi}
-              postPeaks={postPeaksHi}
-              isPlaying={isPlaying}
-              onTogglePlay={togglePlay}
-              auditionTarget={auditionTarget}
-              onAudition={(t) => switchAuditionTarget(t)}
-              fades={fades}
-              onFadesChange={setFades}
-              onSeek={(sec) => {
-                engineRef.current!.seek(sec);
-                telemetryStore.publish({ currentTimeSec: sec });
-              }}
-              running={directorRunning}
-              stage={directorStage}
-              pass={directorPass}
-              maxPasses={10}
-              lastActivity={directorActivityLog.length > 0 ? directorActivityLog[directorActivityLog.length - 1].message : null}
-              report={directorReport}
-              log={diagnosticLog}
-              targetPresetId={targetPresetId}
-              targetLabel={targetLabel}
-              onTargetPreset={handleTargetPreset}
-              onFix={() => { setOperatingMode('autonomous'); void handleRunMasterDirector(true); }}
-              onOpenRack={() => setRackWindowOpen(true)}
-              onNewTrack={handleNewTrack}
-            />
-          )}
+
 
           {/* Transport & Waveform Stage (Full waveform on Studio & Reference; compact transport bar on other tabs) */}
           {!activeTrack && (activeTab === 'plugins' || activeTab === 'stems') ? null : !activeTrack ? (
@@ -2944,6 +2911,41 @@ export default function App() {
                 heightClass="h-64"
               />
             </section>
+          )}
+
+          {activeTab === 'studio' && activeTrack && diagnosticLog && (
+            <FixItStage
+              trackName={activeTrack.name}
+              durationSec={activeTrack.durationSec}
+              sampleRate={activeTrack.sampleRate}
+              source={activeTrack.analysis}
+              master={postAnalysisState.status === 'ready' ? postAnalysis : null}
+              prePeaks={prePeaksHi}
+              postPeaks={postPeaksHi}
+              isPlaying={isPlaying}
+              onTogglePlay={togglePlay}
+              auditionTarget={auditionTarget}
+              onAudition={(t) => switchAuditionTarget(t)}
+              fades={fades}
+              onFadesChange={setFades}
+              onSeek={(sec) => {
+                engineRef.current!.seek(sec);
+                telemetryStore.publish({ currentTimeSec: sec });
+              }}
+              running={directorRunning}
+              stage={directorStage}
+              pass={directorPass}
+              maxPasses={10}
+              lastActivity={directorActivityLog.length > 0 ? directorActivityLog[directorActivityLog.length - 1].message : null}
+              report={directorReport}
+              log={diagnosticLog}
+              targetPresetId={targetPresetId}
+              targetLabel={targetLabel}
+              onTargetPreset={handleTargetPreset}
+              onFix={() => { setOperatingMode('autonomous'); void handleRunMasterDirector(true); }}
+              onOpenRack={() => setRackWindowOpen(true)}
+              onNewTrack={handleNewTrack}
+            />
           )}
 
           {activeTab === 'studio' && activeTrack && (
