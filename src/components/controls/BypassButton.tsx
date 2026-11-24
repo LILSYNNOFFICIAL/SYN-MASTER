@@ -18,20 +18,20 @@ export const BypassButton: React.FC<BypassButtonProps> = ({
   label,
   compact = false,
   showStateText = false,
-  accent = 'cyan',
+  accent = 'gold',
   disabled = false,
   onToggle,
   testId,
 }) => {
   const activeStyle =
     accent === 'gold'
-      ? 'bg-[#D4AF37]/15 border-[#F2CA52]/70 text-[#F2CA52]'
+      ? 'bg-[#F5B82E]/15 border-[#F5B82E]/80 text-[#F5B82E]'
       : 'bg-[#0EA5E9]/15 border-[#38BDF8]/70 text-[#38BDF8]';
 
   const ledColor =
     accent === 'gold'
       ? active
-        ? 'bg-[#F2CA52]'
+        ? 'bg-[#F5B82E]'
         : 'bg-[#475569]'
       : active
         ? 'bg-[#38BDF8]'
@@ -54,7 +54,7 @@ export const BypassButton: React.FC<BypassButtonProps> = ({
         active
           ? activeStyle
           : 'bg-[#12141B] border-[#2A2F3D] text-[#64748B] hover:text-[#94A3B8] hover:border-[#3E4558]'
-      } ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'} focus:outline-none focus-visible:ring-2 focus-visible:ring-[#38BDF8]`}
+      } ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'} focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F5B82E]`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${ledColor}`} aria-hidden="true" />
       <Power className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
