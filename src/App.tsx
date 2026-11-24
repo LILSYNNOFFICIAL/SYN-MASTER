@@ -1884,6 +1884,37 @@ export default function App() {
     setExportDeliveryCheck(null);
     try {
       const safeStem = (exportConfig.filename.trim() || 'SYN_Master').replace(/[<>:"/\\|?*]/g, '_').replace(/^\.+$/, 'SYN_Master');
+      type SynSaveFileHandle = {
+        createWritable: () => Promise<{
+          write: (data: Blob) => Promise<void>;
+          close: () => Promise<void>;
+          abort?: () => Promise<void>;
+        }>;
+      };
+      type SynSavePickerWindow = Window & {
+        showSaveFilePicker?: (options: {
+          suggestedName: string;
+          types: Array<{ description: string; accept: Record<string, string[]> }>;
+        }) => Promise<SynSaveFileHandle>;
+      };
+      let saveFileHandle: SynSaveFileHandle | null = null;
+      const pickerWindow = window as SynSavePickerWindow;
+      if (typeof pickerWindow.showSaveFilePicker === 'function') {
+        try {
+          // Request the native Save As destination from the Export click, before
+          // asynchronous rendering consumes the browser's transient user activation.
+          saveFileHandle = await pickerWindow.showSaveFilePicker({
+            suggestedName: safeStem + '.zip',
+            types: [{ description: 'SYN MASTER export package', accept: { 'application/zip': ['.zip'] } }],
+          });
+        } catch (pickerError) {
+          if ((pickerError as { name?: string })?.name === 'AbortError') {
+            setStatusNotice('Export canceled.');
+            return;
+          }
+          throw pickerError;
+        }
+      }
       const selectedFormats = Array.from(new Set(
         (exportConfig.selectedFormats?.length ? exportConfig.selectedFormats : [exportConfig.format])
           .filter((format) => ['wav', 'mp3', 'ogg', 'flac', 'm4a', 'mid', 'webm-opus'].includes(format)),
@@ -2012,17 +2043,28 @@ export default function App() {
         text: deliveryMessages.length ? deliveryMessages.join('  ') : 'MIDI conductor file packaged successfully.',
       });
 
-      // Start the download while the export action is still active. Keep the visible
-      // fallback link in the modal for browsers that block programmatic downloads.
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = zipName;
-      anchor.style.display = 'none';
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-
-      setStatusNotice('Packaged ' + outputManifest.length + ' output file(s) in "' + zipName + '".');
+      if (saveFileHandle) {
+        const writable = await saveFileHandle.createWritable();
+        try {
+          await writable.write(zipBlob);
+          await writable.close();
+        } catch (writeError) {
+          await writable.abort?.().catch(() => undefined);
+          throw writeError;
+        }
+        setStatusNotice('Saved ' + outputManifest.length + ' output file(s) in "' + zipName + '".');
+      } else {
+        // Automatic download fallback for browsers without the native file picker.
+        // The visible link remains available if the browser blocks this click.
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = zipName;
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setStatusNotice('Packaged ' + outputManifest.length + ' output file(s) in "' + zipName + '".');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Master export failed.';
       setExportError(message);
