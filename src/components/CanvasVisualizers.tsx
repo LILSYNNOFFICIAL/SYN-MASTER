@@ -10,6 +10,7 @@ import {
   evaluateBiquadMagnitudeDb,
 } from '../dsp/biquad';
 import { telemetryStore, type RuntimeTelemetryState } from '../engine/telemetryStore';
+import { buildWaveformOverlayPoints } from '../dsp/waveformOverlay';
 
 interface CanvasMetrics {
   cssWidth: number;
@@ -243,6 +244,7 @@ interface SpectrumCanvasProps {
   mode: 'spectrum' | 'spectrogram';
   heightClass?: string;
   allowLiveTelemetry?: boolean;
+  waveformPeaks?: number[];
 }
 
 const SPECTRO_COLS = 160;
@@ -257,6 +259,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
     mode,
     heightClass = 'h-60',
     allowLiveTelemetry = true,
+    waveformPeaks = [],
   }) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const staticCacheRef = useRef<HTMLCanvasElement | null>(null);
@@ -472,6 +475,25 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
         ctx.fillText(`${dm}`, padL - 5, y + 3);
       }
 
+      // Source waveform is a time-domain amplitude envelope. It is deliberately
+      // translucent and centered behind the frequency-domain spectrum/EQ curves.
+      if (waveformPeaks.length > 0) {
+        const points = buildWaveformOverlayPoints(waveformPeaks, plotW, padT + plotH * 0.5, plotH * 0.34);
+        ctx.save();
+        ctx.globalAlpha = 0.38;
+        ctx.strokeStyle = '#20BFFF';
+        ctx.lineWidth = 1.15;
+        ctx.shadowColor = 'rgba(32,191,255,0.85)';
+        ctx.shadowBlur = 7;
+        ctx.beginPath();
+        for (const point of points) {
+          ctx.moveTo(padL + point.x, point.top);
+          ctx.lineTo(padL + point.x, point.bottom);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
       if (mode === 'spectrum') {
         const drawSpectrumCurve = (
           freqs: number[],
@@ -587,7 +609,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
 
     useEffect(() => {
       rebuildStaticLayer();
-    }, [preAnalysis, postAnalysis, referenceAnalysis, chain, sampleRate, mode]);
+    }, [preAnalysis, postAnalysis, referenceAnalysis, chain, sampleRate, mode, waveformPeaks]);
 
     useEffect(() => {
       if (!allowLiveTelemetry) {
