@@ -8,6 +8,8 @@ import {
   MoreHorizontal,
   Settings,
   SlidersHorizontal,
+  ShieldCheck,
+  Zap,
   X,
 } from 'lucide-react';
 import type { WorkspaceTab } from '../types/mastering';
@@ -43,6 +45,8 @@ const PRIMARY_ITEMS = [
   { key: 'dynamics', label: 'Dynamics', icon: Activity },
   { key: 'stereo', label: 'Stereo', icon: AudioWaveform },
   { key: 'loudness', label: 'Loudness', icon: Gauge },
+  { key: 'exciter', label: 'Exciter', icon: Zap },
+  { key: 'limiter', label: 'Limiter', icon: ShieldCheck },
 ] as const;
 
 export const WorkspaceNavigation: React.FC<Props> = ({
@@ -60,7 +64,7 @@ export const WorkspaceNavigation: React.FC<Props> = ({
     if (activeTab === 'lab') setSelectedPrimary('stereo');
     else if (activeTab === 'qc') setSelectedPrimary('loudness');
     else if (activeTab !== 'studio') setSelectedPrimary('more');
-    else if (!['dashboard', 'equalizer', 'dynamics'].includes(selectedPrimary)) setSelectedPrimary('dashboard');
+    else if (!['dashboard', 'equalizer', 'dynamics', 'exciter', 'limiter'].includes(selectedPrimary)) setSelectedPrimary('dashboard');
 
     if (activeTab === 'studio' && selectedPrimary === 'equalizer') {
       document.querySelector('[data-testid="central-spectrum"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -82,7 +86,7 @@ export const WorkspaceNavigation: React.FC<Props> = ({
     else if (key === 'loudness') onSelect('qc');
     else {
       onSelect('studio');
-      if (key === 'dynamics') onOpenRack();
+      if (key === 'dynamics' || key === 'exciter' || key === 'limiter') onOpenRack();
     }
   };
 
