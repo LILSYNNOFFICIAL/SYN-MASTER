@@ -100,8 +100,15 @@ export function getProviderSettings(): ProviderSettings {
 }
 
 /** Authorization header for the server-owned Gemini endpoints. */
-export function getBuiltinAccessHeaders(): Record<string, string> {
-  const token = settings.serverAccessToken.trim();
+export async function getBuiltinAccessHeaders(): Promise<Record<string, string>> {
+  let token = settings.serverAccessToken.trim();
+  if (!token && typeof window !== 'undefined') {
+    try {
+      token = (await window.synMasterDesktop?.getAiAccessToken())?.trim() ?? '';
+    } catch {
+      // A browser without the desktop preload continues to use its saved hosted token.
+    }
+  }
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

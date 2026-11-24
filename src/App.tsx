@@ -1400,7 +1400,7 @@ export default function App() {
         const builtinStrategy = async () => {
           const res = await fetch('/api/ai/master', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...getBuiltinAccessHeaders() },
+            headers: { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() },
             signal: AbortSignal.timeout(12_000),
             body: JSON.stringify(strategyInput),
           });
@@ -1500,7 +1500,7 @@ export default function App() {
                 const builtinRefine = async () => {
                   const res = await fetch('/api/ai/refine', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getBuiltinAccessHeaders() },
+                    headers: { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() },
                     signal: AbortSignal.timeout(12_000),
                     body: JSON.stringify(ctx),
                   });
