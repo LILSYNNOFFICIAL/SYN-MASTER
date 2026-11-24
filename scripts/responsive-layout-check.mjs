@@ -149,6 +149,8 @@ async function runViewport(browser, width, height, mobile) {
     }
     await page.locator('.syn2-stage').waitFor({ state: 'visible', timeout: 30000 });
     await page.locator('.syn-meter-bridge').waitFor({ state: 'visible', timeout: 10000 });
+    assert.equal(await page.locator('[data-syn-skin="instrument"][data-workspace="rack"]').isVisible(), true, 'Mastering Rack must use the shared instrument surface');
+    assert.equal(await page.locator('[data-syn-skin="instrument"][data-workspace="library"]').isVisible(), true, 'Audio Library must use the shared instrument surface');
 
     if (!mobile) {
       assert.equal(await page.locator('.syn-mobile-command-menu > label').isVisible(), false, 'Desktop must retain the full command bar instead of the mobile Menu button');
