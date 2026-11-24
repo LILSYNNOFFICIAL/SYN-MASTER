@@ -17,11 +17,28 @@ export function crc32(data: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function asBytes(data: ZipFileEntry['data']): Promise<Uint8Array> {
-  if (typeof data === 'string') return Promise.resolve(encoder.encode(data));
-  if (data instanceof Uint8Array) return Promise.resolve(data);
-  if (data instanceof ArrayBuffer) return Promise.resolve(new Uint8Array(data));
-  return data.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+async function asBlob(data: ZipFileEntry['data']): Promise<Blob> {
+  if (data instanceof Blob) return data;
+  if (typeof data === 'string') return new Blob([encoder.encode(data)]);
+  if (data instanceof ArrayBuffer) return new Blob([data]);
+  return new Blob([data]);
+}
+
+async function crc32Blob(blob: Blob): Promise<number> {
+  let crc = 0xffffffff;
+  const reader = blob.stream().getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (let i = 0; i < value.length; i++) {
+        crc = CRC_TABLE[(crc ^ value[i]) & 0xff] ^ (crc >>> 8);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function write16(view: DataView, offset: number, value: number): void {
@@ -44,9 +61,9 @@ export async function createZipBlob(entries: ZipFileEntry[]): Promise<Blob> {
   for (const entry of entries) {
     const name = encoder.encode(entry.name.replace(/\\/g, '/'));
     if (name.length === 0 || name.length > 0xffff) throw new Error('ZIP entry has an invalid filename.');
-    const data = await asBytes(entry.data);
-    if (data.byteLength > 0xffffffff || offset > 0xffffffff) throw new Error('ZIP32 size limit exceeded.');
-    const checksum = crc32(data);
+    const data = await asBlob(entry.data);
+    if (data.size > 0xffffffff || offset > 0xffffffff) throw new Error('ZIP32 size limit exceeded.');
+    const checksum = await crc32Blob(data);
     const local = new Uint8Array(30 + name.length);
     const localView = new DataView(local.buffer);
     write32(localView, 0, 0x04034b50);
@@ -56,7 +73,7 @@ export async function createZipBlob(entries: ZipFileEntry[]): Promise<Blob> {
     write16(localView, 10, 0);
     write16(localView, 12, 0x0021);
     write32(localView, 14, checksum);
-    write32(localView, 18, data.byteLength);
+    write32(localView, 18, data.size);
     write32(localView, 22, data.byteLength);
     write16(localView, 26, name.length);
     write16(localView, 28, 0);
