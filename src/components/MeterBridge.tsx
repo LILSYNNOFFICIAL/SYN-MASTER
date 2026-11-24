@@ -18,7 +18,7 @@ function dbToPercent(db: number): number {
 }
 
 const HOT_CLASS = 'h-full bg-[#EF4444]';
-const NORMAL_CLASS = 'h-full bg-gradient-to-r from-[#9C7C1E] via-[#D4AF37] to-[#F2CA52]';
+const NORMAL_CLASS = 'h-full syn-meter-fill bg-gradient-to-r from-[#1867C9] via-[#2EA8FF] to-[#3FE0FF]';
 
 export const MeterBridge: React.FC<Props> = React.memo(
   ({ postAnalysis, qcReport, monitorVolume, auditionLabel, onChangeMonitorVolume }) => {
@@ -111,7 +111,7 @@ export const MeterBridge: React.FC<Props> = React.memo(
             </div>
           </div>
           <div className="syn-meter-monitor">
-            <Volume2 className="w-3.5 h-3.5 text-[#F2CA52] shrink-0" />
+            <Volume2 className="syn-monitor-icon w-4 h-4 shrink-0" />
             <div className="min-w-0 flex-1">
               <HorizontalSlider
                 label="Monitor Volume"
