@@ -91,14 +91,14 @@ export const WaveformTimelineCanvas: React.FC<WaveformProps> = React.memo(
       if (dur > 0) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         const px = Math.max(0, Math.min(w, (timeSec / dur) * w));
-        ctx.strokeStyle = '#F2CA52';
+        ctx.strokeStyle = '#3FE0FF';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(px, 0);
         ctx.lineTo(px, h);
         ctx.stroke();
 
-        ctx.fillStyle = '#F2CA52';
+        ctx.fillStyle = '#3FE0FF';
         ctx.beginPath();
         ctx.moveTo(px - 5, 0);
         ctx.lineTo(px + 5, 0);
@@ -127,7 +127,7 @@ export const WaveformTimelineCanvas: React.FC<WaveformProps> = React.memo(
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const midY = h * 0.5;
 
-      ctx.fillStyle = '#090A0E';
+      ctx.fillStyle = '#050B16';
       ctx.fillRect(0, 0, w, h);
 
       ctx.strokeStyle = 'rgba(255,255,255,0.05)';
@@ -143,9 +143,9 @@ export const WaveformTimelineCanvas: React.FC<WaveformProps> = React.memo(
       if (loopEnabled && durationSec > 0) {
         const lx1 = (loopStartSec / durationSec) * w;
         const lx2 = (loopEndSec / durationSec) * w;
-        ctx.fillStyle = 'rgba(212, 175, 55, 0.11)';
+        ctx.fillStyle = 'rgba(46, 168, 255, 0.11)';
         ctx.fillRect(lx1, 0, Math.max(2, lx2 - lx1), h);
-        ctx.strokeStyle = 'rgba(242, 202, 82, 0.55)';
+        ctx.strokeStyle = 'rgba(63, 224, 255, 0.55)';
         ctx.beginPath();
         ctx.moveTo(lx1, 0);
         ctx.lineTo(lx1, h);
@@ -154,10 +154,12 @@ export const WaveformTimelineCanvas: React.FC<WaveformProps> = React.memo(
         ctx.stroke();
       }
 
+      ctx.shadowColor = 'rgba(46,168,255,0.7)';
+      ctx.shadowBlur = 6;
       if (prePeaks.length > 0) {
         const barW = w / prePeaks.length;
         ctx.fillStyle =
-          showPostOverlay && postPeaks ? 'rgba(180, 188, 202, 0.28)' : 'rgba(212, 175, 55, 0.78)';
+          showPostOverlay && postPeaks ? 'rgba(180, 188, 202, 0.28)' : 'rgba(46, 168, 255, 0.85)';
         for (let i = 0; i < prePeaks.length; i++) {
           const amp = Math.min(1, prePeaks[i]) * (h * 0.44);
           const x = i * barW;
@@ -167,7 +169,7 @@ export const WaveformTimelineCanvas: React.FC<WaveformProps> = React.memo(
 
       if (showPostOverlay && postPeaks && postPeaks.length > 0) {
         const barW = w / postPeaks.length;
-        ctx.fillStyle = 'rgba(212, 175, 55, 0.85)';
+        ctx.fillStyle = 'rgba(63, 224, 255, 0.9)';
         for (let i = 0; i < postPeaks.length; i++) {
           const amp = Math.min(1, postPeaks[i]) * (h * 0.44);
           const x = i * barW;
@@ -175,6 +177,7 @@ export const WaveformTimelineCanvas: React.FC<WaveformProps> = React.memo(
         }
       }
 
+      ctx.shadowBlur = 0;
       ctx.strokeStyle = 'rgba(255,255,255,0.14)';
       ctx.beginPath();
       ctx.moveTo(0, midY);
@@ -533,7 +536,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
           ctx.lineTo(xs[count - 1], padT + plotH);
           ctx.lineTo(xs[0], padT + plotH);
           ctx.closePath();
-          ctx.fillStyle = 'rgba(242, 202, 82, 0.08)';
+          ctx.fillStyle = 'rgba(63, 224, 255, 0.08)';
           ctx.fill();
         }
       }
@@ -571,7 +574,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
         return padT + ((6 - clamped) / 74) * plotH;
       };
 
-      ctx.fillStyle = '#090A0E';
+      ctx.fillStyle = '#050B16';
       ctx.fillRect(0, 0, w, h);
 
       if (mode === 'spectrogram') {
@@ -593,7 +596,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
         ctx.lineTo(x, padT + plotH);
         ctx.stroke();
 
-        ctx.fillStyle = '#7B8291';
+        ctx.fillStyle = '#6F9CC4';
         ctx.textAlign = fm === 30 ? 'left' : fm === 20000 ? 'right' : 'center';
         ctx.fillText(fm === 20 ? '20 Hz' : fm >= 1000 ? `${fm / 1000}k` : `${fm}`, x, h - 6);
         ctx.textAlign = 'center';
@@ -603,12 +606,12 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       ctx.textAlign = 'right';
       for (const dm of dbMarkers) {
         const y = dbToY(dm);
-        ctx.strokeStyle = dm === 0 ? 'rgba(212, 175, 55, 0.25)' : 'rgba(255,255,255,0.06)';
+        ctx.strokeStyle = dm === 0 ? 'rgba(63, 224, 255, 0.3)' : 'rgba(255,255,255,0.06)';
         ctx.beginPath();
         ctx.moveTo(padL, y);
         ctx.lineTo(padL + plotW, y);
         ctx.stroke();
-        ctx.fillStyle = '#7B8291';
+        ctx.fillStyle = '#6F9CC4';
         ctx.fillText(`${dm}`, padL - 5, y + 3);
       }
 
@@ -651,7 +654,9 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
           }
           ctx.strokeStyle = stroke;
           ctx.lineWidth = 1.6;
+          if (!dashed) { ctx.shadowColor = 'rgba(46,168,255,0.85)'; ctx.shadowBlur = 9; }
           ctx.stroke();
+          ctx.shadowBlur = 0;
 
           if (fill) {
             ctx.lineTo(freqToX(freqs[freqs.length - 1]), padT + plotH);
@@ -677,7 +682,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
           drawSpectrumCurve(
             referenceAnalysis.spectrumBinsFreq,
             referenceAnalysis.spectrumBinsDb,
-            'rgba(212, 175, 55, 0.48)',
+            'rgba(139, 92, 246, 0.8)',
             undefined,
             true,
           );
@@ -687,8 +692,8 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
           drawSpectrumCurve(
             postAnalysis.spectrumBinsFreq,
             postAnalysis.spectrumBinsDb,
-            '#D4AF37',
-            'rgba(212, 175, 55, 0.14)',
+            '#3FE0FF',
+            'rgba(46, 168, 255, 0.16)',
           );
         }
 
@@ -723,7 +728,9 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
             if (i === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
           }
-          ctx.strokeStyle = '#F2CA52';
+          ctx.strokeStyle = '#E040FB';
+          ctx.shadowColor = 'rgba(224,64,251,0.8)';
+          ctx.shadowBlur = 8;
           ctx.lineWidth = 2;
           ctx.stroke();
         }
@@ -813,7 +820,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
           className={`w-full ${heightClass} rounded border border-[#262934] ${canSeek ? 'cursor-ew-resize' : 'cursor-crosshair'} block`}
         />
         {hoverInfo && (
-          <div className="pointer-events-none absolute top-2 right-3 px-2 py-0.5 rounded bg-[#070709]/85 border border-[#D4AF37]/30 text-[11px] font-mono-tabular text-[#F2CA52]">
+          <div className="pointer-events-none absolute top-2 right-3 px-2 py-0.5 rounded bg-[#070709]/85 border border-[#2EA8FF]/40 text-[11px] font-mono-tabular text-[#3FE0FF]">
             {hoverInfo.freqHz >= 1000
               ? `${(hoverInfo.freqHz / 1000).toFixed(2)} kHz`
               : `${hoverInfo.freqHz} Hz`}{' '}
@@ -1013,7 +1020,7 @@ export const LoudnessHistoryCanvas: React.FC<{
       ctx.moveTo(34, y);
       ctx.lineTo(w - 8, y);
       ctx.stroke();
-      ctx.fillStyle = '#7B8291';
+      ctx.fillStyle = '#6F9CC4';
       ctx.font = '10px "JetBrains Mono", monospace';
       ctx.fillText(`${ref}`, 4, y + 3);
     }
