@@ -1364,3 +1364,21 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 @media(max-width:767px) {
   [data-syn-skin="instrument"] canvas { max-width:100%; }
 }
+
+.syn-rack-shell {
+  background:linear-gradient(180deg,#0d1b28 0%,#08111a 100%) !important;
+  border-left:1px solid rgba(79,145,184,.26);
+}
+.syn-library-shell {
+  background:linear-gradient(180deg,#0f1d2a 0%,#09131d 100%) !important;
+  border-right-color:rgba(79,145,184,.26) !important;
+}
+.syn-rack-shell > div:first-child,
+.syn-library-shell > div:first-child {
+  background:linear-gradient(145deg,#152a3b,#0c1722) !important;
+  border-color:rgba(88,151,188,.22) !important;
+}
+.syn-rack-shell .syn-processor-card,
+.syn-rack-shell [data-processor-id] {
+  border-color:rgba(77,143,181,.25);
+}
