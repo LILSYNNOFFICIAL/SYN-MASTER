@@ -1032,3 +1032,25 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   border-color: #262118;
   background: linear-gradient(180deg, #17171A, #111114);
 }
+/* Android touch-target pass: keep compact studio controls comfortable on phones. */
+@media (max-width: 767px) {
+  .syn2-btn-ghost,
+  .syn2-btn-gold,
+  .syn2-details-toggle,
+  .syn2-tabs button,
+  .syn2-select select,
+  .syn2-fades select,
+  .syn2-peq-field input[type=number],
+  .syn2-peq-field select,
+  .syn2-peq-tab,
+  .syn2-float-head button {
+    min-height: 40px;
+  }
+  .syn2-btn-ghost,
+  .syn2-btn-gold,
+  .syn2-details-toggle,
+  .syn2-tabs button {
+    justify-content: center;
+  }
+  .syn2-tabs button { padding-block: .6rem; }
+}
