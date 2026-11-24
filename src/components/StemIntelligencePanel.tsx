@@ -569,6 +569,23 @@ export const StemIntelligencePanel: React.FC = () => {
         </p>
       </section>
 
+      {stems.length === 0 && (
+        <section data-testid="workspace-empty-state" data-workspace="stems" className="syn-workspace-empty syn-stem-empty">
+          <div className="syn-stem-empty-art" aria-hidden="true">
+            {['DRUMS', 'BASS', 'MUSIC', 'VOCALS'].map((name, row) => (
+              <div className="syn-stem-empty-lane" key={name}>
+                <span>{name}</span>
+                <i>{Array.from({ length: 28 }, (_, index) => <b key={index} style={{ height: (7 + ((index * 11 + row * 13) % 24)) + 'px' }} />)}</i>
+              </div>
+            ))}
+          </div>
+          <div className="syn-stem-empty-copy">
+            <b>NO STEMS IN SESSION</b>
+            <p>Separate a stereo mix above or import individual stem files to build your multitrack session.</p>
+          </div>
+        </section>
+      )}
+
       {busy && (
         <div className="flex items-center gap-2 rounded border border-[#343A49] bg-[#171A22] p-3 text-xs text-[#D4AF37]">
           <Loader2 size={15} className="animate-spin" /> Decoding audio files…
