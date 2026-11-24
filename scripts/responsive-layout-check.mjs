@@ -109,7 +109,14 @@ async function runViewport(browser, width, height, mobile) {
 
   try {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.getByRole('button', { name: /Try the demo mix/i }).click({ timeout: 15000 });
+    if (mobile) {
+      await page.getByRole('button', { name: /Try the demo mix/i }).click({ timeout: 15000 });
+    } else {
+      await page.locator('.syn-dashboard-welcome').waitFor({ state: 'visible', timeout: 15000 });
+      assert.equal(await page.locator('.syn-dashboard-visual').isVisible(), true, 'Desktop must open on the designed visual mastering dashboard, not the import splash');
+      assert.equal(await page.locator('.syn-signal-art').isVisible(), true, 'Desktop dashboard must include the signal graphic');
+      await page.getByRole('button', { name: /LOAD DEMO SESSION/i }).click({ timeout: 15000 });
+    }
     await page.locator('.syn2-stage').waitFor({ state: 'visible', timeout: 30000 });
     await page.locator('.syn-meter-bridge').waitFor({ state: 'visible', timeout: 10000 });
 
