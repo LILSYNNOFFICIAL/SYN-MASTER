@@ -83,10 +83,10 @@ async function inspectLayout(page, width, workspace) {
   assert.ok(report.footerWidth <= report.footerClientWidth + 1, `${workspace} at ${width}px: meter bridge overflows horizontally`);
   assert.deepEqual(report.offenders, [], `${workspace} at ${width}px: visible elements escape the viewport: ${JSON.stringify(report.offenders)}`);
 
-  if (width === 375) {
+  if (width < 768) {
     assert.equal(report.meterColumns, 5, 'Mobile meter bridge must present five readouts in its second row');
   }
-  if (width === 1440 && workspace === 'studio') {
+  if (width >= 1024 && workspace === 'studio') {
     const display = await page.locator('.syn-daw-main').evaluate((el) => getComputedStyle(el).display);
     const columns = await page.locator('.syn-daw-main').evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length);
     assert.equal(display, 'grid', 'Desktop mastering workspace must retain its grid cockpit');
@@ -128,9 +128,9 @@ async function runViewport(browser, width, height, mobile) {
       const menuBox = await menu.locator(':scope > summary').boundingBox();
       const exportBox = await exportButton.boundingBox();
       assert.ok(logoBox && menuBox && exportBox, 'Mobile header controls must have measurable boxes');
-      assert.ok(logoBox.right <= menuBox.x + 1, `Mobile logo must not overlap Menu: ${JSON.stringify({ logoBox, menuBox, exportBox })}`);
-      assert.ok(menuBox.right <= exportBox.x + 1, `Mobile Menu must not overlap Export: ${JSON.stringify({ logoBox, menuBox, exportBox })}`);
-      assert.ok(exportBox.right <= width + 1, 'Mobile Export button must remain inside the viewport');
+      assert.ok(logoBox.x + logoBox.width <= menuBox.x + 1, `Mobile logo must not overlap Menu: ${JSON.stringify({ logoBox, menuBox, exportBox })}`);
+      assert.ok(menuBox.x + menuBox.width <= exportBox.x + 1, `Mobile Menu must not overlap Export: ${JSON.stringify({ logoBox, menuBox, exportBox })}`);
+      assert.ok(exportBox.x + exportBox.width <= width + 1, 'Mobile Export button must remain inside the viewport');
       await menu.locator(':scope > summary').click();
       assert.equal(await menu.locator(':scope > .syn-menubar').isVisible(), true, 'Mobile command drawer must open');
       await menu.locator('.syn-menu-group > summary').first().click();
@@ -205,7 +205,10 @@ try {
   await waitForPreview();
   const browser = await chromium.launch({ headless: true });
   try {
+    await runViewport(browser, 360, 800, true);
     await runViewport(browser, 375, 812, true);
+    await runViewport(browser, 412, 915, true);
+    await runViewport(browser, 1024, 900, false);
     await runViewport(browser, 1440, 1000, false);
   } finally {
     await browser.close();
