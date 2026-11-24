@@ -1,0 +1,22 @@
+{
+  "id": "/",
+  "name": "SYN MASTER — AI Audio Mastering Workstation",
+  "short_name": "SYN MASTER",
+  "description": "A browser-first audio mastering workstation with offline DSP, objective quality control, and AI-assisted mastering.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#070709",
+  "theme_color": "#070709",
+  "categories": ["music", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/syn-master.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
