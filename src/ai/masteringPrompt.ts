@@ -77,10 +77,29 @@ Valid paramsJson schemas by processor type:
 13. "multiband-maximizer": {"lowCrossHz":number,"highCrossHz":number,"low":{"preGainDb":number,"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"postGainDb":number,"bypass":false},"mid":{...same},"high":{...same},"ceilingDb":number,"releaseMs":number}
 14. "dither": {"bitDepth":16|20|24,"shape":"tpdf"|"tpdf-hp"|"shaped","autoBlank":true} (always LAST; only when delivering below 32-bit float)`;
 
+/** What each user-selected Mode asks of the strategy. Sent as its own line next to the Objective. */
+export const MODE_MEANINGS: Record<MasteringMode, string> = {
+  'ai-auto': 'fully automatic; the AI chooses every setting',
+  manual: 'the user drives the controls; propose conservative, easily adjustable moves',
+  hybrid: 'AI sets a solid starting master that the user will fine-tune by hand; keep moves clear and editable',
+  transparent: 'minimal, transparent processing; preserve the original tone and dynamics',
+  loudness: 'prioritise competitive loudness and density within the true-peak ceiling',
+  analog: 'add analog-style warmth and harmonic character (saturation, gentle glue)',
+  dynamic: 'preserve dynamics and transients; avoid heavy compression and limiting',
+  reference: 'match the tonal balance, loudness and width of the reference track',
+  streaming: 'optimise for streaming platform normalisation and translation',
+  custom: 'follow the custom objective constraints',
+};
+
+export function formatModeLine(mode: MasteringMode): string {
+  return `Mode: ${mode} — ${MODE_MEANINGS[mode] ?? 'user-selected mastering mode'}`;
+}
+
 export function buildStrategyUserPrompt(input: StrategyPromptInput): string {
   const promptParts = [
     summarizeAnalysisForPrompt('SOURCE TRACK MEASUREMENTS', input.analysis),
     `Mastering Objective: ${(input.objective ?? input.mode).toUpperCase()} | Operating Mode: ${input.operatingMode ?? 'autonomous'}`,
+    formatModeLine(input.mode),
     input.customObjective ? `Custom Objective Constraints: ${JSON.stringify(input.customObjective)}` : '',
     input.targetLufs ? `Requested Target Loudness: ${input.targetLufs} LUFS` : '',
     input.userGenreOverride ? `User Genre Classification: ${input.userGenreOverride}` : '',
