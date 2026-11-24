@@ -145,12 +145,12 @@ export const MeterBridge: React.FC<Props> = React.memo(
           </div>
           <div className="syn-meter-metric">
             <span className="syn-meter-label">Gain Red.</span>
-            <strong ref={grReadoutRef} className="syn-meter-value">0.0 dB</strong>
+            <div ref={grReadoutRef} className="syn-meter-value">0.0 dB</div>
           </div>
           <div className="syn-meter-metric syn-meter-phase">
             <div className="syn-meter-phase-head">
               <span className="syn-meter-label">Phase</span>
-              <strong ref={phaseValueRef} className="syn-meter-value syn-meter-phase-value is-good">+1.00</strong>
+              <span ref={phaseValueRef} className="syn-meter-value syn-meter-phase-value is-good">+1.00</span>
             </div>
             <div className="syn-meter-phase-track">
               <span className="syn-meter-phase-center" />
