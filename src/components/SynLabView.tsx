@@ -12,6 +12,7 @@ interface Props {
   chain: ProcessorModule[];
   postChannels: Float32Array[] | null;
   sampleRate: number;
+  defaultSubTab?: LabSubTab;
 }
 
 const MetricCard: React.FC<{ label: string; value: string; delta?: string }> = ({
@@ -32,8 +33,10 @@ export const SynLabView: React.FC<Props> = React.memo(({
   chain,
   postChannels,
   sampleRate,
+  defaultSubTab = 'frequency',
 }) => {
-  const [subTab, setSubTab] = useState<LabSubTab>('frequency');
+  const [subTab, setSubTab] = useState<LabSubTab>(defaultSubTab);
+  React.useEffect(() => setSubTab(defaultSubTab), [defaultSubTab]);
   const active = postAnalysis ?? preAnalysis;
 
   if (!active || !preAnalysis) {
