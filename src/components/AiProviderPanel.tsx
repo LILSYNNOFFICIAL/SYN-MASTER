@@ -40,6 +40,8 @@ export const AiProviderPanel: React.FC = () => {
 
   const [keyDraft, setKeyDraft] = useState('');
   const [showKey, setShowKey] = useState(false);
+  const [serverTokenDraft, setServerTokenDraft] = useState('');
+  const [showServerToken, setShowServerToken] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -96,6 +98,14 @@ export const AiProviderPanel: React.FC = () => {
     setShowKey(false);
   }
 
+  function saveServerAccessToken() {
+    const token = serverTokenDraft.trim();
+    if (token.length < 32 || token.length > 512) return;
+    setProviderSettings((prev) => ({ ...prev, serverAccessToken: token }));
+    setServerTokenDraft('');
+    setShowServerToken(false);
+  }
+
   async function runTest() {
     setTesting(true);
     setTestResult(null);
@@ -140,7 +150,27 @@ export const AiProviderPanel: React.FC = () => {
       </label>
 
       {isBuiltin ? (
-        <p className="text-[11px] text-[#9CA3AF]">Uses this app&rsquo;s server and its own Gemini key, exactly as before. Nothing to set up.</p>
+        <div className="flex flex-col gap-2 text-[11px] text-[#9CA3AF]">
+          <p>Built-in Gemini uses the server-side Gemini key. Hosted production builds require a separate cloud access token from the SYN MASTER operator. Do not paste a Gemini API key here.</p>
+          <label className="flex flex-col gap-1">
+            Cloud AI access token
+            <div className="flex items-center gap-2">
+              <input type={showServerToken ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={serverTokenDraft} onChange={(e) => setServerTokenDraft(e.target.value)} placeholder="Paste server access token" className={inputCls + ' min-w-0 flex-1 font-mono-tabular'} />
+              <button type="button" aria-label={showServerToken ? 'Hide cloud access token' : 'Show cloud access token'} onClick={() => setShowServerToken((v) => !v)} className="p-1.5 rounded border border-[#2B2E3A] text-[#C5CDD8] hover:border-[#D4AF37]">
+                {showServerToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={saveServerAccessToken} disabled={serverTokenDraft.trim().length < 32 || serverTokenDraft.trim().length > 512} className="px-2.5 py-1.5 rounded bg-[#D4AF37] text-[#070709] font-bold disabled:opacity-40">Save token</button>
+            {settings.serverAccessToken ? <><span className="text-emerald-400">Token saved on this device</span><button type="button" onClick={() => setProviderSettings((prev) => ({ ...prev, serverAccessToken: '' }))} className="px-2 py-1.5 rounded border border-[#2B2E3A] text-[#C5CDD8] hover:border-[#F87171] hover:text-[#F87171]">Clear token</button></> : <span>Not configured</span>}
+          </div>
+          <label className="flex items-center gap-1.5 text-[11px] text-[#C5CDD8]">
+            <input type="checkbox" checked={settings.remember} onChange={(e) => setProviderSettings((prev) => ({ ...prev, remember: e.target.checked }))} className="accent-[#D4AF37]" />
+            Remember on this device (otherwise cleared when this tab closes)
+          </label>
+          <p className="text-[10px] text-[#9CA3AF]">The token is sent only as a Bearer authorization header to this SYN MASTER server. Use a random token of at least 32 characters.</p>
+        </div>
       ) : (
         <>
           {editable && (

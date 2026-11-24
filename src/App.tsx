@@ -124,7 +124,7 @@ import { buildDiagnosticLog } from './director/diagnosticLog';
 import { requestRefine, requestStrategy } from './ai/masteringClient';
 import { AiProviderChip, AiProviderPanel } from './components/AiProviderPanel';
 import { describeProvider } from './ai/providerAdapters';
-import { getActiveProviderConfig, runProviderCall } from './ai/providerStore';
+import { getActiveProviderConfig, getBuiltinAccessHeaders, runProviderCall } from './ai/providerStore';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -1400,7 +1400,7 @@ export default function App() {
         const builtinStrategy = async () => {
           const res = await fetch('/api/ai/master', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getBuiltinAccessHeaders() },
             signal: AbortSignal.timeout(12_000),
             body: JSON.stringify(strategyInput),
           });
@@ -1500,7 +1500,7 @@ export default function App() {
                 const builtinRefine = async () => {
                   const res = await fetch('/api/ai/refine', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getBuiltinAccessHeaders() },
                     signal: AbortSignal.timeout(12_000),
                     body: JSON.stringify(ctx),
                   });

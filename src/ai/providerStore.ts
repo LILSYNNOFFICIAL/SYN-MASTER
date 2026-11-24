@@ -16,6 +16,8 @@ export interface ProviderSettings {
   overrides: Record<string, { model?: string; baseUrl?: string; agentic?: boolean; timeoutSec?: number }>;
   /** Per-preset keys. Browser storage only. */
   keys: Record<string, string>;
+  /** Separate bearer credential for the server-owned Gemini endpoint. */
+  serverAccessToken: string;
   remember: boolean;
 }
 
@@ -33,6 +35,7 @@ export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
   presetId: BUILTIN_PROVIDER_ID,
   overrides: {},
   keys: {},
+  serverAccessToken: '',
   remember: false,
 };
 
@@ -54,6 +57,7 @@ function load(): ProviderSettings {
         presetId: getPreset(parsed.presetId).id,
         overrides: parsed.overrides && typeof parsed.overrides === 'object' ? parsed.overrides : {},
         keys: parsed.keys && typeof parsed.keys === 'object' ? parsed.keys : {},
+        serverAccessToken: typeof parsed.serverAccessToken === 'string' ? parsed.serverAccessToken.slice(0, 512) : '',
         remember: kind === 'local',
       };
     } catch {
@@ -71,14 +75,14 @@ const notify = () => listeners.forEach((l) => l());
 function persist(next: ProviderSettings) {
   const session = safeStorage('session');
   const local = safeStorage('local');
-  const isDefault = next.presetId === BUILTIN_PROVIDER_ID && Object.keys(next.keys).length === 0 && Object.keys(next.overrides).length === 0;
+  const isDefault = next.presetId === BUILTIN_PROVIDER_ID && Object.keys(next.keys).length === 0 && Object.keys(next.overrides).length === 0 && !next.serverAccessToken.trim();
   try {
     if (isDefault) {
       session?.removeItem(STORAGE_KEY);
       local?.removeItem(STORAGE_KEY);
       return;
     }
-    const raw = JSON.stringify({ presetId: next.presetId, overrides: next.overrides, keys: next.keys });
+    const raw = JSON.stringify({ presetId: next.presetId, overrides: next.overrides, keys: next.keys, serverAccessToken: next.serverAccessToken });
     if (next.remember) {
       local?.setItem(STORAGE_KEY, raw);
       session?.removeItem(STORAGE_KEY);
@@ -93,6 +97,12 @@ function persist(next: ProviderSettings) {
 
 export function getProviderSettings(): ProviderSettings {
   return settings;
+}
+
+/** Authorization header for the server-owned Gemini endpoints. */
+export function getBuiltinAccessHeaders(): Record<string, string> {
+  const token = settings.serverAccessToken.trim();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export function setProviderSettings(update: (prev: ProviderSettings) => ProviderSettings) {
