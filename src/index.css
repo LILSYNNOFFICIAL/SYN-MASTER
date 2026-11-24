@@ -949,6 +949,18 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   .syn2-stage-head { align-items: flex-start; }
   .syn2-track { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
   .syn2-stage-tools { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .syn2-stage-tools > .syn2-select {
+    flex: 1 1 220px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .syn2-stage-tools > .syn2-select select {
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .syn2-stage-tools > button { min-height: 40px; }
   .syn2-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .syn2-stat { min-width: 0; padding: 9px; }
   .syn2-stat-val { flex-wrap: wrap; overflow-wrap: anywhere; }
