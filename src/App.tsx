@@ -2106,7 +2106,7 @@ export default function App() {
 
         {/* BlueNote-grade command menu: grouped actions, keyboard-friendly native disclosure menus */}
         <details className="syn-mobile-command-menu"><summary>Menu</summary>
-          <nav aria-label="Application Menu" className="syn-menubar">
+          <nav aria-label="Application Menu" className="syn-menubar" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.closest("details")?.removeAttribute("open"); }}>
           <details className="syn-menu-group">
             <summary>File</summary>
             <div className="syn-menu-panel" role="menu" aria-label="File">
