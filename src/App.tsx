@@ -2940,6 +2940,7 @@ export default function App() {
                 sampleRate={activeTrack.sampleRate}
                 mode={spectrumMode}
                 waveformPeaks={activeTrack.peaks}
+                durationSec={activeTrack.durationSec}
                 heightClass="h-64"
               />
             </section>
