@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
 
 const baseUrl = 'http://127.0.0.1:4180';
-const server = spawn('npm', ['run', 'preview', '--', '--host', '127.0.0.1', '--port', '4180', '--strictPort'], {
+const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4180', '--strictPort'], {
   stdio: 'ignore',
   env: process.env,
 });
@@ -115,13 +115,13 @@ async function runViewport(browser, width, height, mobile) {
 
     if (mobile) {
       const menu = page.locator('.syn-mobile-command-menu');
-      assert.equal(await menu.locator('> summary').isVisible(), true, 'Mobile header must show the single Menu control');
+      assert.equal(await menu.locator(':scope > summary').isVisible(), true, 'Mobile header must show the single Menu control');
       assert.equal(await page.locator('.syn-header-export').isVisible(), true, 'Mobile header must keep Export visible');
-      await menu.locator('> summary').click();
-      assert.equal(await menu.locator('> .syn-menubar').isVisible(), true, 'Mobile command drawer must open');
+      await menu.locator(':scope > summary').click();
+      assert.equal(await menu.locator(':scope > .syn-menubar').isVisible(), true, 'Mobile command drawer must open');
       await menu.locator('.syn-menu-group > summary').first().click();
       assert.equal(await menu.locator('.syn-menu-panel').first().isVisible(), true, 'Mobile command groups must expand');
-      await menu.locator('> summary').click();
+      await menu.locator(':scope > summary').click();
     }
 
     await inspectLayout(page, width, 'studio');
