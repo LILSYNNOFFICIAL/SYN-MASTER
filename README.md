@@ -469,3 +469,11 @@ The client-entered cloud token is a shared bearer credential, not individual use
 - **Brand:** official logo `public/brand/syn-master-logo.{png,webp}`; round mark `public/brand/syn-master-mark.{png,webp}` (header, beside the gold serif wordmark); splash uses the full logo. Icons: `public/favicon.ico`, `public/icons/syn-master-{192,512}.png`, `syn-master-maskable-{192,512}.png`, `apple-touch-icon.png`; Windows multi-size `public/brand/syn-master.ico` for the companion.
 - **Layouts (one codebase, CSS breakpoints):** desktop ≥1024 px = console (`src/components/console/MasterConsole.tsx`): Input/Transient/Stereo left, SYN EQ centre (console variant of `ParametricEQ2`), Global · FIX ALL AI · Presets below, Dynamics/Color/Output/Loudness right, bottom tab bar. <1024 px = mockup-5 portrait grid, fixed bottom tab bar, safe-area insets, ≥44 px targets. Audio library is a drawer behind the header menu button.
 - **Wiring rule:** every console control edits the real chain via the same `updateChainWithHistory` path as the rack; missing processors show "Add …" (inserted before loudness stages) instead of dead knobs; readouts are measured analysis values. FIX ALL AI calls the unchanged Director loop; Stop uses the existing stop flag.
+
+### GUI redesign (in progress, Nov 24 2026)
+- [x] Desktop console + mobile portrait grid, bottom tab bar, library drawer, logo/icons/manifest (`262dd06`).
+- [x] Settings → Layout: Automatic / Desktop view / Mobile view, stored in localStorage (`833c4da`).
+- [ ] Skin layer: move all colours/glows/fonts into one swappable theme file + `public/skin/` artwork (knob faces, meter skins, panel/glow backgrounds, icons) shared with the companion.
+- [ ] Plugins & Host tab restyle (companion status, scanned plugins, add-to-chain, parameters/editor button).
+- [ ] Re-run `scripts/responsive-layout-check.mjs` in CI (updated for the new layout; passed locally at 360–1440 px, the run did not exit cleanly afterwards) and final screenshots.
+- **Re-import into AI Studio:** pull `main`, import the GitHub repo into Google AI Studio, then build and republish. No new build steps: same entry files, assets live in `public/`.
