@@ -250,7 +250,32 @@ interface SpectrumCanvasProps {
   onSeek?: (sec: number) => void;
 }
 
-const SPECTRO_COLS = 160;
+const SPECTRO_COLS = 320;
+
+/** Spectrogram colour map: deep navy → purple → electric blue → cyan → ice white (256 RGB triples). */
+const SPECTRO_LUT: Uint8ClampedArray = (() => {
+  const stops: Array<[number, number, number, number]> = [
+    [0, 3, 6, 14],
+    [0.18, 18, 12, 58],
+    [0.38, 76, 29, 149],
+    [0.58, 46, 168, 255],
+    [0.8, 63, 224, 255],
+    [1, 236, 252, 255],
+  ];
+  const lut = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255;
+    let k = 0;
+    while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
+    const [t0, r0, g0, b0] = stops[k];
+    const [t1, r1, g1, b1] = stops[k + 1];
+    const u = Math.max(0, Math.min(1, (t - t0) / (t1 - t0)));
+    lut[i * 3] = r0 + (r1 - r0) * u;
+    lut[i * 3 + 1] = g0 + (g1 - g0) * u;
+    lut[i * 3 + 2] = b0 + (b1 - b0) * u;
+  }
+  return lut;
+})();
 
 export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
   ({
@@ -286,6 +311,16 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       head: 0,
       count: 0,
     });
+
+    const spectroRef = useRef<{
+      canvas: HTMLCanvasElement | null;
+      img: ImageData | null;
+      lo: Float32Array | null;
+      hi: Float32Array | null;
+      mapH: number;
+      mapBins: number;
+      mapSr: number;
+    }>({ canvas: null, img: null, lo: null, hi: null, mapH: 0, mapBins: 0, mapSr: 0 });
 
     // Pre-allocated scratch buffers for live FFT curve coordinates
     const liveXRef = useRef<Float32Array>(new Float32Array(0));
@@ -343,7 +378,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       // Playback cursor follows engine telemetry over the composite waveform/EQ view.
-      if (waveformPeaksRef.current.length > 0 && durationSecRef.current > 0) {
+      if (modeRef.current !== 'spectrogram' && waveformPeaksRef.current.length > 0 && durationSecRef.current > 0) {
         const progress = Math.max(0, Math.min(1, snap.currentTimeSec / durationSecRef.current));
         const playheadX = padL + progress * plotW;
         ctx.save();
@@ -370,29 +405,96 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
 
       if (modeRef.current === 'spectrogram') {
         const ring = ringRef.current;
-        if (ring.count > 1) {
-          const cols = ring.count;
-          const colW = plotW / cols;
-          const startIdx = ring.count < SPECTRO_COLS ? 0 : ring.head;
-          for (let c = 0; c < cols; c++) {
-            const rowIdx = (startIdx + c) % SPECTRO_COLS;
-            const bins = ring.rows[rowIdx];
-            const binHz = sr / (bins.length * 2);
-            for (let y = 0; y < plotH; y += 3) {
-              const normY = 1 - y / plotH;
-              const freq = minF * Math.pow(maxF / minF, normY);
-              const binIdx = Math.min(bins.length - 1, Math.max(0, Math.round(freq / binHz)));
-              const val = bins[binIdx] / 255;
-              if (val > 0.05) {
-                const r = Math.round(val * 242);
-                const g = Math.round(val * val * 195);
-                const b = Math.round(val * 55);
-                ctx.fillStyle = `rgb(${r},${g},${b})`;
-                ctx.fillRect(padL + c * colW, padT + y, Math.ceil(colW) + 1, 3);
+        const pxH = Math.max(1, Math.round(plotH * dpr));
+        if (ring.count > 0 && ring.binsPerCol > 0) {
+          const cols = SPECTRO_COLS;
+          const sg = spectroRef.current;
+          if (!sg.canvas) sg.canvas = document.createElement('canvas');
+          const off = sg.canvas;
+          if (off.width !== cols || off.height !== pxH) {
+            off.width = cols;
+            off.height = pxH;
+            sg.img = null;
+          }
+          const octx = off.getContext('2d');
+          if (octx) {
+            if (!sg.img) sg.img = octx.createImageData(cols, pxH);
+            // Row → FFT-bin map on a log axis, one entry per device-pixel row. Low rows that
+            // fall inside one bin interpolate; high rows spanning many bins take the max.
+            if (sg.mapH !== pxH || sg.mapBins !== ring.binsPerCol || sg.mapSr !== sr) {
+              sg.lo = new Float32Array(pxH);
+              sg.hi = new Float32Array(pxH);
+              const binHz = sr / (ring.binsPerCol * 2);
+              for (let y = 0; y < pxH; y++) {
+                const fTop = minF * Math.pow(maxF / minF, 1 - y / pxH);
+                const fBot = minF * Math.pow(maxF / minF, 1 - (y + 1) / pxH);
+                sg.lo[y] = Math.max(0, Math.min(ring.binsPerCol - 1, fBot / binHz));
+                sg.hi[y] = Math.max(0, Math.min(ring.binsPerCol - 1, fTop / binHz));
+              }
+              sg.mapH = pxH;
+              sg.mapBins = ring.binsPerCol;
+              sg.mapSr = sr;
+            }
+            const data = sg.img.data;
+            const lo = sg.lo!;
+            const hi = sg.hi!;
+            const filled = ring.count;
+            const startIdx = ring.count < SPECTRO_COLS ? 0 : ring.head;
+            const firstCol = cols - filled;
+            for (let c = 0; c < cols; c++) {
+              const bins = c >= firstCol ? ring.rows[(startIdx + (c - firstCol)) % SPECTRO_COLS] : null;
+              for (let y = 0; y < pxH; y++) {
+                let v = 0;
+                if (bins) {
+                  const a = lo[y];
+                  const b = hi[y];
+                  if (b - a < 1) {
+                    const m = (a + b) * 0.5;
+                    const i0 = Math.floor(m);
+                    const i1 = Math.min(bins.length - 1, i0 + 1);
+                    v = bins[i0] + (bins[i1] - bins[i0]) * (m - i0);
+                  } else {
+                    for (let k = Math.floor(a); k <= Math.ceil(b); k++) if (bins[k] > v) v = bins[k];
+                  }
+                }
+                // Contrast curve: pushes the noise floor down so partials read clearly.
+                const li = Math.max(0, Math.min(255, Math.round(255 * Math.pow(v / 255, 1.6))));
+                const o = (y * cols + c) * 4;
+                data[o] = SPECTRO_LUT[li * 3];
+                data[o + 1] = SPECTRO_LUT[li * 3 + 1];
+                data[o + 2] = SPECTRO_LUT[li * 3 + 2];
+                data[o + 3] = 255;
               }
             }
+            octx.putImageData(sg.img, 0, 0);
+            ctx.save();
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(off, padL, padT, plotW, plotH);
+            ctx.restore();
           }
+        } else {
+          ctx.fillStyle = '#7FB8E6';
+          ctx.font = '11px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('Press play to draw the spectrogram', padL + plotW / 2, padT + plotH / 2);
         }
+        // Log-frequency axis on top of the image.
+        ctx.font = w < 420 ? '8px "JetBrains Mono", monospace' : '10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'right';
+        for (const fm of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
+          const y = Math.round(padT + (1 - Math.log10(fm / minF) / logSpan) * plotH) + 0.5;
+          ctx.strokeStyle = 'rgba(160,220,255,0.16)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(padL, y);
+          ctx.lineTo(padL + plotW, y);
+          ctx.stroke();
+          ctx.fillStyle = '#8FC8F0';
+          ctx.fillText(fm >= 1000 ? `${fm / 1000}k` : `${fm}`, padL - 4, y + 3);
+        }
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#5F8FB8';
+        ctx.fillText('time →', padL + 2, h - 6);
         return;
       }
 
@@ -472,15 +574,12 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       ctx.fillStyle = '#090A0E';
       ctx.fillRect(0, 0, w, h);
 
-      if (mode === 'spectrogram' && (postAnalysis ?? preAnalysis)) {
-        const src = (postAnalysis ?? preAnalysis)!;
-        for (let x = 0; x < plotW; x += 4) {
-          const ratio = x / plotW;
-          const idx = Math.min(src.spectrumBinsDb.length - 1, Math.floor(ratio * src.spectrumBinsDb.length));
-          const norm = Math.max(0, Math.min(1, (src.spectrumBinsDb[idx] + 72) / 68));
-          ctx.fillStyle = `rgba(212, 175, 55, ${norm * 0.25})`;
-          ctx.fillRect(padL + x, padT + (1 - norm) * plotH, 3, norm * plotH);
-        }
+      if (mode === 'spectrogram') {
+        // Spectrogram: the image, log-frequency axis and labels are drawn per frame.
+        ctx.fillStyle = '#03060E';
+        ctx.fillRect(padL, padT, plotW, plotH);
+        drawFrame(telemetryStore.getSnapshot());
+        return;
       }
 
       const freqMarkers = [20, 30, 60, 100, 250, 500, 1000, 2000, 5000, 10000, 20000];
@@ -685,7 +784,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       setHoverInfo({ freqHz, db });
     };
 
-    const canSeek = Boolean(onSeek) && durationSec > 0 && waveformPeaks.length > 0;
+    const canSeek = Boolean(onSeek) && durationSec > 0 && waveformPeaks.length > 0 && mode !== 'spectrogram';
     const seekFromEvent = (e: React.PointerEvent<HTMLCanvasElement>) => {
       const fn = onSeekRef.current;
       const dur = durationSecRef.current;

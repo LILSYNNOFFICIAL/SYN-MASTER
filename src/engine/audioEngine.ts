@@ -106,7 +106,7 @@ export class SynAudioEngine {
       this.monitorGain.gain.value = this.monitorVolume;
 
       this.analyserMain = this.ctx.createAnalyser();
-      this.analyserMain.fftSize = 2048;
+      this.analyserMain.fftSize = 8192; // display-only analyser (spectrum, spectrogram); meters use analyserL/R
       this.analyserMain.smoothingTimeConstant = 0.72;
       this.fftBuf = new Uint8Array(this.analyserMain.frequencyBinCount);
 
