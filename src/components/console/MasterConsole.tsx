@@ -3,6 +3,7 @@ import { BrainCircuit, Download, MessageSquareText, Plus, Square, Upload } from 
 import type {
   AudioAnalysis,
   CompressorParams,
+  DynamicEQParams,
   LimiterParams,
   MasterFinalReport,
   MasteringPreset,
@@ -17,6 +18,7 @@ import type {
 import { LOUDNESS_TARGET_PRESETS } from '../../dsp/loudnessTargets';
 import { MODULE_CATALOG } from '../studio/moduleCatalog';
 import { ParametricEQ2 } from '../studio/ParametricEQ2';
+import { DynamicEQPanel } from '../studio/DynamicEQPanel';
 import { SpectrumAndEQCanvas } from '../CanvasVisualizers';
 import { ArcKnob } from './ArcKnob';
 import { GlowFader } from './GlowFader';
@@ -234,7 +236,7 @@ const StepLabel: React.FC<{ n: number; text: string; hint?: string; className?: 
 );
 
 export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
-  const [eqView, setEqView] = useState<'eq' | 'spectrum' | 'spectrogram'>('eq');
+  const [eqView, setEqView] = useState<'eq' | 'dyneq' | 'spectrum' | 'spectrogram'>('eq');
   const [presetId, setPresetId] = useState<string>(p.presets[0]?.id ?? '');
   const modeInfo = p.mode ? MODE_INFO[p.mode] : undefined;
   const suggestedPreset = modeInfo?.preset && p.presets.some((x) => x.id === modeInfo.preset) ? modeInfo.preset : null;
@@ -255,6 +257,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
   };
 
   const eq = find('parametric-eq');
+  const dynEq = chain.find((m) => m.type === 'dynamic-eq');
   const ts = find('transient-shaper');
   const comp = find('compressor');
   const sat = find('saturation');
@@ -400,12 +403,19 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               <p className="syn-eq-sub">{eq ? eq.name : 'Precision · Color · Balance'}{p.sampleRate ? ` · ${(p.sampleRate / 1000).toFixed(1)} kHz` : ''}</p>
             </div>
             <div className="syn-seg" role="group" aria-label="EQ view">
-              {([['eq', 'EQ'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
+              {([['eq', 'EQ'], ['dyneq', 'Dynamic EQ'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
                 <button key={id} type="button" aria-pressed={eqView === id} className={eqView === id ? 'is-on' : ''} onClick={() => setEqView(id)}>{label}</button>
               ))}
             </div>
           </div>
-          {eqView === 'eq' ? (
+          {eqView === 'dyneq' ? (
+            <DynamicEQPanel
+              module={dynEq}
+              onAdd={() => add('dynamic-eq')}
+              onChange={(next) => { if (dynEq) setParams<DynamicEQParams>(dynEq, next); }}
+              onToggle={(on) => { if (dynEq) patch(dynEq.id, { enabled: true, bypassed: !on }); }}
+            />
+          ) : eqView === 'eq' ? (
             eq ? (
               <ParametricEQ2
                 variant="console"
@@ -426,7 +436,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               referenceAnalysis={p.referenceAnalysis}
               chain={p.chainBypassed ? [] : chain}
               sampleRate={p.sampleRate}
-              mode={eqView}
+              mode={eqView === 'spectrogram' ? 'spectrogram' : 'spectrum'}
               waveformPeaks={p.waveformPeaks}
               durationSec={p.durationSec}
               onSeek={p.onSeek}
