@@ -2575,7 +2575,7 @@ export default function App() {
 
 
           {/* Transport & Waveform Stage (Full waveform on Studio & Reference; compact transport bar on other tabs) */}
-          {!activeTrack && (activeTab === 'plugins' || activeTab === 'stems') ? null : !activeTrack ? (
+          {!activeTrack && (activeTab === 'plugins' || activeTab === 'stems') ? null : !activeTrack && activeTab === 'studio' ? (
             <StudioWelcome
               projectCount={projects.length}
               processorCount={chain.length}
