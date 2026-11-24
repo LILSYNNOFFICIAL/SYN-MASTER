@@ -2330,7 +2330,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="syn-control-desk-actions flex flex-wrap items-center gap-2">
-                  <button type="button" disabled={directorRunning} onClick={handleAnalyzeTrack>
+                  <button type="button" disabled={directorRunning} onClick={handleAnalyzeTrack}
                     className="rounded-md border border-[#8B6A1B] bg-[#171208] px-3 py-2 text-[11px] font-bold text-[#E8C85A] hover:border-[#F2CA52] disabled:opacity-45">
                     ANALYZE TRACK
                   </button>
