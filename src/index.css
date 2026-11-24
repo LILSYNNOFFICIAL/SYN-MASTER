@@ -1154,3 +1154,16 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
   .syn2-track { max-width:76vw !important; font-size:18px !important; }
   .syn2-fix-btn { padding:15px 22px !important; }
 }
+
+
+.syn2-fix-centerpiece {
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+  padding:10px 12px 4px;
+  background:radial-gradient(ellipse at center,rgba(21,75,112,.15),transparent 68%);
+}
+.syn2-run-panel {
+  padding:13px 16px; border-radius:12px;
+  background:linear-gradient(145deg,#102237,#081522);
+  border:1px solid rgba(65,171,226,.35);
+  box-shadow:0 8px 24px rgba(0,0,0,.24);
+}
