@@ -118,6 +118,7 @@ const PluginManagerView = React.lazy(() =>
 const ExportModal = React.lazy(() => import('./components/Modals').then(({ ExportModal }) => ({ default: ExportModal })));
 const SettingsModal = React.lazy(() => import('./components/Modals').then(({ SettingsModal }) => ({ default: SettingsModal })));
 import { WorkspaceNavigation } from './components/WorkspaceNavigation';
+import { WorkspaceHero } from './components/WorkspaceHero';
 import { ImportScreen } from './components/studio/ImportScreen';
 import { StudioWelcome } from './components/studio/StudioWelcome';
 import { FixItStage } from './components/studio/FixItStage';
@@ -2957,6 +2958,8 @@ export default function App() {
               />
             </section>
           )}
+
+          {activeTab !== 'studio' && <WorkspaceHero workspace={activeTab} hasTrack={Boolean(activeTrack)} />}
 
           {activeTab === 'stems' && <StemIntelligencePanel />}
 
