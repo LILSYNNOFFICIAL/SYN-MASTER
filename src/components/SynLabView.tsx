@@ -63,7 +63,7 @@ export const SynLabView: React.FC<Props> = React.memo(({
   return (
     <div className="flex flex-col gap-4">
       {/* Sub-lab selector */}
-      <div className="flex items-center gap-1 p-1 rounded bg-[#111217] border border-[#242732] w-fit">
+      <div className="syn-lab-tab-nav flex items-center gap-1 p-1 rounded bg-[#111217] border border-[#242732] w-fit">
         {(
           [
             { id: 'frequency', label: 'Frequency Lab' },
