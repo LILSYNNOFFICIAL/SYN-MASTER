@@ -386,3 +386,9 @@ The live `/api/health` response only verifies configuration presence, not full A
 - A shared rate limiter is still needed if the service is later scaled across multiple server instances.
 - Avoid logging request bodies, audio, or credentials.
 
+
+
+## Parallel execution update — November 23, 2026
+
+- [x] **Production Gemini access gate (server-side):** production `/api/ai/*` routes now have a separate bearer-token gate in `src/server/aiAccess.ts`. The gate fails closed when the configured token is absent/too short, rejects missing or incorrect credentials before JSON parsing/Gemini work, and compares credentials with a constant-time byte comparison. The Gemini API key remains server-only. Middleware regression tests are included. The browser Settings field and production secret wiring are the next commit; this source change alone is not a deploy-ready configuration.
+- [ ] **Hosted deployment verification:** set the separate `SYN_MASTER_AI_ACCESS_TOKEN` deployment secret, sync the source into AI Studio, inspect Cloud Run/IAM/IAP, and verify unauthorized calls are rejected without billable Gemini usage.

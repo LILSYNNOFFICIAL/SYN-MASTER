@@ -17,6 +17,7 @@ import {
 } from './src/server/aiMastering.ts';
 import { isValidAnalysisPayload, sanitizeAvailablePlugins } from './src/server/aiPayloadValidation.ts';
 import { createRateLimiter } from './src/server/requestLimiter.mjs';
+import { createAiAccessGuard } from './src/server/aiAccess.ts';
 import { validateChainAgainstInventory } from './src/director/processorInventory.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -49,7 +50,13 @@ function aiRateLimiter(
   next();
 }
 // Apply the AI limiter before JSON parsing so malformed or oversized requests are rate-limited too.
-app.use('/api/ai', aiRateLimiter);
+const aiAccessGuard = createAiAccessGuard({
+  accessToken: process.env.SYN_MASTER_AI_ACCESS_TOKEN,
+  production: process.env.NODE_ENV === 'production',
+});
+// Keep the existing IP budget in front of the access check, then reject unauthenticated
+// production calls before JSON parsing or any billable Gemini work.
+app.use('/api/ai', aiRateLimiter, aiAccessGuard);
 // Offline codec jobs are CPU-intensive but must not compete with AI requests for the
 // same budget, so export has its own per-client limiter.
 const allowExportRequest = createRateLimiter({ limit: 30, windowMs: 60_000, maxKeys: 10_000 });
