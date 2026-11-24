@@ -357,7 +357,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
 
       {/* Browser-Only Honest Empty State */}
       {!isConnected && snapshot.plugins.length === 0 ? (
-        <section className="p-6 rounded bg-[#111217] border border-[#242732] grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section data-testid="workspace-empty-state" data-workspace="plugins" className="syn-workspace-empty syn-workspace-empty-plugins p-6 rounded bg-[#111217] border border-[#242732] grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="flex flex-col gap-3">
             <h2 className="font-display text-sm font-bold text-[#F2CA52] uppercase tracking-wider">
               Windows 11 Companion Host Required for Native Plugins
