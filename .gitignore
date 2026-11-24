@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
+desktop/node_modules/
+desktop/dist/
+desktop/native/
+desktop/release/
+desktop/server.production.mjs

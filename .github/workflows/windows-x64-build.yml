@@ -5,6 +5,11 @@ on:
   push:
     paths:
       - 'native/**'
+      - 'desktop/**'
+      - 'src/**'
+      - 'server.ts'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/windows-x64-build.yml'
 
 permissions:
@@ -47,6 +52,32 @@ jobs:
         working-directory: native
         shell: pwsh
         run: ./scripts/validate_windows_vst3.ps1 -BuildDir build/windows-x64-release -SkipSystemInstall -SkipAudioHardware
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install SYN MASTER web and server dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build the browser UI and production Express runtime
+        run: npm run build:desktop
+
+      - name: Install Electron packaging dependencies
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+
+      - name: Build unsigned Windows x64 workstation installer
+        working-directory: desktop
+        run: npm run dist:win
+
+      - name: Upload unsigned Windows workstation installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: syn-master-workstation-win-x64-unsigned
+          if-no-files-found: error
+          path: desktop/release/*.exe
+
 
       - name: Upload Windows x64 Artifacts
         uses: actions/upload-artifact@v4

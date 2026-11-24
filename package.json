@@ -11,7 +11,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.mjs\"",
-    "check:bundle": "node scripts/check-bundle-budget.mjs"
+    "check:bundle": "node scripts/check-bundle-budget.mjs",
+    "build:desktop-server": "esbuild server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=desktop/server.production.mjs",
+    "build:desktop": "npm run build && npm run build:desktop-server && node desktop/scripts/prepare-runtime.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.32.0",
