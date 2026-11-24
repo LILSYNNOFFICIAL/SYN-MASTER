@@ -1253,3 +1253,11 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 .syn-stem-empty-copy>b{color:#e8c77e;font:800 9px var(--syn-font-mono);letter-spacing:.12em}
 .syn-stem-empty-copy>p{margin-top:7px;color:#9bb1c2;font-size:9px;line-height:1.7}
 @media(max-width:767px){.syn-stem-empty{align-items:stretch;flex-direction:column;gap:13px;padding:13px}.syn-stem-empty-copy{max-width:none}.syn-stem-empty-lane{grid-template-columns:48px minmax(0,1fr)}.syn-workspace-empty:not(.syn-workspace-empty-plugins):not(.syn-stem-empty){padding:18px 14px}}
+
+/* Active navigation and processing hardware share the same signal-first finish. */
+.syn-library-tab[data-active="true"]{color:#a8ddff!important;border-bottom-color:#58c4ff!important;background:linear-gradient(180deg,rgba(25,83,119,.24),rgba(11,28,43,.58))!important;box-shadow:inset 0 -1px 0 rgba(117,207,255,.3)}
+.syn-library-tab[data-active="true"] svg{color:#78d0ff}
+.syn-library-tab:focus-visible{outline:2px solid #58c4ff;outline-offset:-2px}
+.syn-mastering-rack{border:1px solid rgba(75,145,186,.32);border-radius:11px;background:linear-gradient(155deg,#0e1c2a,#08131e 70%,#080d14)!important;box-shadow:inset 0 1px rgba(255,255,255,.035),0 14px 34px rgba(0,0,0,.25)}
+.syn-mastering-rack>div:first-child{background:linear-gradient(115deg,#14283b,#0a1622)!important;border-color:rgba(84,153,191,.24)!important}
+.syn-mastering-rack button:focus-visible,.syn-mastering-rack select:focus-visible,.syn-mastering-rack input:focus-visible{outline:2px solid #58c4ff;outline-offset:2px}
