@@ -122,7 +122,7 @@ async function runViewport(browser, width, height, mobile) {
       await page.locator('.syn-workspace-menu-item').filter({ hasText: 'AI Director' }).click();
       await page.locator('.syn-ai-hero').waitFor({ state: 'visible', timeout: 10000 });
       assert.equal(await page.getByText('WAITING FOR SOURCE AUDIO').isVisible(), true, 'AI Assistant must have a designed empty state before import');
-      assert.equal(await page.locator('[data-testid="workspace-empty-state"]').isVisible(), true, 'AI Assistant must expose a distinct pre-import state');
+      assert.equal(await page.locator('[data-testid="workspace-empty-state"][data-workspace="ai"]').isVisible(), true, 'AI Assistant must expose a distinct pre-import state');
       assert.equal(await page.locator('[data-testid="workspace-hero"][data-workspace="ai"]').isVisible(), true, 'AI Assistant must have the shared workspace identity header before source import');
       assert.equal(await page.locator('[data-testid="workspace-hero"][data-workspace="ai"] [data-testid="workspace-hero-graphic"]').isVisible(), true, 'AI Assistant must show its native instrument graphic');
       for (const [id, label] of [
@@ -136,7 +136,7 @@ async function runViewport(browser, width, height, mobile) {
         await page.locator('.syn-primary-nav-more').click();
         await page.locator('.syn-workspace-menu-item').filter({ hasText: label }).click();
         await page.locator(`main[data-layout="${id}"]`).waitFor({ state: 'visible', timeout: 10000 });
-        const emptyState = page.locator('[data-testid="workspace-empty-state"]');
+        const emptyState = page.locator(`[data-testid="workspace-empty-state"][data-workspace="${id}"]`);
         await emptyState.waitFor({ state: 'visible', timeout: 10000 });
         assert.equal(await emptyState.isVisible(), true, `${label} must explain its no-source/no-host state`);
       }
