@@ -669,6 +669,7 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 }
 .syn-daw-body > *,
 .syn-daw-main > *,
+.syn-daw-main .grid > *,
 .syn-daw-main [data-testid],
 .syn-daw-main section,
 .syn-daw-main article {
