@@ -112,9 +112,9 @@ export const FixItStage: React.FC<Props> = (p) => {
           <div className="syn2-fix-overlay">
             <button type="button" className="syn2-fix-btn" onClick={p.onFix}>
               <Sparkles className="w-6 h-6" />
-              FIX IT ALL WITH AI
+              <span className="syn2-fix-label"><span>FIX ALL</span><small>AI</small></span>
             </button>
-            <div className="syn2-fix-hint">Analyze → repair → master → re-measure, repeated until every target passes</div>
+            <div className="syn2-fix-hint">ANALYZE · BALANCE · ENHANCE</div>
           </div>
         )}
         {p.running && (
