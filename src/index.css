@@ -795,7 +795,8 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 .syn-meter-phase-marker { position: absolute; top: 0; bottom: 0; width: 8px; border-radius: 2px; background: #F5B82E; box-shadow: 0 0 8px rgba(245, 184, 46, .35); }
 
 .syn-mobile-command-menu { display: contents; }
-.syn-mobile-command-menu > summary { display: none; }
+.syn-mobile-menu-toggle,
+.syn-mobile-menu-trigger { display: none; }
 .syn-mobile-command-menu > .syn-menubar { display: flex !important; }
 
 @media (max-width: 1023px) {
@@ -838,7 +839,7 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
     white-space: nowrap;
     font-size: 13px;
   }
-  .syn-workstation > header.syn-app-header > details.syn-mobile-command-menu {
+  .syn-workstation > header.syn-app-header > .syn-mobile-command-menu {
     width: 64px;
     justify-self: center;
   }
@@ -850,7 +851,20 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
     grid-row: 1;
     min-width: 0;
   }
-  .syn-mobile-command-menu > summary {
+  .syn-mobile-command-menu > .syn-mobile-menu-toggle {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  .syn-mobile-command-menu > .syn-mobile-menu-trigger {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -864,14 +878,12 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
     font-size: 11px;
     font-weight: 800;
     letter-spacing: .08em;
-    list-style: none;
     cursor: pointer;
   }
-  .syn-mobile-command-menu > summary::-webkit-details-marker { display: none; }
-  .syn-mobile-command-menu[open] > summary { background: #F5B82E; color: #08080A; }
-  .syn-mobile-command-menu > .syn-menubar,
-  .syn-mobile-command-menu:not([open]) > .syn-menubar { display: none !important; }
-  .syn-mobile-command-menu[open] > .syn-menubar {
+  .syn-mobile-menu-toggle:checked + .syn-mobile-menu-trigger { background: #F5B82E; color: #08080A; }
+  .syn-mobile-menu-toggle:focus-visible + .syn-mobile-menu-trigger { outline: 2px solid #FFF3CC; outline-offset: 2px; }
+  .syn-mobile-command-menu > .syn-menubar { display: none !important; }
+  .syn-mobile-menu-toggle:checked ~ .syn-menubar {
     position: fixed;
     z-index: 120;
     top: calc(env(safe-area-inset-top, 0px) + 64px);
