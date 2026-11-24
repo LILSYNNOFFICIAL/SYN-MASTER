@@ -22,6 +22,7 @@ import { ArcKnob } from './ArcKnob';
 import { GlowFader } from './GlowFader';
 import { LightRibbons } from './LightRibbons';
 import { StereoMeters, StereoScope } from './StereoScope';
+import { telemetryStore, type RuntimeTelemetryState } from '../../engine/telemetryStore';
 
 /**
  * SYN-MASTER console (reference-mockup layout). A presentation layer only: every control
@@ -133,6 +134,32 @@ const AddModule: React.FC<{ type: ProcessorType; onAdd: (t: ProcessorType) => vo
     <Plus className="w-3.5 h-3.5" /> Add {LABEL_FOR[type] ?? type}
   </button>
 );
+
+/** Live short-window RMS / peak from the playback analyser (honestly labelled: not LUFS). */
+const LiveLevel: React.FC = () => {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    let sm = -90;
+    const update = (snap: RuntimeTelemetryState) => {
+      const el = ref.current;
+      if (!el) return;
+      const live = snap.isPlaying ? snap.live : null;
+      if (!live) {
+        el.dataset.live = 'false';
+        el.textContent = 'Live level: press play';
+        return;
+      }
+      const rms = Math.max(live.rmsL, live.rmsR);
+      const pk = Math.max(live.peakL, live.peakR);
+      sm = sm * 0.75 + (Number.isFinite(rms) ? rms : -90) * 0.25;
+      el.dataset.live = 'true';
+      el.textContent = `Live RMS ${sm.toFixed(1)} dBFS · peak ${Number.isFinite(pk) ? pk.toFixed(1) : '-inf'} dBFS`;
+    };
+    update(telemetryStore.getSnapshot());
+    return telemetryStore.subscribe(update);
+  }, []);
+  return <div ref={ref} className="syn-loud-live" aria-live="off" />;
+};
 
 const LOUD_MIN = -30;
 const LOUD_MAX = -5;
@@ -453,6 +480,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
           <div className="syn-loud-value"><strong>{lufs !== null ? lufs.toFixed(1) : '—'}</strong> <span>LUFS</span></div>
           <div className="syn-loud-target">Target {p.targetLufs} LUFS · TP {tp !== null ? tp.toFixed(2) : '—'} / {p.maxTruePeakDb} dBTP</div>
           <LoudnessBar lufs={lufs} targetLufs={p.targetLufs} disabled={p.running} onTarget={p.onTargetLufs} />
+          <LiveLevel />
           <div className="syn-loud-src">{p.master ? 'Measured on the rendered master' : p.source ? 'Source measurement' : 'No signal'}</div>
         </Card>
       </div>

@@ -370,3 +370,5 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-primary-nav-item:hover{color:#E8F6FF !important;}
 .syn-session-ribbon{border-bottom-color:var(--line-blue) !important;}
 .syn-session-ribbon select{border-color:var(--line-blue) !important;}
+.syn-loud-live{margin-top:6px;font:700 10px var(--syn-font-mono,monospace);color:#5F8FB8;font-variant-numeric:tabular-nums;}
+.syn-loud-live[data-live="true"]{color:var(--skin-cyan);text-shadow:0 0 8px var(--glow-cyan);}
