@@ -430,6 +430,7 @@ The client-entered cloud token is a shared bearer credential, not individual use
 - [x] **Responsive workstation breakpoint:** the touch-first stacked layout now activates through 1024 CSS pixels, covering narrow Android/tablet browser viewports that previously retained the two-column library rail.
 - [x] **Full-width mastering workspace:** the mastering stage, spectrum panel, and processor rack are constrained to the available viewport width when stacked; the spectrum panel retains a 220 px minimum height.
 - [x] **Readable mastering meters:** the eight technical readouts use a two-column grid in the touch-first layout, with a single-column fallback on very narrow screens.
+- [x] **Touch-sized mastering action:** the FIX IT ALL WITH AI control expands within the mobile stage, caps at 420 px on wider touch layouts, and scales its text to avoid clipping on narrow phones.
 - [x] **Compact command header:** brand and export action share the first row, while the command menus occupy a horizontally scrollable second row to avoid compressing the workstation.
 - [ ] **Physical Android acceptance:** verify the live synced build in Chrome/Chrome Canary on the target phone at portrait and landscape widths. GitHub CI and CSS inspection do not replace this device check.
 - **Scope:** this is a CSS-only responsive layout change. React state, Web Audio routing, DSP, mastering algorithms, and audio engine modules were not modified.
