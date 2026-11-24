@@ -150,6 +150,21 @@ async function runViewport(browser, width, height, mobile) {
       if (mobile) assert.ok(canvasBox.height >= 240, 'Mobile spectrum canvas must be at least 240 px high');
     }
 
+    assert.equal(await page.locator('.syn2-fix-centerpiece').isVisible(), true, 'FIX ALL AI must appear as a separate centerpiece below the EQ workspace');
+    assert.equal(await page.locator('.syn2-wave-wrap').count(), 0, 'The default mastering workspace must use the unified waveform-behind-EQ visualization, not a second stacked waveform panel');
+    const eqPrecedesFix = await page.evaluate(() => {
+      const eq = document.querySelector('[data-testid="central-spectrum"]');
+      const fix = document.querySelector('.syn2-fix-centerpiece');
+      return Boolean(eq && fix && (eq.compareDocumentPosition(fix) & Node.DOCUMENT_POSITION_FOLLOWING));
+    });
+    assert.equal(eqPrecedesFix, true, 'PRAGMATIC EQ must appear before the FIX ALL AI centerpiece');
+
+    await page.getByRole('button', { name: /Timeline & fades/ }).click();
+    assert.equal(await page.locator('.syn2-wave-wrap').count(), 1, 'Timeline and fade editing must remain available on demand');
+    await inspectLayout(page, width, 'studio-timeline-expanded');
+    await page.getByRole('button', { name: /Hide timeline & fades/ }).click();
+    assert.equal(await page.locator('.syn2-wave-wrap').count(), 0, 'Collapsing the timeline must restore the unified default visualization');
+
     const library = page.locator('aside[aria-label="Audio Library and Presets"]');
     for (const [index, label] of ['Audio', 'Presets', 'Chains', 'Projects'].entries()) {
       await library.locator(':scope > div:first-child button').nth(index).click();
