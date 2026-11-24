@@ -2948,7 +2948,7 @@ export default function App() {
           {activeTab === 'studio' && activeTrack && (
             <section data-testid="central-mastering-rack" className="rounded-xl border border-[#D4AF37]/45 bg-[#0D0B06] p-2.5">
               <div className="mb-2 flex items-center justify-between gap-2 px-1">
-                <h2 className="text-[11px] font-black uppercase tracking-[.16em] text-[#F2CA52]">Mastering Chain · Main Workspace</h2>
+                <h2 className="text-[11px] font-black uppercase tracking-[.16em] text-[#F2CA52]">Effects Rack / Processing Chain</h2>
                 <span className="text-[9px] font-mono-tabular uppercase tracking-wider text-[#A99A74]">Visible rack · Offline DSP / VST3</span>
               </div>
               <MasteringRack
