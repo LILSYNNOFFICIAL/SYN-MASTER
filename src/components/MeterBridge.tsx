@@ -58,7 +58,7 @@ export const MeterBridge: React.FC<Props> = React.memo(
       }
       if (phaseValueRef.current) {
         phaseValueRef.current.textContent = corr >= 0 ? `+${corr.toFixed(2)}` : corr.toFixed(2);
-        phaseValueRef.current.className = corr < 0.2 ? 'text-[#F59E0B]' : 'text-[#34D399]';
+        phaseValueRef.current.className = 'syn-meter-phase-value ' + (corr < 0.2 ? 'is-warning' : 'is-good');
       }
       if (phaseMarkerRef.current) {
         phaseMarkerRef.current.style.left = `calc(${((corr + 1) / 2) * 100}% - 4px)`;
@@ -87,108 +87,32 @@ export const MeterBridge: React.FC<Props> = React.memo(
     }, []);
 
     return (
-      <footer
-        aria-label="Master Output Meter Bridge"
-        className="h-auto lg:h-[84px] shrink-0 bg-[#0B0C10] border-t border-[#242732] px-3 lg:px-4 py-1.5 lg:py-2 flex flex-wrap items-center justify-between gap-2.5 lg:gap-4"
-      >
-        {/* L / R Stereo Output Bars (updated imperatively without React re-renders) */}
-        <div className="flex flex-col gap-1 w-full sm:w-auto sm:min-w-[200px] sm:flex-1 sm:max-w-xs">
-          <div className="flex items-center justify-between text-[10px] font-mono-tabular text-[#9CA3AF]">
-            <span className="uppercase tracking-wider text-[#D4AF37] font-semibold">
-              Master Out ({auditionLabel})
-            </span>
-            <span ref={lrReadoutRef}>L -∞ / R -∞ dBFS</span>
-          </div>
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-mono-tabular text-[#9CA3AF] w-3">L</span>
-              <div className="flex-1 h-2 rounded-sm bg-[#161820] border border-[#242732] overflow-hidden">
-                <div ref={barLRef} className={NORMAL_CLASS} style={{ width: '0%' }} />
-              </div>
+      <footer aria-label="Master Output Meter Bridge" className="syn-meter-bridge">
+        <section className="syn-meter-stereo" aria-label="Stereo output levels">
+          <div className="syn-meter-stereo-main">
+            <div className="syn-meter-stereo-head">
+              <span className="syn-meter-kicker">Master Out ({auditionLabel})</span>
+              <span ref={lrReadoutRef} className="syn-meter-live-readout">L -∞ / R -∞ dBFS</span>
+              {qcReport && (
+                <span className="syn-meter-qc">
+                  QC <strong className={qcReport.overallStatus === 'pass' ? 'is-pass' : qcReport.overallStatus === 'warning' ? 'is-warning' : 'is-fail'}>{qcReport.overallStatus.toUpperCase()}</strong>
+                </span>
+              )}
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-mono-tabular text-[#9CA3AF] w-3">R</span>
-              <div className="flex-1 h-2 rounded-sm bg-[#161820] border border-[#242732] overflow-hidden">
-                <div ref={barRRef} className={NORMAL_CLASS} style={{ width: '0%' }} />
+            <div className="syn-meter-stereo-bars">
+              <div className="syn-meter-bar-row">
+                <span>L</span>
+                <div className="syn-meter-bar-track"><div ref={barLRef} className={NORMAL_CLASS} style={{ width: '0%' }} /></div>
+              </div>
+              <div className="syn-meter-bar-row">
+                <span>R</span>
+                <div className="syn-meter-bar-track"><div ref={barRRef} className={NORMAL_CLASS} style={{ width: '0%' }} /></div>
               </div>
             </div>
           </div>
-        </div>
-
-        {/* Primary Calibrated Telemetry Readouts */}
-        <div className="grid grid-cols-4 sm:flex sm:flex-wrap items-center gap-2 sm:gap-5 font-mono-tabular w-full sm:w-auto">
-          <div>
-            <div className="text-[9px] sm:text-[10px] uppercase text-[#9CA3AF]">Integrated</div>
-            <div className="text-xs sm:text-sm font-bold text-[#F2CA52]">
-              {postAnalysis ? `${postAnalysis.integratedLufs.toFixed(1)} LUFS` : '--.- LUFS'}
-            </div>
-          </div>
-          <div>
-            <div className="text-[9px] sm:text-[10px] uppercase text-[#9CA3AF]">True Peak</div>
-            <div
-              className={`text-xs sm:text-sm font-bold ${
-                postAnalysis && postAnalysis.truePeakDb > -0.2
-                  ? 'text-[#EF4444]'
-                  : 'text-[#F7F8FA]'
-              }`}
-            >
-              {postAnalysis ? `${postAnalysis.truePeakDb.toFixed(2)} dBTP` : '--.-- dBTP'}
-            </div>
-          </div>
-          <div>
-            <div className="text-[9px] sm:text-[10px] uppercase text-[#9CA3AF]">Dyn Range</div>
-            <div className="text-xs sm:text-sm font-bold text-[#F7F8FA]">
-              {postAnalysis ? `${postAnalysis.dynamicRangeDb.toFixed(1)} dB` : '--.- dB'}
-            </div>
-          </div>
-          <div>
-            <div className="text-[9px] sm:text-[10px] uppercase text-[#9CA3AF]">Gain Red.</div>
-            <div ref={grReadoutRef} className="text-xs sm:text-sm font-bold text-[#F59E0B]">
-              0.0 dB
-            </div>
-          </div>
-        </div>
-
-        {/* Phase Correlation Bar */}
-        <div className="flex flex-col gap-1 min-w-[130px]">
-          <div className="flex justify-between text-[10px] font-mono-tabular text-[#9CA3AF]">
-            <span>Phase Corr</span>
-            <span ref={phaseValueRef} className="text-[#34D399]">
-              +1.00
-            </span>
-          </div>
-          <div className="h-2 rounded-sm bg-[#161820] border border-[#242732] relative">
-            <div className="absolute left-1/2 top-0 bottom-0 w-px bg-[#4B5563]" />
-            <div
-              ref={phaseMarkerRef}
-              className="absolute top-0 bottom-0 w-2 rounded-sm bg-[#F2CA52]"
-              style={{ left: 'calc(100% - 4px)' }}
-            />
-          </div>
-        </div>
-
-        {/* QC Status + Independent Monitor Level Control */}
-        <div className="flex items-center gap-4">
-          {qcReport && (
-            <div className="text-[11px] font-mono-tabular">
-              <span className="text-[#9CA3AF]">QC: </span>
-              <span
-                className={
-                  qcReport.overallStatus === 'pass'
-                    ? 'text-[#34D399] font-bold'
-                    : qcReport.overallStatus === 'warning'
-                      ? 'text-[#F59E0B] font-bold'
-                      : 'text-[#EF4444] font-bold'
-                }
-              >
-                {qcReport.overallStatus.toUpperCase()}
-              </span>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 w-36">
-            <Volume2 className="w-3.5 h-3.5 text-[#38BDF8] shrink-0" />
-            <div className="flex-1 min-w-0">
+          <div className="syn-meter-monitor">
+            <Volume2 className="w-3.5 h-3.5 text-[#F2CA52] shrink-0" />
+            <div className="min-w-0 flex-1">
               <HorizontalSlider
                 label="Monitor Volume"
                 value={Math.round(monitorVolume * 100)}
@@ -204,7 +128,36 @@ export const MeterBridge: React.FC<Props> = React.memo(
               />
             </div>
           </div>
-        </div>
+        </section>
+
+        <section className="syn-meter-readouts" aria-label="Master output measurements">
+          <div className="syn-meter-metric">
+            <span className="syn-meter-label">Integrated</span>
+            <strong className="syn-meter-value is-primary">{postAnalysis ? `${postAnalysis.integratedLufs.toFixed(1)} LUFS` : '--.- LUFS'}</strong>
+          </div>
+          <div className="syn-meter-metric">
+            <span className="syn-meter-label">True Peak</span>
+            <strong className="syn-meter-value">{postAnalysis ? `${postAnalysis.truePeakDb.toFixed(2)} dBTP` : '--.-- dBTP'}</strong>
+          </div>
+          <div className="syn-meter-metric">
+            <span className="syn-meter-label">Dyn Range</span>
+            <strong className="syn-meter-value">{postAnalysis ? `${postAnalysis.dynamicRangeDb.toFixed(1)} dB` : '--.- dB'}</strong>
+          </div>
+          <div className="syn-meter-metric">
+            <span className="syn-meter-label">Gain Red.</span>
+            <strong ref={grReadoutRef} className="syn-meter-value">0.0 dB</strong>
+          </div>
+          <div className="syn-meter-metric syn-meter-phase">
+            <div className="syn-meter-phase-head">
+              <span className="syn-meter-label">Phase</span>
+              <strong ref={phaseValueRef} className="syn-meter-value syn-meter-phase-value is-good">+1.00</strong>
+            </div>
+            <div className="syn-meter-phase-track">
+              <span className="syn-meter-phase-center" />
+              <span ref={phaseMarkerRef} className="syn-meter-phase-marker" style={{ left: 'calc(100% - 4px)' }} />
+            </div>
+          </div>
+        </section>
       </footer>
     );
   },
