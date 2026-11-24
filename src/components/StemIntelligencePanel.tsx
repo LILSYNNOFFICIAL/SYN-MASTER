@@ -465,7 +465,7 @@ export const StemIntelligencePanel: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div data-syn-skin="instrument" data-workspace="stems" className="syn-stem-workspace flex flex-col gap-4">
       <section className="rounded-lg border border-[#D4AF37]/30 bg-gradient-to-br from-[#171610] to-[#111217] p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
