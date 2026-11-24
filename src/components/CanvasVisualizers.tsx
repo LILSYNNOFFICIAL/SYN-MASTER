@@ -245,6 +245,7 @@ interface SpectrumCanvasProps {
   heightClass?: string;
   allowLiveTelemetry?: boolean;
   waveformPeaks?: number[];
+  durationSec?: number;
 }
 
 const SPECTRO_COLS = 160;
@@ -260,6 +261,7 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
     heightClass = 'h-60',
     allowLiveTelemetry = true,
     waveformPeaks = [],
+    durationSec = 0,
   }) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const staticCacheRef = useRef<HTMLCanvasElement | null>(null);
@@ -329,6 +331,22 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       const sr = sampleRateRef.current;
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Playback cursor follows engine telemetry and stays behind the EQ curves.
+      if (waveformPeaks.length > 0 && durationSec > 0) {
+        const progress = Math.max(0, Math.min(1, snap.currentTimeSec / durationSec));
+        const playheadX = padL + progress * plotW;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(74,207,255,0.92)';
+        ctx.lineWidth = 1.25;
+        ctx.shadowColor = 'rgba(32,191,255,0.9)';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.moveTo(playheadX, padT);
+        ctx.lineTo(playheadX, padT + plotH);
+        ctx.stroke();
+        ctx.restore();
+      }
 
       if (modeRef.current === 'spectrogram') {
         const ring = ringRef.current;
