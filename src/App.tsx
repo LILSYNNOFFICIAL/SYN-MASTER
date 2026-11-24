@@ -2034,6 +2034,8 @@ export default function App() {
             metadataTitle: exportConfig.metadataTitle ?? '',
             metadataArtist: exportConfig.metadataArtist ?? '',
             ceilingDb: String(exportConfig.ceilingDb),
+            normalizeToTarget: String(exportConfig.normalizeToTarget),
+            targetLufs: String(exportConfig.targetLufs),
           });
           const response = await fetch('/api/export/encode?' + params.toString(), {
             method: 'POST',
@@ -2098,6 +2100,8 @@ export default function App() {
           masteringChainIncluded: exportConfig.includeMasteringChain !== false && !chainBypassed,
           dither: exportConfig.dither,
           truePeakCeilingDbtp: exportConfig.ceilingDb,
+          normalizeToTarget: exportConfig.normalizeToTarget,
+          targetIntegratedLufs: exportConfig.normalizeToTarget ? exportConfig.targetLufs : null,
           metadataTitle: exportConfig.metadataTitle ?? '',
           metadataArtist: exportConfig.metadataArtist ?? '',
         },

@@ -194,6 +194,8 @@ app.post('/api/export/encode', async (req, res) => {
   const aacBitrate = Number(req.query.aacBitrateKbps ?? 320);
   const opusBitrate = Number(req.query.opusBitrateKbps ?? 192);
   const ceilingDb = Number(req.query.ceilingDb ?? -1);
+  const normalizeToTarget = String(req.query.normalizeToTarget ?? 'false') === 'true';
+  const targetLufs = Number(req.query.targetLufs ?? -14);
   const ditherMode = String(req.query.dither ?? 'none') === 'tpdf' ? 'triangular' : 'none';
   if (![44100, 48000, 88200, 96000].includes(sampleRate) || !['stereo', 'mono'].includes(channelMode) ||
       ![16, 24, 32].includes(wavBitDepth) || ![16, 24].includes(flacBitDepth) || !Number.isInteger(flacCompression) || flacCompression < 0 || flacCompression > 8 ||
@@ -249,9 +251,12 @@ app.post('/api/export/encode', async (req, res) => {
       if (flacBitDepth === 24) resampleOptions.push('output_sample_bits=24');
       if (ditherMode === 'triangular') resampleOptions.push('dither_method=triangular');
     }
+    const audioFilters = normalizeToTarget
+      ? ['loudnorm=I=' + targetLufs + ':TP=' + ceilingDb + ':LRA=11', resampleOptions.join(':')]
+      : [resampleOptions.join(':')];
     const args = [
       '-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath, '-vn',
-      '-af', resampleOptions.join(':'),
+      '-af', audioFilters.join(','),
       '-ar', String(sampleRate), '-ac', channelMode === 'mono' ? '1' : '2',
     ];
     if (title) args.push('-metadata', 'title=' + title);

@@ -180,14 +180,52 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   onChange={(e) => onChange({ ...config, ceilingDb: Number(e.target.value) })} className={fieldClass} />
               </label>
             </>}
-            <label className={labelClass}>Delivery Objective
-              <select value={config.deliveryProfile} onChange={(e) => onChange({ ...config, deliveryProfile: e.target.value })} className={fieldClass}>
-                <option value="streaming">Streaming · -14 LUFS / -1 dBTP</option>
-                <option value="club">Club / EDM · -9 LUFS / -0.5 dBTP</option>
-                <option value="broadcast">Broadcast · -23 LUFS</option>
-                <option value="archive">Full Dynamic Archive</option>
-              </select>
-            </label>
+            {config.format !== 'mid' && <>
+              <label className={labelClass}>Delivery Objective
+                <select
+                  value={config.deliveryProfile}
+                  onChange={(e) => {
+                    const profile = e.target.value;
+                    const presets: Record<string, Partial<ExportConfig>> = {
+                      streaming: { normalizeToTarget: true, targetLufs: -14, ceilingDb: -1 },
+                      club: { normalizeToTarget: true, targetLufs: -9, ceilingDb: -0.5 },
+                      broadcast: { normalizeToTarget: true, targetLufs: -23, ceilingDb: -1 },
+                      archive: { normalizeToTarget: false, targetLufs: -14, ceilingDb: -1 },
+                    };
+                    onChange({ ...config, deliveryProfile: profile, ...(presets[profile] ?? {}) });
+                  }}
+                  className={fieldClass}
+                >
+                  <option value="streaming">Streaming · -14 LUFS / -1 dBTP</option>
+                  <option value="club">Club / EDM · -9 LUFS / -0.5 dBTP</option>
+                  <option value="broadcast">Broadcast · -23 LUFS / -1 dBTP</option>
+                  <option value="archive">Full Dynamic Archive · normalization off</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-[#D8C58C]">
+                <input
+                  type="checkbox"
+                  checked={config.normalizeToTarget}
+                  onChange={(e) => onChange({ ...config, deliveryProfile: 'custom', normalizeToTarget: e.target.checked })}
+                  className="accent-[#D4AF37]"
+                />
+                Normalize to target integrated loudness
+              </label>
+              {config.normalizeToTarget && (
+                <label className={labelClass}>Target Integrated Loudness (LUFS)
+                  <input
+                    type="number"
+                    min={-36}
+                    max={-5}
+                    step={0.1}
+                    value={config.targetLufs}
+                    onChange={(e) => onChange({ ...config, deliveryProfile: 'custom', targetLufs: Number(e.target.value) })}
+                    className={fieldClass}
+                  />
+                </label>
+              )}
+            </>}
             {config.format === 'mid' && <>
               <label className={labelClass}>Tempo (BPM)
                 <input type="number" min={20} max={300} step={1} value={config.midiTempoBpm ?? 120}

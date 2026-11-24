@@ -100,7 +100,7 @@ async function waitForEndpoint(baseUrl, child, getDiagnostics) {
   throw new Error('SYN-MASTER export endpoint did not become ready. ' + getDiagnostics());
 }
 
-async function exportAudio(baseUrl, fixture, format, sampleRate = 48000) {
+async function exportAudio(baseUrl, fixture, format, sampleRate = 48000, options = {}) {
   const params = new URLSearchParams({
     format,
     sampleRate: String(sampleRate),
@@ -110,7 +110,9 @@ async function exportAudio(baseUrl, fixture, format, sampleRate = 48000) {
     flacCompression: '5',
     mp3BitrateKbps: '320',
     dither: 'none',
-    ceilingDb: '-1',
+    ceilingDb: String(options.ceilingDb ?? -1),
+    normalizeToTarget: String(options.normalizeToTarget ?? false),
+    targetLufs: String(options.targetLufs ?? -14),
   });
   const response = await fetch(baseUrl + '/api/export/encode?' + params.toString(), {
     method: 'POST',
@@ -286,6 +288,17 @@ test('SYN-MASTER export endpoint creates measurable contract-format files', { ti
     'Default FLAC export changed integrated loudness despite normalization being disabled.');
   assert.ok(Math.abs(mp348.integratedLufs - sourceLufs) <= 0.80,
     '320 kbps MP3 export changed integrated loudness more than the lossy-codec tolerance.');
+
+  const normalizedWav = await exportAudio(baseUrl, source48, 'wav', 48000, {
+    normalizeToTarget: true,
+    targetLufs: -14,
+    ceilingDb: -1,
+  });
+  const normalizedPath = path.join(tempDir, 'normalized-minus-14.wav');
+  await writeFile(normalizedPath, normalizedWav.bytes);
+  const normalizedLufs = await measureIntegratedLufs(normalizedPath);
+  assert.ok(Math.abs(normalizedLufs - (-14)) <= 1.0,
+    'Opt-in loudness normalization did not reach the requested -14 LUFS target.');
 
   const wavDecoded = await decodeToS32(wav48Path, path.join(tempDir, 'wav-48k.s32le'));
   const flacDecoded = await decodeToS32(flac48Path, path.join(tempDir, 'flac-48k.s32le'));
