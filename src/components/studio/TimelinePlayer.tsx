@@ -71,6 +71,17 @@ export const TimelinePlayer: React.FC<Props> = (p) => {
       ) : (
         <div className="syn-player-empty">Import a track to see its waveform</div>
       )}
+      <div className="syn-player-transport" role="group" aria-label="Transport">
+        <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(0)} disabled={!hasTrack} aria-label="Jump to start">
+            <SkipBack className="w-3.5 h-3.5" />
+          </button>
+          <button type="button" className="syn-player-play" onClick={p.onTogglePlay} disabled={!hasTrack} aria-label={p.isPlaying ? 'Pause' : 'Play'} title={p.isPlaying ? 'Pause' : 'Play'}>
+            {p.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+          </button>
+        <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(Math.max(0, p.durationSec - 0.05))} disabled={!hasTrack} aria-label="Jump to end">
+            <SkipForward className="w-3.5 h-3.5" />
+          </button>
+      </div>
       <div className="syn-player-controls">
         <label className="syn-player-btn syn-player-import">
           <Upload className="w-4 h-4" aria-hidden="true" /> Import Track
@@ -84,16 +95,6 @@ export const TimelinePlayer: React.FC<Props> = (p) => {
             }}
           />
         </label>
-        <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(0)} disabled={!hasTrack} aria-label="Jump to start">
-          <SkipBack className="w-4 h-4" />
-        </button>
-        <button type="button" className="syn-player-play" onClick={p.onTogglePlay} disabled={!hasTrack} aria-label={p.isPlaying ? 'Pause' : 'Play'}>
-          {p.isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-          <span>{p.isPlaying ? 'Pause' : 'Play'}</span>
-        </button>
-        <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(Math.max(0, p.durationSec - 0.05))} disabled={!hasTrack} aria-label="Jump to end">
-          <SkipForward className="w-4 h-4" />
-        </button>
         <div className="syn-player-fades" role="group" aria-label="Fades">
           <label>
             <span>Fade in <b>{p.fades.inSec.toFixed(2)}s</b></span>
