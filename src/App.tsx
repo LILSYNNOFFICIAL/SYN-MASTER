@@ -2524,7 +2524,7 @@ export default function App() {
         )}
 
         {/* Center Mastering Stage */}
-        <main data-layout={activeTab} className="syn-daw-main lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">
+        <main data-layout={activeTab} data-syn-skin={activeTab === 'studio' ? 'studio' : 'instrument'} data-workspace={activeTab} className="syn-daw-main lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">
           {activeTrack && activeTab !== 'studio' && (
             <section data-testid="mastering-control-desk" aria-label="Mastering Control Desk"
               className="syn-control-desk rounded-xl border border-[#D4AF37]/65 bg-gradient-to-br from-[#151006] via-[#0D0B06] to-[#070604] p-3.5 shadow-[0_12px_32px_rgba(0,0,0,.35)]">
