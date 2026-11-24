@@ -1249,6 +1249,12 @@ export default function App() {
     if (!activeTrack || !postAnalysis || postAnalysisState.status === 'failed') return null;
     return runQualityControl(activeTrack.analysis, postAnalysis, activeQcProfile, exportConfig);
   }, [activeTrack, postAnalysis, postAnalysisState.status, activeQcProfile, exportConfig]);
+  // QC workspace only: while the master render is pending (or failed), validate the source so
+  // the QC page is never empty with a track loaded. Other consumers keep the master-only report.
+  const qcViewReport = useMemo(() => {
+    if (qcReport || !activeTrack) return qcReport;
+    return runQualityControl(activeTrack.analysis, activeTrack.analysis, activeQcProfile, exportConfig);
+  }, [qcReport, activeTrack, activeQcProfile, exportConfig]);
 
   const currentChainFingerprint = useMemo(
     () => computeChainFingerprint(chain, chainBypassed),
@@ -3049,7 +3055,7 @@ export default function App() {
             </section>
           )}
 
-          {activeTab !== 'studio' && activeTab !== 'ai' && <WorkspaceHero workspace={activeTab} hasTrack={Boolean(activeTrack)} />}
+          {activeTab !== 'studio' && activeTab !== 'ai' && activeTab !== 'qc' && <WorkspaceHero workspace={activeTab} hasTrack={Boolean(activeTrack)} />}
 
           {activeTab === 'stems' && <StemIntelligencePanel />}
 
@@ -3211,7 +3217,12 @@ export default function App() {
 
           {activeTab === 'qc' && (
             <QualityControlView
-              qcReport={qcReport}
+              qcReport={qcViewReport}
+              qcBasis={qcReport ? 'master' : 'source'}
+              preAnalysis={activeTrack?.analysis ?? null}
+              postAnalysis={postAnalysisState.status === 'failed' ? null : postAnalysis}
+              durationSec={activeTrack?.durationSec ?? 0}
+              onSeek={seekTo}
               profiles={QC_TARGET_PROFILES}
               selectedProfileId={qcTargetId}
               onSelectProfile={setQcTargetId}

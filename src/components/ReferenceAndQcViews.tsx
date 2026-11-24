@@ -9,6 +9,7 @@ import type {
   ReferenceComparisonReport,
 } from '../types/mastering';
 import { SpectrumAndEQCanvas } from './CanvasVisualizers';
+import { LiveLoudnessPanel } from './qc/LiveLoudnessPanel';
 
 interface RefProps {
   activeTrack: AudioTrackAsset | null;
@@ -218,6 +219,13 @@ interface QcProps {
   selectedProfileId: string;
   onSelectProfile: (id: string) => void;
   onAutoFixQc: () => void;
+  /** Measurements for the live loudness panel (source, rendered master when available). */
+  preAnalysis?: AudioAnalysis | null;
+  postAnalysis?: AudioAnalysis | null;
+  durationSec?: number;
+  onSeek?: (sec: number) => void;
+  /** 'source' when the report was run on the source because the master render is not ready. */
+  qcBasis?: 'master' | 'source';
 }
 
 export const QualityControlView: React.FC<QcProps> = ({
@@ -226,7 +234,13 @@ export const QualityControlView: React.FC<QcProps> = ({
   selectedProfileId,
   onSelectProfile,
   onAutoFixQc,
+  preAnalysis = null,
+  postAnalysis = null,
+  durationSec = 0,
+  onSeek,
+  qcBasis = 'master',
 }) => {
+  const profile = profiles.find((p) => p.id === selectedProfileId);
   return (
     <div data-syn-skin="instrument" data-workspace="qc" className="syn-qc-workspace flex flex-col gap-4">
       <div className="p-4 rounded bg-[#111217] border border-[#D4AF37]/30 flex flex-wrap items-center justify-between gap-3">
@@ -262,9 +276,23 @@ export const QualityControlView: React.FC<QcProps> = ({
         </div>
       </div>
 
+      {preAnalysis && (
+        <LiveLoudnessPanel
+          pre={preAnalysis}
+          post={postAnalysis}
+          durationSec={durationSec}
+          targetLufs={profile?.targetLufs}
+          maxTruePeakDb={profile?.maxTruePeakDb}
+          onSeek={onSeek}
+        />
+      )}
+      {qcReport && qcBasis === 'source' && (
+        <p className="syn-qc-basis text-[11px]">Checks below are run on the source; they switch to the rendered master as soon as it is ready.</p>
+      )}
+
       {!qcReport ? (
         <div data-testid="workspace-empty-state" data-workspace="qc" className="syn-workspace-empty p-8 rounded bg-[#111217] border border-dashed border-[#2A2D39] text-center">
-          <p className="text-xs text-[#9CA3AF]">Load an audio track to run SYN-QC technical validation.</p>
+          <p className="text-xs text-[#9CA3AF]">Import a track (step 1 on the Dashboard, or the menu ☰ → Library) to run SYN-QC technical validation.</p>
         </div>
       ) : (
         <>
