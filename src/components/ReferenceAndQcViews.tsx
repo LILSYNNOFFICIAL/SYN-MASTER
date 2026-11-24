@@ -41,7 +41,7 @@ export const ReferenceMatchView: React.FC<RefProps> = ({
   const activePost = postAnalysis ?? activeTrack?.analysis ?? null;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div data-syn-skin="instrument" data-workspace="reference" className="syn-reference-workspace flex flex-col gap-4">
       <div className="p-4 rounded bg-[#111217] border border-[#D4AF37]/30 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-bold text-[#F7F8FA]">SYN-REFERENCE Comparison &amp; Matching</h3>
@@ -228,7 +228,7 @@ export const QualityControlView: React.FC<QcProps> = ({
   onAutoFixQc,
 }) => {
   return (
-    <div className="flex flex-col gap-4">
+    <div data-syn-skin="instrument" data-workspace="qc" className="syn-qc-workspace flex flex-col gap-4">
       <div className="p-4 rounded bg-[#111217] border border-[#D4AF37]/30 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-bold text-[#F7F8FA]">SYN-QC Mastering Quality Control</h3>
