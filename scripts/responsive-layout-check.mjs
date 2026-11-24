@@ -123,7 +123,7 @@ async function runViewport(browser, width, height, mobile) {
       await page.locator('.syn-ai-hero').waitFor({ state: 'visible', timeout: 10000 });
       assert.equal(await page.getByText('WAITING FOR SOURCE AUDIO').isVisible(), true, 'AI Assistant must have a designed empty state before import');
       assert.equal(await page.locator('[data-testid="workspace-hero"][data-workspace="ai"]').isVisible(), true, 'AI Assistant must have the shared workspace identity header before source import');
-      assert.equal(await page.locator('[data-testid="workspace-hero-graphic"]').isVisible(), true, 'AI Assistant must show its own instrument graphic');
+      assert.equal(await page.locator('[data-testid="workspace-hero"][data-workspace="ai"] [data-testid="workspace-hero-graphic"]').isVisible(), true, 'AI Assistant must show its native instrument graphic');
       await page.locator('.syn-primary-nav-item').filter({ hasText: 'Dashboard' }).click();
       await page.getByRole('button', { name: /LOAD DEMO SESSION/i }).click({ timeout: 15000 });
     }
@@ -210,7 +210,7 @@ async function runViewport(browser, width, height, mobile) {
       if (id !== 'studio') {
         const workspaceHero = page.locator(`[data-testid="workspace-hero"][data-workspace="${id}"]`);
         await workspaceHero.waitFor({ state: 'visible', timeout: 10000 });
-        assert.equal(await workspaceHero.locator('svg[role="img"]').isVisible(), true, `${label} must display its workspace-specific instrument graphic`);
+        assert.equal(await workspaceHero.locator('[data-testid="workspace-hero-graphic"]').isVisible(), true, `${label} must display its workspace-specific instrument graphic`);
       }
       await inspectLayout(page, width, id);
 
