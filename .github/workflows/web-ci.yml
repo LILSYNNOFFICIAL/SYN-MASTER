@@ -10,6 +10,7 @@ on:
       - 'index.html'
       - 'public/**'
       - 'scripts/check-bundle-budget.mjs'
+      - 'scripts/responsive-layout-check.mjs'
       - 'tsconfig.json'
       - '.github/workflows/web-ci.yml'
   push:
@@ -22,6 +23,7 @@ on:
       - 'index.html'
       - 'public/**'
       - 'scripts/check-bundle-budget.mjs'
+      - 'scripts/responsive-layout-check.mjs'
       - 'tsconfig.json'
       - '.github/workflows/web-ci.yml'
   workflow_dispatch:
@@ -96,3 +98,11 @@ jobs:
           done
           cat /tmp/syn-master-start.log
           exit 1
+
+      - name: Install Playwright Chromium for responsive checks
+        run: |
+          npm install --no-save --no-package-lock playwright
+          npx playwright install --with-deps chromium
+
+      - name: Responsive viewport and workspace smoke tests
+        run: node scripts/responsive-layout-check.mjs
