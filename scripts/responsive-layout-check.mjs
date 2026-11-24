@@ -115,6 +115,9 @@ async function runViewport(browser, width, height, mobile) {
       await page.locator('.syn-dashboard-welcome').waitFor({ state: 'visible', timeout: 15000 });
       assert.equal(await page.locator('.syn-dashboard-visual').isVisible(), true, 'Desktop must open on the designed visual mastering dashboard, not the import splash');
       assert.equal(await page.locator('.syn-signal-art').isVisible(), true, 'Desktop dashboard must include the signal graphic');
+      for (const selector of ['.syn-fix-orbit', '.syn-meter-instrument', '.syn-vectorscope', '.syn-dashboard-loudness', '.syn-chain-flow']) {
+        assert.equal(await page.locator(selector).isVisible(), true, `Desktop mastering cockpit must include ${selector}`);
+      }
       await page.locator('.syn-primary-nav-more').click();
       await page.locator('.syn-workspace-menu-item').filter({ hasText: 'AI Director' }).click();
       await page.locator('.syn-ai-hero').waitFor({ state: 'visible', timeout: 10000 });
