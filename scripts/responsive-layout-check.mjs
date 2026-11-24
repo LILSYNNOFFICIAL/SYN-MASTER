@@ -113,10 +113,24 @@ async function runViewport(browser, width, height, mobile) {
     await page.locator('.syn2-stage').waitFor({ state: 'visible', timeout: 30000 });
     await page.locator('.syn-meter-bridge').waitFor({ state: 'visible', timeout: 10000 });
 
+    if (!mobile) {
+      assert.equal(await page.locator('.syn-mobile-command-menu > summary').isVisible(), false, 'Desktop must retain the full command bar instead of the mobile Menu button');
+      assert.equal(await page.locator('.syn-menubar').isVisible(), true, 'Desktop command menus must remain visible');
+      assert.equal(await page.locator('.syn-header-export').isVisible(), true, 'Desktop Export Master action must remain visible');
+    }
+
     if (mobile) {
       const menu = page.locator('.syn-mobile-command-menu');
       assert.equal(await menu.locator(':scope > summary').isVisible(), true, 'Mobile header must show the single Menu control');
-      assert.equal(await page.locator('.syn-header-export').isVisible(), true, 'Mobile header must keep Export visible');
+      const exportButton = page.locator('.syn-header-export');
+      assert.equal(await exportButton.isVisible(), true, 'Mobile header must keep Export visible');
+      const logoBox = await page.locator('.syn-app-header > div:first-child').boundingBox();
+      const menuBox = await menu.locator(':scope > summary').boundingBox();
+      const exportBox = await exportButton.boundingBox();
+      assert.ok(logoBox && menuBox && exportBox, 'Mobile header controls must have measurable boxes');
+      assert.ok(logoBox.right <= menuBox.x + 1, 'Mobile logo must not overlap the Menu control');
+      assert.ok(menuBox.right <= exportBox.x + 1, 'Mobile Menu must not overlap Export');
+      assert.ok(exportBox.right <= width + 1, 'Mobile Export button must remain inside the viewport');
       await menu.locator(':scope > summary').click();
       assert.equal(await menu.locator(':scope > .syn-menubar').isVisible(), true, 'Mobile command drawer must open');
       await menu.locator('.syn-menu-group > summary').first().click();
