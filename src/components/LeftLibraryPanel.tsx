@@ -83,7 +83,9 @@ export const LeftLibraryPanel: React.FC<Props> = React.memo(({
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={`py-2.5 px-1 flex flex-col items-center gap-1 text-[10px] font-semibold border-b-2 transition-colors ${
+            aria-pressed={tab === id}
+            data-active={tab === id ? 'true' : 'false'}
+            className={`syn-library-tab py-2.5 px-1 flex flex-col items-center gap-1 text-[10px] font-semibold border-b-2 transition-colors ${
               tab === id
                 ? 'border-[#D4AF37] text-[#F2CA52] bg-[#161820]'
                 : 'border-transparent text-[#9CA3AF] hover:text-[#F7F8FA]'
