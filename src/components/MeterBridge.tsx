@@ -58,7 +58,7 @@ export const MeterBridge: React.FC<Props> = React.memo(
       }
       if (phaseValueRef.current) {
         phaseValueRef.current.textContent = corr >= 0 ? `+${corr.toFixed(2)}` : corr.toFixed(2);
-        phaseValueRef.current.className = 'syn-meter-phase-value ' + (corr < 0.2 ? 'is-warning' : 'is-good');
+        phaseValueRef.current.className = 'syn-meter-value syn-meter-phase-value ' + (corr < 0.2 ? 'is-warning' : 'is-good');
       }
       if (phaseMarkerRef.current) {
         phaseMarkerRef.current.style.left = `calc(${((corr + 1) / 2) * 100}% - 4px)`;
