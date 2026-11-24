@@ -125,6 +125,12 @@ async function runViewport(browser, width, height, mobile) {
     }
 
     await inspectLayout(page, width, 'studio');
+    const spectrumCanvas = page.locator('[data-testid="spectrum-canvas"]');
+    if (await spectrumCanvas.count()) {
+      const canvasBox = await spectrumCanvas.boundingBox();
+      assert.ok(canvasBox && canvasBox.width <= width + 1, `Spectrum canvas must fit at ${width}px`);
+      if (mobile) assert.ok(canvasBox.height >= 240, 'Mobile spectrum canvas must be at least 240 px high');
+    }
 
     const library = page.locator('aside[aria-label="Audio Library and Presets"]');
     for (const [index, label] of ['Audio', 'Presets', 'Chains', 'Projects'].entries()) {
@@ -150,11 +156,28 @@ async function runViewport(browser, width, height, mobile) {
       await delay(120);
       await inspectLayout(page, width, id);
 
-      if (id === 'ai' && mobile) {
-        const analyze = page.getByRole('button', { name: 'ANALYZE TRACK' });
-        assert.equal(await analyze.isVisible(), true, 'Mobile Mastering Control Desk must keep Analyze Track visible');
-        const box = await analyze.boundingBox();
-        assert.ok(box && box.x >= 0 && box.x + box.width <= width + 1, 'Analyze Track button must fit within the mobile viewport');
+      if (id === 'ai') {
+        const modeGrid = page.getByText('Operating Mode', { exact: true }).locator('xpath=following-sibling::div[1]');
+        const modeColumns = await modeGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\\s+/).length);
+        assert.equal(modeColumns, mobile ? 1 : 3, 'AI Director operating mode cards must stack on mobile and use three desktop columns');
+
+        const telemetryGrid = page.locator('[data-testid="measured-before-after-telemetry"] > div.grid');
+        const telemetryColumns = await telemetryGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\\s+/).length);
+        assert.equal(telemetryColumns, mobile ? 2 : 3, 'AI Director telemetry must use two mobile columns and three desktop columns');
+
+        if (mobile) {
+          const analyze = page.getByRole('button', { name: 'ANALYZE TRACK' });
+          assert.equal(await analyze.isVisible(), true, 'Mobile Mastering Control Desk must keep Analyze Track visible');
+          const box = await analyze.boundingBox();
+          assert.ok(box && box.x >= 0 && box.x + box.width <= width + 1, 'Analyze Track button must fit within the mobile viewport');
+        }
+      }
+
+      if (id === 'lab') {
+        const labHeading = page.getByText('Spectral Zone Balance (Pre vs Master)', { exact: true });
+        const labGrid = labHeading.locator('xpath=ancestor::div[contains(@class,"grid-cols-1")][1]');
+        const labColumns = await labGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\\s+/).length);
+        assert.equal(labColumns, mobile ? 1 : 2, 'Analysis Lab spectral diagnostics must stack on mobile and use two desktop columns');
       }
     }
 
