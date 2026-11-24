@@ -13,6 +13,8 @@ interface Props {
   postChannels: Float32Array[] | null;
   sampleRate: number;
   defaultSubTab?: LabSubTab;
+  /** Reports the chosen sub-lab so the parent can restore it when the view remounts. */
+  onSubTabChange?: (tab: LabSubTab) => void;
 }
 
 const MetricCard: React.FC<{ label: string; value: string; delta?: string }> = ({
@@ -20,7 +22,7 @@ const MetricCard: React.FC<{ label: string; value: string; delta?: string }> = (
   value,
   delta,
 }) => (
-  <div className="p-3 rounded bg-[#111217] border border-[#232632]">
+  <div className="syn-lab-metric p-3 rounded bg-[#111217] border border-[#232632]">
     <div className="text-[11px] uppercase tracking-wider text-[#9CA3AF]">{label}</div>
     <div className="mt-1 text-lg font-bold font-mono-tabular text-[#F7F8FA]">{value}</div>
     {delta && <div className="text-[11px] font-mono-tabular text-[#D4AF37]">{delta}</div>}
@@ -34,9 +36,11 @@ export const SynLabView: React.FC<Props> = React.memo(({
   postChannels,
   sampleRate,
   defaultSubTab = 'frequency',
+  onSubTabChange,
 }) => {
-  const [subTab, setSubTab] = useState<LabSubTab>(defaultSubTab);
-  React.useEffect(() => setSubTab(defaultSubTab), [defaultSubTab]);
+  const [subTab, setSubTabState] = useState<LabSubTab>(defaultSubTab);
+  const setSubTab = (t: LabSubTab) => { setSubTabState(t); onSubTabChange?.(t); };
+  React.useEffect(() => setSubTabState(defaultSubTab), [defaultSubTab]);
   const active = postAnalysis ?? preAnalysis;
 
   if (!active || !preAnalysis) {
@@ -61,7 +65,7 @@ export const SynLabView: React.FC<Props> = React.memo(({
   ];
 
   return (
-    <div data-syn-skin="instrument" data-workspace="lab" className="syn-lab-workspace flex flex-col gap-4">
+    <div data-syn-skin="instrument" data-workspace="lab" className="syn-lab-workspace flex flex-col gap-4" data-lab={subTab}>
       {/* Sub-lab selector */}
       <div className="syn-lab-tab-nav flex items-center gap-1 p-1 rounded bg-[#111217] border border-[#242732] w-fit">
         {(
@@ -76,7 +80,9 @@ export const SynLabView: React.FC<Props> = React.memo(({
             key={t.id}
             type="button"
             onClick={() => setSubTab(t.id)}
-            className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors whitespace-nowrap ${
+            data-active={subTab === t.id ? 'true' : 'false'}
+            data-lab-id={t.id}
+            className={`syn-lab-tab px-3 py-1.5 rounded text-xs font-semibold transition-colors whitespace-nowrap ${
               subTab === t.id
                 ? 'bg-[#D4AF37] text-[#070709]'
                 : 'text-[#9CA3AF] hover:text-[#F7F8FA]'

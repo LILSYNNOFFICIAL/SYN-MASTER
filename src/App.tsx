@@ -3061,6 +3061,7 @@ export default function App() {
               postChannels={postChannelsRef.current}
               sampleRate={activeTrack?.sampleRate ?? 44100}
               defaultSubTab={labDefaultSubTab}
+              onSubTabChange={setLabDefaultSubTab}
             />
           )}
 

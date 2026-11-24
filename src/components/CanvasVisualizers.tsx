@@ -856,7 +856,9 @@ export const VectorscopeCanvas: React.FC<{
       const cy = h * 0.5;
       const radius = Math.min(cx, cy) - 14;
       const step = Math.max(1, Math.floor(left.length / 280));
-      ctx.fillStyle = 'rgba(242, 202, 82, 0.7)';
+      ctx.fillStyle = 'rgba(63, 224, 255, 0.8)';
+      ctx.shadowColor = 'rgba(46, 168, 255, 0.9)';
+      ctx.shadowBlur = 6;
       for (let i = 0; i < left.length; i += step) {
         const l = left[i];
         const r = right[i];
@@ -890,13 +892,30 @@ export const VectorscopeCanvas: React.FC<{
     const cy = h * 0.5;
     const radius = Math.min(cx, cy) - 14;
 
-    ctx.fillStyle = '#090A0E';
+    const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.6);
+    bg.addColorStop(0, '#0A1A30');
+    bg.addColorStop(1, '#03070F');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
+    // Blue glowing scope circle
+    ctx.save();
+    ctx.strokeStyle = 'rgba(46, 168, 255, 0.85)';
+    ctx.shadowColor = 'rgba(46, 168, 255, 0.9)';
+    ctx.shadowBlur = 12;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(63, 224, 255, 0.18)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(46, 168, 255, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
     ctx.moveTo(cx - radius, cy);
     ctx.lineTo(cx + radius, cy);
     ctx.moveTo(cx, cy - radius);
@@ -904,7 +923,7 @@ export const VectorscopeCanvas: React.FC<{
     ctx.stroke();
 
     const diag = radius * 0.707;
-    ctx.strokeStyle = 'rgba(212, 175, 55, 0.16)';
+    ctx.strokeStyle = 'rgba(139, 92, 246, 0.35)';
     ctx.beginPath();
     ctx.moveTo(cx - diag, cy + diag);
     ctx.lineTo(cx + diag, cy - diag);
@@ -913,7 +932,7 @@ export const VectorscopeCanvas: React.FC<{
     ctx.stroke();
 
     ctx.font = '10px "JetBrains Mono", monospace';
-    ctx.fillStyle = '#9CA3AF';
+    ctx.fillStyle = '#8FC8F0';
     ctx.fillText('M (+)', cx - 12, cy - radius - 3);
     ctx.fillText('L', cx - diag - 10, cy - diag);
     ctx.fillText('R', cx + diag + 4, cy - diag);
@@ -958,7 +977,7 @@ export const VectorscopeCanvas: React.FC<{
     <canvas
       ref={canvasRef}
       data-testid="vectorscope-canvas"
-      className="w-full h-56 rounded border border-[#262934] block"
+      className="syn-lab-canvas w-full h-56 rounded border border-[#262934] block"
     />
   );
 });
@@ -979,7 +998,7 @@ export const LoudnessHistoryCanvas: React.FC<{
     if (!ctx) return;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#090A0E';
+    ctx.fillStyle = '#050B16';
     ctx.fillRect(0, 0, w, h);
 
     const dbToY = (lufs: number) => {
@@ -989,7 +1008,7 @@ export const LoudnessHistoryCanvas: React.FC<{
 
     for (const ref of [-9, -14, -23, -32]) {
       const y = dbToY(ref);
-      ctx.strokeStyle = ref === -14 ? 'rgba(212,175,55,0.28)' : 'rgba(255,255,255,0.07)';
+      ctx.strokeStyle = ref === -14 ? 'rgba(63,224,255,0.35)' : 'rgba(46,168,255,0.1)';
       ctx.beginPath();
       ctx.moveTo(34, y);
       ctx.lineTo(w - 8, y);
@@ -1016,8 +1035,8 @@ export const LoudnessHistoryCanvas: React.FC<{
       ctx.restore();
     };
 
-    plotLine(preHistory, 'rgba(180,188,202,0.5)', true);
-    plotLine(postHistory, '#D4AF37', false);
+    plotLine(preHistory, 'rgba(139,92,246,0.7)', true);
+    plotLine(postHistory, '#3FE0FF', false);
   };
 
   const drawRef = useRef(draw);
@@ -1040,7 +1059,7 @@ export const LoudnessHistoryCanvas: React.FC<{
     <canvas
       ref={canvasRef}
       data-testid="loudness-history-canvas"
-      className="w-full h-48 rounded border border-[#262934] block"
+      className="syn-lab-canvas w-full h-48 rounded border border-[#262934] block"
     />
   );
 });

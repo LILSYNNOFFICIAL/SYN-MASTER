@@ -434,3 +434,22 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 /* Round 3 · D: EQ blanket live approximation while the processed render catches up */
 .syn-ceq-blanket-path{transition:transform 60ms linear;}
 .syn-ceq-blanket-path[data-live="true"]{stroke-opacity:.85;}
+
+/* Round 3 · H: Analysis Lab sub-labs — blue glass, each lab with its own glow accent */
+.syn-lab-workspace{--lab-accent:#2EA8FF;--lab-glow:rgba(46,168,255,.45);}
+.syn-lab-workspace[data-lab="frequency"]{--lab-accent:#2EA8FF;--lab-glow:rgba(46,168,255,.45);}
+.syn-lab-workspace[data-lab="dynamics"]{--lab-accent:#8B5CF6;--lab-glow:rgba(139,92,246,.5);}
+.syn-lab-workspace[data-lab="stereo"]{--lab-accent:#3FE0FF;--lab-glow:rgba(63,224,255,.45);}
+.syn-lab-workspace[data-lab="distortion"]{--lab-accent:#E040FB;--lab-glow:rgba(224,64,251,.45);}
+.syn-lab-workspace .syn-lab-tab-nav{background:rgba(4,12,24,.75) !important;border-color:var(--line-blue) !important;border-radius:14px !important;box-shadow:0 0 18px var(--glow-blue-soft);}
+.syn-lab-workspace .syn-lab-tab{border-radius:10px !important;color:#8FB7D6 !important;background:transparent !important;}
+.syn-lab-workspace .syn-lab-tab:hover{color:#E8F6FF !important;}
+.syn-lab-workspace .syn-lab-tab[data-active="true"]{color:#fff !important;background:linear-gradient(180deg,color-mix(in srgb,var(--lab-accent) 45%,transparent),color-mix(in srgb,var(--lab-accent) 18%,transparent)) !important;
+  box-shadow:0 0 0 1px var(--lab-accent) inset,0 0 16px var(--lab-glow);text-shadow:0 0 8px var(--lab-glow);}
+.syn-lab-workspace > div:not(.syn-lab-tab-nav) [class*="bg-[#111217]"],.syn-lab-workspace .syn-lab-metric{
+  background:radial-gradient(ellipse at 0% 0%,color-mix(in srgb,var(--lab-accent) 14%,transparent),transparent 60%),linear-gradient(170deg,#0A1628,#050A14) !important;
+  border-color:color-mix(in srgb,var(--lab-accent) 45%,transparent) !important;border-radius:14px !important;box-shadow:0 0 18px color-mix(in srgb,var(--lab-accent) 18%,transparent);}
+.syn-lab-workspace h3[class*="text-[#D4AF37]"]{color:#E8F6FF !important;text-shadow:0 0 10px var(--lab-glow);}
+.syn-lab-workspace [class*="text-[#D4AF37]"]{color:var(--lab-accent) !important;}
+.syn-lab-workspace .syn-lab-metric .text-lg{color:#fff !important;text-shadow:0 0 10px var(--lab-glow);}
+.syn-lab-workspace canvas,.syn-lab-canvas{border-color:color-mix(in srgb,var(--lab-accent) 50%,transparent) !important;border-radius:12px !important;box-shadow:0 0 22px var(--lab-glow),inset 0 0 20px rgba(46,168,255,.08);}
