@@ -249,7 +249,7 @@ export const MasteringRack: React.FC<Props> = React.memo(
             aria-label="Select processor to add"
             value={selectedToAdd}
             onChange={(e) => setSelectedToAdd(e.target.value)}
-            className="flex-1 bg-[#181A22] border border-[#2B2E3A] rounded px-2 py-1.5 text-xs text-[#F7F8FA] focus:outline-none focus:border-[#D4AF37]"
+            className="min-w-0 flex-1 bg-[#181A22] border border-[#2B2E3A] rounded px-2 py-1.5 text-xs text-[#F7F8FA] focus:outline-none focus:border-[#D4AF37]"
           >
             <optgroup label="SYN MASTER Native DSP">
               {NATIVE_PROCESSOR_TYPES.map((t) => (
