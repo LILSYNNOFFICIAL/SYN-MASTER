@@ -1130,3 +1130,27 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 .syn2-fix-label > span { font:900 clamp(17px,2.1vw,24px) var(--syn-font-display); letter-spacing:.11em; }
 .syn2-fix-label small { font:900 12px var(--syn-font-display); letter-spacing:.42em; padding-left:.42em; color:#18314A; }
 .syn2-fix-hint { color:#C4D8E8 !important; font-size:11px !important; font-weight:800; letter-spacing:.14em; }
+
+
+/* Premium surfaces for the mastering stage, waveform, rack, and floating editors */
+.syn2-stage {
+  background:linear-gradient(145deg,rgba(16,34,52,.98),rgba(6,15,25,.98)) !important;
+  border-color:rgba(128,99,47,.72) !important;
+  box-shadow:0 1px 0 rgba(180,220,245,.05) inset,0 24px 60px rgba(0,0,0,.46),0 0 34px rgba(23,125,184,.06) !important;
+}
+.syn2-eyebrow,.syn2-stat-label { color:#D8B66F !important; }
+.syn2-track { color:#EAF3FA !important; }
+.syn2-track-meta,.syn2-stat-src { color:#9CB5C8 !important; }
+.syn2-wave-wrap { border-color:rgba(48,164,222,.4) !important; background:#061321 !important; box-shadow:0 0 26px rgba(20,150,215,.08); }
+.syn2-stat { background:linear-gradient(145deg,#102237,#091522) !important; border-color:#29435A !important; }
+.syn2-stat-out { color:#EAF3FA !important; }
+.syn2-float { background:linear-gradient(180deg,#102237,#071321) !important; border-color:#80632F !important; }
+.syn2-float-head { background:linear-gradient(180deg,#1B3148,#102033) !important; border-color:#80632F !important; }
+.syn2-slot { background:linear-gradient(180deg,#13263A,#0A1725) !important; border-color:#29445B !important; }
+.syn2-slot-name { color:#E5EFF7 !important; }
+.syn2-fix-btn { box-shadow:0 0 0 6px rgba(216,182,111,.14),0 0 60px rgba(32,157,219,.32),0 20px 50px rgba(0,0,0,.6) !important; }
+@media (max-width: 767px) {
+  .syn2-stage { padding:12px !important; gap:11px !important; }
+  .syn2-track { max-width:76vw !important; font-size:18px !important; }
+  .syn2-fix-btn { padding:15px 22px !important; }
+}
