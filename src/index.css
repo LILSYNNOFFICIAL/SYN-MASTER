@@ -110,9 +110,15 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 .syn-workstation [class*="text-[#D4AF37]"],.syn-workstation [class*="text-[#F2CA52]"] { color:#F2CA52 !important; }
 .syn-workstation [class*="bg-[#D4AF37]"],.syn-workstation [class*="bg-[#F2CA52]"] { background-color:#D4AF37 !important; color:#080704 !important; }
 .syn-workstation [class*="border-[#D4AF37]"],.syn-workstation [class*="border-[#F2CA52]"],.syn-workstation [class*="border-[#D4AF37]/"] { border-color:#A88120 !important; }
-.syn-workstation [class*="text-[#38BDF8]"],.syn-workstation [class*="text-[#34D399]"],.syn-workstation [class*="text-[#10B981]"],.syn-workstation [class*="text-[#F59E0B]"] { color:#E5C45C !important; }
-.syn-workstation [class*="border-[#38BDF8]"],.syn-workstation [class*="border-[#34D399]"],.syn-workstation [class*="border-[#10B981]"],.syn-workstation [class*="border-[#F59E0B]"] { border-color:#745817 !important; }
-.syn-workstation [class*="bg-[#38BDF8]"],.syn-workstation [class*="bg-[#34D399]"],.syn-workstation [class*="bg-[#10B981]"],.syn-workstation [class*="bg-[#F59E0B]"] { background-color:rgba(212,175,55,.12) !important; }
+.syn-workstation [class*="text-[#38BDF8]"] { color:#65C7FF !important; }
+.syn-workstation [class*="text-[#34D399]"],.syn-workstation [class*="text-[#10B981]"] { color:#7BE0A0 !important; }
+.syn-workstation [class*="text-[#F59E0B]"] { color:#F2CA52 !important; }
+.syn-workstation [class*="border-[#38BDF8]"] { border-color:#287EAF !important; }
+.syn-workstation [class*="border-[#34D399]"],.syn-workstation [class*="border-[#10B981]"] { border-color:#347C5A !important; }
+.syn-workstation [class*="border-[#F59E0B]"] { border-color:#745817 !important; }
+.syn-workstation [class*="bg-[#38BDF8]"] { background-color:rgba(56,189,248,.13) !important; }
+.syn-workstation [class*="bg-[#34D399]"],.syn-workstation [class*="bg-[#10B981]"] { background-color:rgba(52,211,153,.12) !important; }
+.syn-workstation [class*="bg-[#F59E0B]"] { background-color:rgba(212,175,55,.12) !important; }
 @keyframes syn-menu-fade { from { opacity:0 } to { opacity:1 } }
 @keyframes syn-menu-slide { from { transform:translateX(-12px); opacity:.7 } to { transform:translateX(0); opacity:1 } }
 @media (max-width:767px) {
