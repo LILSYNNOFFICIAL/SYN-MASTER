@@ -55,6 +55,7 @@ const Stat: React.FC<{ label: string; src: string; out?: string | null; good?: b
 /** One-button mastering stage: waveform + grid, big FIX IT ALL WITH AI, technical details on demand. */
 export const FixItStage: React.FC<Props> = (p) => {
   const [showDetails, setShowDetails] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
   const pressed = p.running || p.report !== null;
   useEffect(() => {
     if (p.running) setShowDetails(true);
@@ -97,33 +98,43 @@ export const FixItStage: React.FC<Props> = (p) => {
         </div>
       </div>
 
-      <div className="syn2-wave-wrap">
-        <TimelineWaveform
-          prePeaks={p.prePeaks}
-          postPeaks={p.postPeaks}
-          durationSec={p.durationSec}
-          showPost={p.auditionTarget !== 'original'}
-          fades={p.fades}
-          onFadesChange={p.onFadesChange}
-          onSeek={p.onSeek}
-          heightPx={240}
-        />
-        {!pressed && (
-          <div className="syn2-fix-overlay">
-            <button type="button" className="syn2-fix-btn" onClick={p.onFix}>
-              <Sparkles className="w-6 h-6" />
-              <span className="syn2-fix-label"><span>FIX ALL</span><small>AI</small></span>
-            </button>
-            <div className="syn2-fix-hint">ANALYZE · BALANCE · ENHANCE</div>
-          </div>
-        )}
-        {p.running && (
-          <div className="syn2-run-overlay" role="status" aria-live="polite">
-            <div className="syn2-run-stage">{p.stage || 'Working'} · pass {p.pass}/{p.maxPasses}</div>
-            <div className="syn2-progress"><span style={{ width: `${Math.max(6, pct)}%` }} /></div>
-            {p.lastActivity && <div className="syn2-run-msg">{p.lastActivity}</div>}
-          </div>
-        )}
+      {!pressed && (
+        <div className="syn2-fix-centerpiece">
+          <button type="button" className="syn2-fix-btn" onClick={p.onFix}>
+            <Sparkles className="w-6 h-6" />
+            <span className="syn2-fix-label"><span>FIX ALL</span><small>AI</small></span>
+          </button>
+          <div className="syn2-fix-hint">ANALYZE · BALANCE · ENHANCE</div>
+        </div>
+      )}
+
+      {p.running && (
+        <div className="syn2-run-panel" role="status" aria-live="polite">
+          <div className="syn2-run-stage">{p.stage || 'Working'} · pass {p.pass}/{p.maxPasses}</div>
+          <div className="syn2-progress"><span style={{ width: `${Math.max(6, pct)}%` }} /></div>
+          {p.lastActivity && <div className="syn2-run-msg">{p.lastActivity}</div>}
+        </div>
+      )}
+
+      {showTimeline && (
+        <div className="syn2-wave-wrap">
+          <TimelineWaveform
+            prePeaks={p.prePeaks}
+            postPeaks={p.postPeaks}
+            durationSec={p.durationSec}
+            showPost={p.auditionTarget !== 'original'}
+            fades={p.fades}
+            onFadesChange={p.onFadesChange}
+            onSeek={p.onSeek}
+            heightPx={190}
+          />
+        </div>
+      )}
+
+      <div className="flex justify-center">
+        <button type="button" className="syn2-btn-ghost" onClick={() => setShowTimeline((value) => !value)} aria-expanded={showTimeline}>
+          <SlidersHorizontal className="w-4 h-4" /> {showTimeline ? 'Hide timeline & fades' : 'Timeline & fades'}
+        </button>
       </div>
 
       <div className="syn2-transport">
