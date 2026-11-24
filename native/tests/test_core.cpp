@@ -85,6 +85,10 @@ void testSecurityPolicy() {
   assert(policy.isOriginAllowed("http://localhost:3000"));
   assert(policy.isOriginAllowed("http://127.0.0.1:5173"));
   assert(policy.isOriginAllowed("https://ais-dev-example-123.us-west1.run.app"));
+  assert(policy.isOriginAllowed("https://syn-master.ai.studio"));
+  assert(!policy.isOriginAllowed("http://syn-master.ai.studio"));
+  assert(!policy.isOriginAllowed("https://syn-master.ai.studio.evil.com"));
+  assert(!policy.isOriginAllowed("https://evilai.studio"));
   assert(!policy.isOriginAllowed(""));
   assert(!policy.isOriginAllowed("null"));
   assert(!policy.isOriginAllowed("file://"));

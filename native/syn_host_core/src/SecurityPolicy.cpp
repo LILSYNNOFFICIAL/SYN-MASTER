@@ -154,9 +154,14 @@ bool SecurityPolicy::isOriginAllowed(const std::string& origin) const {
       if (!isValidPortSuffix(rest.substr(colon))) return false;
       host = rest.substr(0, colon);
     }
-    const std::string suffix = ".run.app";
-    if (host.size() > suffix.size() &&
-        host.compare(host.size() - suffix.size(), suffix.size(), suffix) == 0) {
+    // *.run.app = AI Studio Cloud Run deployments; *.ai.studio = the published
+    // AI Studio app domain the live SYN MASTER build is served from
+    // (https://syn-master.ai.studio). HTTPS only.
+    auto endsWith = [&](const std::string& suffix) {
+      return host.size() > suffix.size() &&
+             host.compare(host.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+    if (endsWith(".run.app") || endsWith(".ai.studio")) {
       // Basic hostname character validation
       for (char c : host) {
         if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '.') {

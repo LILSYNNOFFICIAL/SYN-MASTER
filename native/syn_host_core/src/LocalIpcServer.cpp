@@ -72,7 +72,7 @@ std::string LocalIpcServer::serializePluginJson(const PluginDescriptor& d) {
 
   nlohmann::json params = nlohmann::json::array();
   for (const auto& p : d.parameters) {
-    params.push_back({
+    nlohmann::json obj = {
         {"id", p.id},
         {"name", p.name},
         {"label", p.label},
@@ -81,7 +81,18 @@ std::string LocalIpcServer::serializePluginJson(const PluginDescriptor& d) {
         {"isAutomatable", p.isAutomatable},
         {"isReadOnly", p.isReadOnly},
         {"isBypass", p.isBypass},
-    });
+    };
+    if (!p.extJson.empty()) {
+      try {
+        auto ext = nlohmann::json::parse(p.extJson);
+        if (ext.is_object()) {
+          for (auto it = ext.begin(); it != ext.end(); ++it) {
+            if (!obj.contains(it.key())) obj[it.key()] = it.value();
+          }
+        }
+      } catch (...) {}
+    }
+    params.push_back(std::move(obj));
   }
 
   nlohmann::json j = {

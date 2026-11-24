@@ -26,6 +26,29 @@ void printUsage() {
             << "   or: syn-plugin-scanner --selftest-crash | --selftest-hang\n";
 }
 
+#ifdef JUCE_PLUGINHOST_VST3
+std::string paramText(juce::AudioProcessorParameter& param, float normalized) {
+  // getText() asks the plugin's own edit controller (VST3 getParamStringByValue)
+  // for its display string at this normalized value, e.g. "-0.30 dB", "2.5:1".
+  return param.getText(normalized, 64).trim().substring(0, 64).toStdString();
+}
+
+const char* categoryName(juce::AudioProcessorParameter::Category c) {
+  using C = juce::AudioProcessorParameter;
+  switch (c) {
+    case C::inputGain: return "inputGain";
+    case C::outputGain: return "outputGain";
+    case C::inputMeter: return "inputMeter";
+    case C::outputMeter: return "outputMeter";
+    case C::compressorLimiterGainReductionMeter: return "gainReductionMeter";
+    case C::expanderGateGainReductionMeter: return "gainReductionMeter";
+    case C::analysisMeter: return "analysisMeter";
+    case C::otherMeter: return "otherMeter";
+    default: return "generic";
+  }
+}
+#endif
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -97,7 +120,18 @@ int main(int argc, char* argv[]) {
     j["version"] = desc->version.toStdString();
     j["sdkVersion"] = "VST3";
     j["category"] = desc->category.isNotEmpty() ? desc->category.toStdString() : "Effect";
-    j["subCategories"] = nlohmann::json::array({desc->category.toStdString()});
+    // JUCE fills PluginDescription::category from the VST3 PClassInfo2
+    // subCategories string ("Fx|EQ", "Fx|Dynamics", "Fx|Reverb"...). Split it.
+    {
+      nlohmann::json subs = nlohmann::json::array();
+      juce::StringArray tokens;
+      tokens.addTokens(desc->category, "|", "");
+      tokens.trim();
+      tokens.removeEmptyStrings();
+      for (const auto& t : tokens) subs.push_back(t.toStdString());
+      j["subCategories"] = subs;
+    }
+    j["isInstrument"] = desc->isInstrument;
     j["bundlePath"] = resolved.bundlePath;
     j["binaryPath"] = resolved.binaryPath;
     j["arch"] = toString(resolved.pe.arch);
@@ -134,20 +168,54 @@ int main(int argc, char* argv[]) {
       const auto& params = instance->getParameters();
       j["parameterCount"] = params.size();
       nlohmann::json paramArr = nlohmann::json::array();
-      int maxExport = std::min(params.size(), 256);
+      // Export up to 1024 parameters; value-to-text sampling (the data the web-side
+      // capability mapper uses for unit conversion) for the first 384 only, so a
+      // plugin with thousands of parameters cannot blow up the catalog payload.
+      const int maxExport = std::min(params.size(), 1024);
+      const int maxSampled = 384;
       for (int p = 0; p < maxExport; ++p) {
-        const auto* param = params[p];
+        auto* param = params[p];
         if (!param) continue;
-        paramArr.push_back({
+        nlohmann::json pj = {
             {"id", static_cast<uint32_t>(p)},
             {"name", param->getName(128).toStdString()},
             {"label", param->getLabel().toStdString()},
+            {"units", param->getLabel().toStdString()},
             {"defaultValueNormalized", static_cast<double>(param->getDefaultValue())},
             {"stepCount", param->getNumSteps()},
             {"isAutomatable", param->isAutomatable()},
             {"isReadOnly", param->isMetaParameter()},
             {"isBypass", param == instance->getBypassParameter()},
-        });
+            {"isDiscrete", param->isDiscrete()},
+            {"isBoolean", param->isBoolean()},
+            {"category", categoryName(param->getCategory())},
+        };
+        if (auto* hosted = dynamic_cast<juce::HostedAudioProcessorParameter*>(param)) {
+          pj["paramIdString"] = hosted->getParameterID().toStdString();
+        }
+        if (p < maxSampled) {
+          pj["defaultText"] = paramText(*param, param->getDefaultValue());
+          nlohmann::json samples = nlohmann::json::array();
+          const int steps = param->getNumSteps();
+          const bool smallDiscrete = param->isDiscrete() && steps >= 2 && steps <= 64;
+          if (smallDiscrete) {
+            nlohmann::json valueStrings = nlohmann::json::array();
+            for (int k = 0; k < steps; ++k) {
+              const float v = static_cast<float>(k) / static_cast<float>(steps - 1);
+              const auto text = paramText(*param, v);
+              valueStrings.push_back(text);
+              samples.push_back(nlohmann::json::array({static_cast<double>(v), text}));
+            }
+            pj["valueStrings"] = valueStrings;
+          } else {
+            for (int k = 0; k <= 10; ++k) {
+              const float v = static_cast<float>(k) / 10.0f;
+              samples.push_back(nlohmann::json::array({static_cast<double>(v), paramText(*param, v)}));
+            }
+          }
+          pj["textSamples"] = samples;
+        }
+        paramArr.push_back(std::move(pj));
       }
       j["parameters"] = paramArr;
       instance.reset();

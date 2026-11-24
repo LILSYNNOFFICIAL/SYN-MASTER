@@ -94,6 +94,16 @@ std::vector<std::string> collectVst3Bundles(const std::vector<std::string>& sear
   return found;
 }
 
+// Catalog entries written by an older scanner have no value-to-text samples; an
+// incremental scan re-scans those once so the capability mapper gets unit data.
+bool catalogEntryHasRichParameterMetadata(const PluginDescriptor& d) {
+  if (d.parameters.empty()) return true;
+  for (const auto& p : d.parameters) {
+    if (!p.extJson.empty()) return true;
+  }
+  return false;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -219,7 +229,8 @@ int main(int argc, char* argv[]) {
           existing[0].fileMtimeNs == resolved.mtimeNs &&
           existing[0].fileSizeBytes == resolved.sizeBytes &&
           existing[0].fileHashSha256 == resolved.sha256Hex &&
-          existing[0].status == PluginStatus::Available) {
+          existing[0].status == PluginStatus::Available &&
+          catalogEntryHasRichParameterMetadata(existing[0])) {
         ++skipped;
         progressCb(i + 1, total, bundle, "unchanged");
         continue;
@@ -266,6 +277,11 @@ int main(int argc, char* argv[]) {
             d.version = pj.value("version", "");
             d.sdkVersion = pj.value("sdkVersion", "VST3");
             d.category = pj.value("category", "Effect");
+            if (pj.contains("subCategories") && pj["subCategories"].is_array()) {
+              for (const auto& sc : pj["subCategories"]) {
+                if (sc.is_string()) d.subCategories.push_back(sc.get<std::string>());
+              }
+            }
             d.bundlePath = pj.value("bundlePath", bundle);
             d.binaryPath = pj.value("binaryPath", resolved.binaryPath);
             d.arch = BinaryArch::X64;
@@ -297,6 +313,21 @@ int main(int argc, char* argv[]) {
               pd.isAutomatable = p.value("isAutomatable", true);
               pd.isReadOnly = p.value("isReadOnly", false);
               pd.isBypass = p.value("isBypass", false);
+              // Keep every extended scanner field (units, textSamples, valueStrings,
+              // paramIdString...) as a JSON object for the catalog and the web app.
+              {
+                static const char* kCoreKeys[] = {"id", "name", "label", "defaultValueNormalized",
+                                                  "stepCount", "isAutomatable", "isReadOnly", "isBypass"};
+                nlohmann::json ext = nlohmann::json::object();
+                for (auto it = p.begin(); it != p.end(); ++it) {
+                  bool core = false;
+                  for (const char* k : kCoreKeys) {
+                    if (it.key() == k) { core = true; break; }
+                  }
+                  if (!core) ext[it.key()] = it.value();
+                }
+                if (!ext.empty()) pd.extJson = ext.dump();
+              }
               d.parameters.push_back(std::move(pd));
             }
             std::string err;

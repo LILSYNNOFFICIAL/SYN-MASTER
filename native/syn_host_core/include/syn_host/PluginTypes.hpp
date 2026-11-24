@@ -70,6 +70,10 @@ struct ParameterDescriptor {
   bool isAutomatable = true;
   bool isReadOnly = false;
   bool isBypass = false;
+  // Extended scanner metadata kept as a JSON object string so this header stays
+  // dependency-free: paramIdString, units, isDiscrete, isBoolean, defaultText,
+  // textSamples [[normalized, "text"], ...], valueStrings [...], category.
+  std::string extJson;
 };
 
 struct BusConfiguration {

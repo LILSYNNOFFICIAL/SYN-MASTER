@@ -161,7 +161,7 @@ std::string serializeBusConfigs(const std::vector<BusConfiguration>& buses) {
 std::string serializeParameters(const std::vector<ParameterDescriptor>& params) {
   nlohmann::json arr = nlohmann::json::array();
   for (const auto& p : params) {
-    arr.push_back({
+    nlohmann::json obj = {
         {"id", p.id},
         {"name", p.name},
         {"label", p.label},
@@ -170,7 +170,18 @@ std::string serializeParameters(const std::vector<ParameterDescriptor>& params) 
         {"isAutomatable", p.isAutomatable},
         {"isReadOnly", p.isReadOnly},
         {"isBypass", p.isBypass},
-    });
+    };
+    if (!p.extJson.empty()) {
+      try {
+        auto ext = nlohmann::json::parse(p.extJson);
+        if (ext.is_object()) {
+          for (auto it = ext.begin(); it != ext.end(); ++it) {
+            if (!obj.contains(it.key())) obj[it.key()] = it.value();
+          }
+        }
+      } catch (...) {}
+    }
+    arr.push_back(std::move(obj));
   }
   return arr.dump();
 }
@@ -236,6 +247,14 @@ PluginDescriptor readRow(sqlite3_stmt* st) {
         pd.isAutomatable = p.value("isAutomatable", true);
         pd.isReadOnly = p.value("isReadOnly", false);
         pd.isBypass = p.value("isBypass", false);
+        nlohmann::json ext = nlohmann::json::object();
+        for (auto it = p.begin(); it != p.end(); ++it) {
+          const auto& k = it.key();
+          if (k == "id" || k == "name" || k == "label" || k == "defaultValueNormalized" ||
+              k == "stepCount" || k == "isAutomatable" || k == "isReadOnly" || k == "isBypass") continue;
+          ext[k] = it.value();
+        }
+        if (!ext.empty()) pd.extJson = ext.dump();
         d.parameters.push_back(std::move(pd));
       }
     }
