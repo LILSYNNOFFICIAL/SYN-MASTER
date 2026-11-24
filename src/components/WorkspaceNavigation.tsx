@@ -18,6 +18,7 @@ type Props = {
   onOpenRack: () => void;
   onExport: () => void;
   onSettings: () => void;
+  onStereoWorkspace: () => void;
 };
 
 const ADVANCED_GROUPS: { label: string; items: { id: WorkspaceTab; label: string; detail: string }[] }[] = [
@@ -50,6 +51,7 @@ export const WorkspaceNavigation: React.FC<Props> = ({
   onOpenRack,
   onExport,
   onSettings,
+  onStereoWorkspace,
 }) => {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [selectedPrimary, setSelectedPrimary] = useState<string>('dashboard');
@@ -76,7 +78,7 @@ export const WorkspaceNavigation: React.FC<Props> = ({
 
   const choosePrimary = (key: string) => {
     setSelectedPrimary(key);
-    if (key === 'stereo') onSelect('lab');
+    if (key === 'stereo') onStereoWorkspace();
     else if (key === 'loudness') onSelect('qc');
     else {
       onSelect('studio');
