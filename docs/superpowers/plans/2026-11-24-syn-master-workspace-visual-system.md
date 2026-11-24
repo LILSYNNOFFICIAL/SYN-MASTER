@@ -44,10 +44,31 @@
 
 - [x] Add Playwright assertions for all seven non-studio workspace headers and the AI pre-import state.
 - [x] Run responsive CI and observe the expected missing-header failure.
-- [x] Implement the shared component with distinct visual motifs for AI, Lab, Stems, Battle, Reference, QC and Plugins.
+- [x] Implement the shared component with distinct visual motifs for Lab, Stems, Battle, Reference, QC and Plugins; retain AI Director's native hero.
 - [x] Integrate the header without moving or replacing existing functional workspace content.
 - [x] Add responsive styles and truthful idle/source status labels.
 - [x] Run the complete web CI.
+
+### Task 2: Section-specific empty states and visual hierarchy
+
+**Files:**
+- Modify: `src/components/SynLabView.tsx`
+- Modify: `src/components/BattleModeView.tsx`
+- Modify: `src/components/ReferenceAndQcViews.tsx`
+- Modify: `src/components/StemIntelligencePanel.tsx`
+- Modify: `src/components/PluginManagerView.tsx`
+- Modify: `src/index.css`
+- Test: `scripts/responsive-layout-check.mjs`
+
+**Interfaces:**
+- Consumes: existing view props and existing action callbacks.
+- Produces: section-specific, useful pre-import states; consistent blue signal / gold action hierarchy; no fake analysis values.
+
+- [x] Add targeted browser assertions for each no-source empty state.
+- [x] Verify expected failure before implementation.
+- [x] Refine empty states with purpose-built SVG/CSS instrument art and direct next actions.
+- [x] Preserve existing loaded-source controls and results.
+- [x] Run complete web CI and inspect responsive logs.
 
 ### Task 3: Navigation, library and cross-workspace consistency
 
