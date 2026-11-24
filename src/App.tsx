@@ -2584,7 +2584,7 @@ export default function App() {
               onCalibration={() => handleLoadDemoSource('sine-sweep')}
               onOpenAI={() => setActiveTab('ai')}
             />
-          ) : activeTab === 'studio' ? null : activeTab === 'reference' ? (
+          ) : !activeTrack ? null : activeTab === 'studio' ? null : activeTab === 'reference' ? (
             <section className="p-3.5 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
               {/* Track Metadata + A/B Switch */}
               <div className="flex flex-wrap items-center justify-between gap-2">
