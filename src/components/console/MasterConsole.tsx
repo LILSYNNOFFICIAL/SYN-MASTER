@@ -70,6 +70,8 @@ export interface MasterConsoleProps {
   onAskAi?: () => void;
   /** Opens the Export Master dialog (step 4 of the guided flow). */
   onExport?: () => void;
+  /** Seek the shared playback position (live spectrum / spectrogram playhead drag). */
+  onSeek?: (sec: number) => void;
   /** Session "Mode" from the ribbon (MasteringMode). Shown on the console and used to suggest a preset. */
   mode?: string;
   /** Drag the target marker on the loudness meter: sets a custom integrated-loudness target. */
@@ -427,6 +429,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               mode={eqView}
               waveformPeaks={p.waveformPeaks}
               durationSec={p.durationSec}
+              onSeek={p.onSeek}
               heightClass="h-64"
             />
           )}

@@ -1159,6 +1159,12 @@ export default function App() {
     [settings.loudnessMatchAB, activeTrack, postAnalysis, referenceTrack],
   );
 
+  /** One shared playback position: every seekable view (timeline, live spectrum) goes through here. */
+  const seekTo = useCallback((sec: number) => {
+    engineRef.current?.seek(sec);
+    telemetryStore.publish({ currentTimeSec: sec });
+  }, []);
+
   const togglePlay = useCallback(() => {
     const engine = engineRef.current!;
     if (!activeTrack) return;
@@ -2375,6 +2381,7 @@ export default function App() {
       notice={statusNotice}
       onAskAi={() => setActiveTab('ai')}
       onExport={() => setExportModalOpen(true)}
+      onSeek={seekTo}
       mode={mode}
       onTargetLufs={(lufs) => {
         setTargetPresetId(null);
@@ -2392,10 +2399,7 @@ export default function App() {
           isPlaying={isPlaying}
           fades={fades}
           onFadesChange={setFades}
-          onSeek={(sec) => {
-            engineRef.current!.seek(sec);
-            telemetryStore.publish({ currentTimeSec: sec });
-          }}
+          onSeek={seekTo}
           onTogglePlay={togglePlay}
           onImport={handleUploadSourceFile}
         />

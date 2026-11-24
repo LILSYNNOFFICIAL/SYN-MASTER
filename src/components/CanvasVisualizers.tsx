@@ -246,6 +246,8 @@ interface SpectrumCanvasProps {
   allowLiveTelemetry?: boolean;
   waveformPeaks?: number[];
   durationSec?: number;
+  /** When set, the playhead line is click/drag seekable (shared playback position). */
+  onSeek?: (sec: number) => void;
 }
 
 const SPECTRO_COLS = 160;
@@ -262,7 +264,11 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
     allowLiveTelemetry = true,
     waveformPeaks = [],
     durationSec = 0,
+    onSeek,
   }) => {
+    const onSeekRef = useRef(onSeek);
+    onSeekRef.current = onSeek;
+    const seekDragRef = useRef(false);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const staticCacheRef = useRef<HTMLCanvasElement | null>(null);
     const metricsRef = useRef<CanvasMetrics>({ cssWidth: 0, cssHeight: 0, dpr: 1 });
@@ -349,6 +355,16 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
         ctx.moveTo(playheadX, padT);
         ctx.lineTo(playheadX, padT + plotH);
         ctx.stroke();
+        if (onSeekRef.current) {
+          // Grab handle: shows the line is draggable.
+          ctx.fillStyle = '#3FE0FF';
+          ctx.beginPath();
+          ctx.moveTo(playheadX - 6, padT - 2);
+          ctx.lineTo(playheadX + 6, padT - 2);
+          ctx.lineTo(playheadX, padT + 7);
+          ctx.closePath();
+          ctx.fill();
+        }
         ctx.restore();
       }
 
@@ -669,6 +685,19 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
       setHoverInfo({ freqHz, db });
     };
 
+    const canSeek = Boolean(onSeek) && durationSec > 0 && waveformPeaks.length > 0;
+    const seekFromEvent = (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const fn = onSeekRef.current;
+      const dur = durationSecRef.current;
+      if (!fn || !(dur > 0)) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const padL = 36;
+      const padR = 14;
+      const plotW = Math.max(1, rect.width - padL - padR);
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left - padL) / plotW));
+      fn(ratio * dur);
+    };
+
     return (
       <div className="relative">
         <canvas
@@ -676,7 +705,13 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
           data-testid="spectrum-canvas"
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoverInfo(null)}
-          className={`w-full ${heightClass} rounded border border-[#262934] cursor-crosshair block`}
+          onPointerDown={canSeek ? (e) => { seekDragRef.current = true; e.currentTarget.setPointerCapture(e.pointerId); seekFromEvent(e); } : undefined}
+          onPointerMove={canSeek ? (e) => { if (seekDragRef.current) seekFromEvent(e); } : undefined}
+          onPointerUp={canSeek ? (e) => { seekDragRef.current = false; e.currentTarget.releasePointerCapture?.(e.pointerId); } : undefined}
+          onPointerCancel={canSeek ? () => { seekDragRef.current = false; } : undefined}
+          title={canSeek ? 'Click or drag to move the playhead' : undefined}
+          style={canSeek ? { touchAction: 'pan-y' } : undefined}
+          className={`w-full ${heightClass} rounded border border-[#262934] ${canSeek ? 'cursor-ew-resize' : 'cursor-crosshair'} block`}
         />
         {hoverInfo && (
           <div className="pointer-events-none absolute top-2 right-3 px-2 py-0.5 rounded bg-[#070709]/85 border border-[#D4AF37]/30 text-[11px] font-mono-tabular text-[#F2CA52]">
