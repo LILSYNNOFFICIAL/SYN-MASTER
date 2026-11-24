@@ -1386,3 +1386,9 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 /* Keep the command/navigation layer above transport and processor panels. */
 .syn-daw-global-tabs{position:relative;z-index:40}
 .syn-daw-global-tabs .syn-primary-nav-more,.syn-daw-global-tabs [role="dialog"],.syn-daw-global-tabs [role="menu"]{position:relative;z-index:41}
+
+/* The workspace drawer must sit above floating transport/A-B surfaces on touch layouts. */
+.syn-daw-global-tabs { position:relative; z-index:160 !important; }
+.syn-daw-global-tabs .syn-primary-nav-more,
+.syn-daw-global-tabs [role="dialog"],
+.syn-daw-global-tabs [role="menu"] { position:relative; z-index:161 !important; }
