@@ -135,6 +135,7 @@ async function runViewport(browser, width, height, mobile) {
       assert.equal(await menu.locator(':scope > .syn-menubar').isVisible(), true, 'Mobile command drawer must open');
       await menu.locator('.syn-menu-group > summary').first().click();
       assert.equal(await menu.locator('.syn-menu-panel').first().isVisible(), true, 'Mobile command groups must expand');
+      await inspectLayout(page, width, 'mobile-command-menu-open');
       await menu.locator(':scope > summary').click();
     }
 
