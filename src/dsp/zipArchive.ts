@@ -74,7 +74,7 @@ export async function createZipBlob(entries: ZipFileEntry[]): Promise<Blob> {
     write16(localView, 12, 0x0021);
     write32(localView, 14, checksum);
     write32(localView, 18, data.size);
-    write32(localView, 22, data.byteLength);
+    write32(localView, 22, data.size);
     write16(localView, 26, name.length);
     write16(localView, 28, 0);
     local.set(name, 30);
@@ -90,8 +90,8 @@ export async function createZipBlob(entries: ZipFileEntry[]): Promise<Blob> {
     write16(centralView, 12, 0);
     write16(centralView, 14, 0x0021);
     write32(centralView, 16, checksum);
-    write32(centralView, 20, data.byteLength);
-    write32(centralView, 24, data.byteLength);
+    write32(centralView, 20, data.size);
+    write32(centralView, 24, data.size);
     write16(centralView, 28, name.length);
     write16(centralView, 30, 0);
     write16(centralView, 32, 0);
@@ -101,7 +101,7 @@ export async function createZipBlob(entries: ZipFileEntry[]): Promise<Blob> {
     write32(centralView, 42, offset);
     central.set(name, 46);
     centralParts.push(central);
-    offset += local.byteLength + data.byteLength;
+    offset += local.byteLength + data.size;
   }
 
   const centralSize = centralParts.reduce((sum, part) => sum + part.byteLength, 0);
