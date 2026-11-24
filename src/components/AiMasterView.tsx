@@ -12,6 +12,7 @@ import {
   RotateCcw,
   ScanSearch,
   Sliders,
+  ShieldCheck,
   Sparkles,
   Square,
   Undo2,
@@ -263,12 +264,32 @@ export const AiMasterView: React.FC<Props> = ({
 
   if (!preAnalysis) {
     return (
-      <div className="p-8 rounded bg-[#111217] border border-[#242732] text-center">
-        <p className="text-sm font-semibold text-[#F7F8FA]">SYN MASTER AI | Mastering Director</p>
-        <p className="mt-1 text-xs text-[#9CA3AF]">
-          Load a track first to enable autonomous analysis, explainable mastering plans, multi-objective evaluation, and closed-loop DSP refinement.
-        </p>
-        <div className="mt-4 text-left">{diagnosticArchivePanel}</div>
+      <div className="syn-ai-workspace">
+        <section className="syn-ai-hero">
+          <div className="syn-ai-hero-copy">
+            <span className="syn-ai-eyebrow"><Sparkles size={14}/> SYN MASTER INTELLIGENCE</span>
+            <h1>Mastering Director<span> / AI Assistant</span></h1>
+            <p>Measurement-led mastering intelligence. Analyze the source, build a reasoned processing strategy, render through SYN-DSP, then independently verify the result.</p>
+            <div className="syn-ai-state"><i/> WAITING FOR SOURCE AUDIO</div>
+          </div>
+          <div className="syn-ai-orb" aria-hidden="true">
+            <div className="syn-ai-orb-ring ring-a"/><div className="syn-ai-orb-ring ring-b"/><div className="syn-ai-orb-core"><Sparkles size={42}/><b>SYN</b><small>AI ENGINE</small></div>
+            <div className="syn-ai-orb-node node-a"/><div className="syn-ai-orb-node node-b"/><div className="syn-ai-orb-node node-c"/>
+          </div>
+          <div className="syn-ai-pipeline">
+            <div className="is-ready"><span>01</span><b>ANALYZE</b><small>Audio measurements</small></div><i/>
+            <div><span>02</span><b>PLAN</b><small>Explainable decisions</small></div><i/>
+            <div><span>03</span><b>PROCESS</b><small>Real DSP execution</small></div><i/>
+            <div><span>04</span><b>VERIFY</b><small>Independent QC</small></div>
+          </div>
+        </section>
+        <div className="syn-ai-empty-grid">
+          <div className="syn-ai-empty-card"><Activity/><b>Audio intelligence</b><p>Frequency balance, loudness, dynamics, stereo, transient integrity and distortion are measured from your imported source.</p></div>
+          <div className="syn-ai-empty-card"><Sliders/><b>Explainable processing</b><p>Every proposed processor and parameter change includes a reason, an expected outcome and a way to verify it.</p></div>
+          <div className="syn-ai-empty-card"><ShieldCheck/><b>Non-destructive control</b><p>Your source stays untouched. Review, audition, accept, undo or restore every AI-generated chain change.</p></div>
+        </div>
+        <div className="syn-ai-empty-note">IMPORT A TRACK IN THE LIBRARY TO ACTIVATE THE MASTERING DIRECTOR</div>
+        <div className="mt-2 text-left">{diagnosticArchivePanel}</div>
       </div>
     );
   }
@@ -296,7 +317,25 @@ export const AiMasterView: React.FC<Props> = ({
         : '—';
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="syn-ai-workspace flex flex-col gap-4">
+      <section className="syn-ai-hero syn-ai-hero-compact">
+        <div className="syn-ai-hero-copy">
+          <span className="syn-ai-eyebrow"><Sparkles size={14}/> SYN MASTER INTELLIGENCE</span>
+          <h1>Mastering Director<span> / AI Assistant</span></h1>
+          <p>Analyze. Decide. Process. Verify. Every mastering decision is tied to source measurements and checked against the rendered result.</p>
+          <div className="syn-ai-state"><i className={directorRunning ? 'is-running' : ''}/>{directorRunning ? (directorStage || 'OPTIMIZATION IN PROGRESS').toUpperCase() : aiLifecycleState.toUpperCase()}</div>
+        </div>
+        <div className="syn-ai-mini-visual" aria-hidden="true">
+          <div className="syn-ai-mini-bars">{Array.from({length:36},(_,i)=><i key={i} style={{'--bar-height':(18+((i*17)%63))+'%'} as React.CSSProperties}/>)}</div>
+          <div className="syn-ai-mini-caption"><span>INPUT</span><b>AI / DSP / QC</b><span>OUTPUT</span></div>
+        </div>
+        <div className="syn-ai-pipeline">
+          <div className={directorRunning ? 'is-ready is-active' : 'is-ready'}><span>01</span><b>ANALYZE</b><small>Audio measurements</small></div><i/>
+          <div className={directorPlan ? 'is-ready' : ''}><span>02</span><b>PLAN</b><small>Explainable decisions</small></div><i/>
+          <div className={directorRunning ? 'is-active' : directorReport ? 'is-ready' : ''}><span>03</span><b>PROCESS</b><small>Real DSP execution</small></div><i/>
+          <div className={directorReport ? 'is-ready' : ''}><span>04</span><b>VERIFY</b><small>Independent QC</small></div>
+        </div>
+      </section>
       {/* Director Control Header */}
       <div className="p-4 rounded bg-[#111217] border border-[#D4AF37]/35 flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
