@@ -260,3 +260,18 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-export-modal > div:first-child::after{content:"";position:absolute;left:20px;right:20px;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,#3FE0FF,#E040FB,transparent);box-shadow:0 0 10px #3FE0FF;}
 .syn-export-modal > div:first-child{position:sticky;}
 @media (prefers-reduced-motion:reduce){.syn-modal{animation:none;}}
+
+/* Imager: polar vectorscope + live stereo meters */
+.syn-card-stereo .syn-scope-btn{padding:4px !important;min-height:0 !important;border-color:var(--line-blue) !important;background:rgba(3,8,16,.6) !important;box-shadow:0 0 18px var(--glow-blue-soft),inset 0 0 16px rgba(46,168,255,.08);}
+.syn-vectorscope{display:block;max-width:100%;height:auto !important;filter:drop-shadow(0 0 6px rgba(46,168,255,.35));}
+.syn-stmeters{display:flex;flex-direction:column;gap:6px;width:100%;margin-top:6px;}
+.syn-stmeter-head{display:flex;justify-content:space-between;font:700 8px var(--syn-font-body,inherit);letter-spacing:.14em;text-transform:uppercase;color:#8FB7D6;}
+.syn-stmeter-head b{text-transform:none;color:#E8F6FF;font:700 10px var(--syn-font-mono,monospace);letter-spacing:0;text-shadow:0 0 6px var(--glow-blue);}
+.syn-stmeter-track{position:relative;height:6px;margin-top:3px;border-radius:999px;background:linear-gradient(90deg,rgba(224,64,251,.18),rgba(46,168,255,.08) 50%,rgba(63,224,255,.18));border:1px solid rgba(46,168,255,.25);overflow:hidden;}
+.syn-stmeter-track.is-bal{background:rgba(46,168,255,.08);}
+.syn-stmeter-track span{position:absolute;top:0;bottom:0;left:50%;width:0;background:linear-gradient(90deg,#2EA8FF,#3FE0FF);box-shadow:0 0 8px #3FE0FF;}
+.syn-stmeter-track span[data-neg="true"]{background:linear-gradient(90deg,#E040FB,#8B5CF6);box-shadow:0 0 8px #E040FB;}
+.syn-stmeter-track i{position:absolute;top:-1px;bottom:-1px;left:50%;width:1px;background:rgba(255,255,255,.5);}
+.syn-stmeter-scale{display:flex;justify-content:space-between;font:7px var(--syn-font-mono,monospace);color:#5F8FB8;margin-top:1px;}
+.syn-band-readouts{margin-top:2px;}
+.syn-band-readouts dt::after{content:" corr";}

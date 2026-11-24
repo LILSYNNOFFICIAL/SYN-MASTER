@@ -21,7 +21,7 @@ import { SpectrumAndEQCanvas } from '../CanvasVisualizers';
 import { ArcKnob } from './ArcKnob';
 import { GlowFader } from './GlowFader';
 import { LightRibbons } from './LightRibbons';
-import { StereoScope } from './StereoScope';
+import { StereoMeters, StereoScope } from './StereoScope';
 
 /**
  * SYN-MASTER console (reference-mockup layout). A presentation layer only: every control
@@ -238,11 +238,19 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
           <button type="button" className="syn-scope-btn" onClick={p.onOpenStereoLab} aria-label="Open the stereo analysis workspace">
             <StereoScope channels={p.scopeChannels} size={128} />
           </button>
+          <StereoMeters correlation={shown ? shown.phaseCorrelation : null} balanceDb={shown ? shown.lrBalanceDb : null} />
           <dl className="syn-readouts">
             <div><dt>Width</dt><dd>{shown ? `${Math.round(shown.stereoWidth * 100)}%` : '—'}</dd></div>
-            <div><dt>Balance</dt><dd>{shown ? fmtSigned(shown.lrBalanceDb, 2) : '—'}</dd></div>
-            <div><dt>Correlation</dt><dd>{shown ? fmtSigned(shown.phaseCorrelation, 2) : '—'}</dd></div>
+            <div><dt>Mono</dt><dd>{shown ? `${Math.round(shown.monoCompatibilityScore)}` : '—'}</dd></div>
+            <div><dt>Low corr</dt><dd>{shown ? fmtSigned(shown.lowEndCorrelation, 2) : '—'}</dd></div>
           </dl>
+          {shown?.stereoBandCorrelation && (
+            <dl className="syn-readouts syn-band-readouts" aria-label="Per-band correlation">
+              <div><dt>Low</dt><dd>{fmtSigned(shown.stereoBandCorrelation.low, 2)}</dd></div>
+              <div><dt>Mid</dt><dd>{fmtSigned(shown.stereoBandCorrelation.mid, 2)}</dd></div>
+              <div><dt>High</dt><dd>{fmtSigned(shown.stereoBandCorrelation.high, 2)}</dd></div>
+            </dl>
+          )}
         </Card>
       </div>
 
