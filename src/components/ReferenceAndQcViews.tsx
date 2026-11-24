@@ -90,7 +90,7 @@ export const ReferenceMatchView: React.FC<RefProps> = ({
       </div>
 
       {!referenceTrack || !activePost ? (
-        <div className="p-8 rounded bg-[#111217] border border-dashed border-[#2A2D39] text-center">
+        <div data-testid="workspace-empty-state" data-workspace="reference" className="syn-workspace-empty p-8 rounded bg-[#111217] border border-dashed border-[#2A2D39] text-center">
           <p className="text-xs text-[#9CA3AF]">
             Load both a source track and a reference track to view dual-spectrum deltas and loudness-matched A/B controls.
           </p>
@@ -263,7 +263,7 @@ export const QualityControlView: React.FC<QcProps> = ({
       </div>
 
       {!qcReport ? (
-        <div className="p-8 rounded bg-[#111217] border border-dashed border-[#2A2D39] text-center">
+        <div data-testid="workspace-empty-state" data-workspace="qc" className="syn-workspace-empty p-8 rounded bg-[#111217] border border-dashed border-[#2A2D39] text-center">
           <p className="text-xs text-[#9CA3AF]">Load an audio track to run SYN-QC technical validation.</p>
         </div>
       ) : (
