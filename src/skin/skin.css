@@ -372,3 +372,9 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-session-ribbon select{border-color:var(--line-blue) !important;}
 .syn-loud-live{margin-top:6px;font:700 10px var(--syn-font-mono,monospace);color:#5F8FB8;font-variant-numeric:tabular-nums;}
 .syn-loud-live[data-live="true"]{color:var(--skin-cyan);text-shadow:0 0 8px var(--glow-cyan);}
+@media (max-width:1023px){
+  .syn-player-controls{display:grid;grid-template-columns:auto 44px minmax(0,1fr) 44px;}
+  .syn-player-import{padding:0 10px;}
+  .syn-player-play{padding:0 10px;}
+  .syn-player-fades{grid-column:1 / -1;}
+}

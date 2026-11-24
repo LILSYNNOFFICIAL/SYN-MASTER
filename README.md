@@ -470,7 +470,20 @@ The client-entered cloud token is a shared bearer credential, not individual use
 - **Layouts (one codebase, CSS breakpoints):** desktop ≥1024 px = console (`src/components/console/MasterConsole.tsx`): Input/Transient/Stereo left, SYN EQ centre (console variant of `ParametricEQ2`), Global · FIX ALL AI · Presets below, Dynamics/Color/Output/Loudness right, bottom tab bar. <1024 px = mockup-5 portrait grid, fixed bottom tab bar, safe-area insets, ≥44 px targets. Audio library is a drawer behind the header menu button.
 - **Wiring rule:** every console control edits the real chain via the same `updateChainWithHistory` path as the rack; missing processors show "Add …" (inserted before loudness stages) instead of dead knobs; readouts are measured analysis values. FIX ALL AI calls the unchanged Director loop; Stop uses the existing stop flag.
 
-### GUI redesign (in progress, Nov 24 2026)
+### GUI redesign status (blue-glow pass, Nov 24 2026)
+Owner feedback round 2 ("more blue glow everywhere"). Skin lives in `src/skin/skin.css` (layer scale, blue glow tokens `--glow-*`, `--line-blue*`); overlays render through `src/ui/Portal.tsx`.
+- [x] **Layering** (`fa0db95`): one z-index scale (`--z-header`, `--z-bottombar`, `--z-menubar`, `--z-drawer`, `--z-float`, `--z-modal`, `--z-popover`); floating FX windows, Export/Settings, More menu and library drawer portal to `document.body`.
+- [x] **Menubar** (`b5b6b8a`): click opens, hover switches while open, outside click / Esc / item closes, arrow keys; active item glows blue.
+- [x] **Timeline player + EQ waveform** (`0d48fd5`): `studio/TimelinePlayer.tsx` under the EQ (blue overview waveform, playhead, click/drag seek, Import / Play / Jump start / Jump end / time, FL-style fade knobs = real `FadeSettings`, applied after the chain on preview, Fix-All and export). The EQ draws the processed preview's waveform (debounced re-render on every change) as a purple/blue blanket with a live playhead. The old "Timeline & fades" toggle in `FixItStage` was removed.
+- [x] **AI** (`a2f96f5`): "Ask AI" sits directly under FIX ALL (ribbon button removed); AI Assistant workspace re-skinned to console glass/blue; its fake bars replaced by a live analyser spectrum (`console/LiveSpectrum.tsx`). The AI workspace layout itself is restyled, not restructured.
+- [x] **More menu** (`bc1090c`): centred game-style overlay. **Export + Settings** (`b6669a2`): blue glass modals, every option unchanged, Esc closes.
+- [x] **Imager** (`a8a7b12`): polar half-circle vectorscope (live analyser / rendered snapshot), live correlation + L/R balance meters, mono score, per-band *correlation* (per-band width is not measured by the analyzer).
+- [x] **Modes** (`ba9210c`): console shows the active Mode and pre-selects a matching preset. What Mode does in code: saved with the project and put in the AI strategy input; the prompt uses the Objective (always set), so Mode does not change processing. Target / Objective drive the master.
+- [x] **LUFS** (`160550c`): read-only meter with a draggable / keyboard target thumb (sets a custom target via the same path as the Target presets).
+- [x] **Glow pass** (`c9cd5d9`): monitor volume + meter bridge, FX rack windows and in-page rack, hamburger drawer, EQ grid/nodes/curve, nav and cards. **Real-time** (`0340dcf`): Loudness card shows live RMS/peak while playing.
+- [ ] Not done: FIX ALL not moved higher; AI workspace not structurally rebuilt; Analysis Lab canvases keep their existing (already live) drawing with the old palette; per-band stereo width readouts need analyzer support.
+
+### GUI redesign (first pass, Nov 24 2026)
 - [x] Desktop console + mobile portrait grid, bottom tab bar, library drawer, logo/icons/manifest (`262dd06`).
 - [x] Settings → Layout: Automatic / Desktop view / Mobile view, stored in localStorage (`833c4da`).
 - [ ] Skin layer: move all colours/glows/fonts into one swappable theme file + `public/skin/` artwork (knob faces, meter skins, panel/glow backgrounds, icons) shared with the companion.
