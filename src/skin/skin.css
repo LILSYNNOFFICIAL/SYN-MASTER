@@ -229,3 +229,34 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-workspace-menu-item span.block.mt-0\.5{text-transform:none;letter-spacing:0;color:#8FB7D6;}
 .syn-workspace-menu-footer{text-align:center;border-color:var(--line-blue) !important;color:#5F8FB8 !important;letter-spacing:.3em;}
 @media (prefers-reduced-motion:reduce){.syn-workspace-menu{animation:none !important;}}
+
+/* Modals (Export, Settings): blue glass, glow, on top */
+.syn-modal-backdrop{background:radial-gradient(ellipse at 50% 40%,rgba(14,50,95,.5),rgba(0,0,0,.88) 72%) !important;backdrop-filter:blur(6px);}
+.syn-modal{position:relative;border:1px solid var(--line-blue-strong) !important;border-radius:22px !important;color:#DCEEFF;
+  background:radial-gradient(ellipse at 50% 0%,rgba(46,168,255,.18),transparent 50%),linear-gradient(180deg,rgba(9,20,38,.98),rgba(3,8,16,.98)) !important;
+  box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 0 6px rgba(46,168,255,.06),0 0 60px rgba(46,168,255,.3),0 30px 90px rgba(0,0,0,.85) !important;animation:syn-modal-in .18s ease-out;}
+@keyframes syn-modal-in{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+.syn-modal > div:first-child{background:linear-gradient(180deg,rgba(46,168,255,.16),rgba(9,20,38,.95)) !important;border-color:var(--line-blue) !important;backdrop-filter:blur(8px);}
+.syn-modal h2{color:#E8F6FF !important;text-shadow:0 0 14px var(--glow-cyan);letter-spacing:.2em !important;}
+.syn-modal [class*="text-[#F2CA52]"],.syn-modal [class*="text-[#D4AF37]"]{color:var(--skin-cyan) !important;}
+.syn-modal [class*="text-[#A99A74]"],.syn-modal [class*="text-[#B6A780]"],.syn-modal [class*="text-[#9CA3AF]"],.syn-modal [class*="text-[#6B7280]"]{color:#8FB7D6 !important;}
+.syn-modal [class*="text-[#C7B98F]"],.syn-modal [class*="text-[#D8C58C]"],.syn-modal [class*="text-[#E8D9AF]"]{color:#CFE9FF !important;}
+.syn-modal [class*="border-[#5A4519]"],.syn-modal [class*="border-[#4A3917]"],.syn-modal [class*="border-[#3D3015]"],.syn-modal [class*="border-[#D4AF37]"],
+.syn-modal [class*="border-[#242732]"],.syn-modal [class*="border-[#222530]"],.syn-modal [class*="border-[#2B2E3A]"]{border-color:var(--line-blue) !important;}
+.syn-modal [class*="bg-[#100D06]"],.syn-modal [class*="bg-[#0B0905]"],.syn-modal [class*="bg-[#0C0D12]"],.syn-modal [class*="bg-[#151720]"],.syn-modal [class*="bg-[#D4AF37]/10"]{
+  background:rgba(46,168,255,.06) !important;border-radius:14px !important;box-shadow:inset 0 0 18px rgba(46,168,255,.06);}
+.syn-modal select,.syn-modal input[type="text"],.syn-modal input[type="number"],.syn-modal [class*="bg-[#090704]"],.syn-modal [class*="bg-[#090A0E]"]{
+  background:var(--panel-blue-solid) !important;border-color:var(--line-blue) !important;color:#E8F6FF !important;border-radius:10px !important;}
+.syn-modal select:focus,.syn-modal input:focus{border-color:var(--skin-cyan) !important;box-shadow:0 0 10px var(--glow-blue-soft);outline:none;}
+.syn-modal input[type="checkbox"],.syn-modal input[type="radio"],.syn-modal input[type="range"]{accent-color:var(--skin-blue) !important;}
+.syn-modal label[class*="rounded"][class*="border"]{transition:box-shadow .15s,border-color .15s;}
+.syn-modal label[class*="rounded"][class*="border"]:has(input:checked){border-color:var(--line-blue-strong) !important;background:rgba(46,168,255,.14);box-shadow:0 0 12px var(--glow-blue-soft);}
+.syn-modal button[class*="bg-[#D4AF37]"]{background:radial-gradient(circle at 50% 30%,#3FE0FF,#2EA8FF 60%,#1867c9) !important;color:#02101f !important;border:1px solid #9EEBFF !important;
+  border-radius:999px !important;box-shadow:0 0 0 3px rgba(46,168,255,.15),0 0 22px var(--glow-blue) !important;letter-spacing:.12em;text-transform:uppercase;}
+.syn-modal button[class*="bg-[#D4AF37]"]:hover:not(:disabled){box-shadow:0 0 0 3px rgba(46,168,255,.25),0 0 32px var(--glow-cyan) !important;}
+.syn-modal button[class*="bg-[#171208]"],.syn-modal button[aria-label^="Close"]{border:1px solid var(--line-blue) !important;background:rgba(46,168,255,.08) !important;color:#CFE9FF !important;border-radius:10px !important;}
+.syn-modal button[aria-label^="Close"]:hover{box-shadow:0 0 12px var(--glow-blue);}
+.syn-export-modal{max-width:46rem !important;}
+.syn-export-modal > div:first-child::after{content:"";position:absolute;left:20px;right:20px;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,#3FE0FF,#E040FB,transparent);box-shadow:0 0 10px #3FE0FF;}
+.syn-export-modal > div:first-child{position:sticky;}
+@media (prefers-reduced-motion:reduce){.syn-modal{animation:none;}}

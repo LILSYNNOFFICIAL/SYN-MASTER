@@ -4,6 +4,18 @@ import type { AppSettings, ExportConfig } from '../types/mastering';
 import { Portal } from '../ui/Portal';
 import { changeViewMode, parseViewMode, readViewMode } from '../ui/viewMode';
 
+/** Escape closes the dialog from anywhere (focus may still be on the page behind it). */
+function useEscapeToClose(open: boolean, onClose: () => void) {
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+}
+
 interface ExportModalProps {
   open: boolean;
   config: ExportConfig;
@@ -22,6 +34,7 @@ interface ExportModalProps {
 export const ExportModal: React.FC<ExportModalProps> = ({
   open, config, rendering, downloadUrl, downloadFilename, deliveryCheck, renderError, renderProgress, hasTrack, onChange, onRender, onClose,
 }) => {
+  useEscapeToClose(open, onClose);
   if (!open) return null;
   const fieldClass = "bg-[#090704] border border-[#5A4519] focus:border-[#D4AF37] rounded px-2.5 py-1.5 text-xs text-[#F7F1E2]";
   const labelClass = "flex flex-col gap-1 text-[11px] text-[#C7B98F]";
@@ -49,7 +62,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     <Portal>
     <div role="dialog" aria-modal="true" aria-label="Export Master Audio"
       className="syn-modal-backdrop syn-export-backdrop fixed inset-0 bg-black/85 flex items-center justify-center p-4"
-      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+>
       <div className="syn-modal syn-export-modal w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-xl bg-[#090806] border border-[#D4AF37]/70 shadow-[0_24px_90px_rgba(0,0,0,.8)]">
         <div className="sticky top-0 z-10 px-5 py-4 border-b border-[#5A4519] flex items-center justify-between bg-[#100D06]">
           <div>
@@ -320,6 +333,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   children,
 }) => {
+  useEscapeToClose(open, onClose);
   if (!open) return null;
 
   return (
@@ -329,7 +343,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       aria-modal="true"
       aria-label="Workstation Settings"
       className="syn-modal-backdrop syn-settings-backdrop fixed inset-0 bg-black/75 flex items-center justify-center p-4"
-      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
     >
       <div className="syn-modal syn-settings-modal w-full max-w-lg max-h-[92vh] overflow-y-auto rounded bg-[#111217] border border-[#D4AF37]/45 shadow-2xl">
         <div className="px-5 py-3.5 border-b border-[#242732] flex items-center justify-between bg-[#151720]">
