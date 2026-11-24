@@ -1,11 +1,10 @@
 import React from 'react';
 import type { WorkspaceTab } from '../types/mastering';
 
-type Workspace = Exclude<WorkspaceTab, 'studio'>;
+type Workspace = Exclude<WorkspaceTab, 'studio' | 'ai'>;
 type WorkspaceHeroProps = { workspace: Workspace; hasTrack: boolean };
 
 const COPY: Record<Workspace, { index: string; eyebrow: string; title: string; subtitle: string; detail: string }> = {
-  ai: { index: '01', eyebrow: 'SYN MASTER INTELLIGENCE', title: 'MASTERING DIRECTOR', subtitle: 'AI ASSISTANT', detail: 'Measurement-led decisions, real DSP execution and independent verification.' },
   lab: { index: '02', eyebrow: 'SIGNAL ANALYSIS', title: 'ANALYSIS LAB', subtitle: 'MEASURE · INSPECT · UNDERSTAND', detail: 'Frequency, dynamics, stereo image and distortion diagnostics.' },
   stems: { index: '03', eyebrow: 'MULTITRACK INTELLIGENCE', title: 'STEM STUDIO', subtitle: 'SEPARATE · PROCESS · REBUILD', detail: 'Isolate, shape and recombine the elements of your mix.' },
   battle: { index: '04', eyebrow: 'MASTERING A/B EVALUATION', title: 'A/B BATTLE', subtitle: 'THREE MASTERS · ONE WINNER', detail: 'Compare independent mastering approaches with loudness-matched auditioning.' },
@@ -16,19 +15,6 @@ const COPY: Record<Workspace, { index: string; eyebrow: string; title: string; s
 
 function InstrumentGraphic({ workspace }: { workspace: Workspace }) {
   const grid = Array.from({ length: 7 }, (_, i) => i);
-  if (workspace === 'ai') return (
-    <svg viewBox="0 0 360 170" role="img" aria-label="AI mastering signal path illustration">
-      <defs><radialGradient id="heroAiCore"><stop stopColor="#7bd5ff" stopOpacity=".65"/><stop offset="1" stopColor="#14628e" stopOpacity=".05"/></radialGradient></defs>
-      <circle cx="180" cy="82" r="60" fill="none" stroke="#2f8fbd" strokeOpacity=".45" strokeDasharray="2 6"/>
-      <circle cx="180" cy="82" r="43" fill="none" stroke="#d5b66f" strokeOpacity=".7" transform="rotate(-22 180 82)"/>
-      <circle cx="180" cy="82" r="29" fill="url(#heroAiCore)" stroke="#70cfff" strokeOpacity=".8"/>
-      <path d="M180 53V111M151 82H209M160 62L200 102M200 62L160 102" stroke="#9de0ff" strokeOpacity=".7"/>
-      <circle cx="180" cy="82" r="5" fill="#f0d18b"/>
-      <g fill="#68caff"><circle cx="105" cy="43" r="4"/><circle cx="255" cy="39" r="3"/><circle cx="260" cy="125" r="4"/><circle cx="94" cy="119" r="3"/></g>
-      <g stroke="#4e9ec8" strokeOpacity=".7" fill="none"><path d="M105 43L146 61L151 82M255 39L215 60L209 82M260 125L215 104L209 82M94 119L145 103L151 82"/><path d="M26 82H94M266 82H334" strokeDasharray="3 5"/></g>
-      <g fill="#86a9bf" fontSize="8" fontFamily="monospace"><text x="14" y="70">ANALYZE</text><text x="285" y="70">VERIFY</text><text x="164" y="151">SYN / AI</text></g>
-    </svg>
-  );
   if (workspace === 'lab') return (
     <svg viewBox="0 0 360 170" role="img" aria-label="Spectrum and frequency analysis illustration">
       {grid.map(i => <g key={i}><line x1="18" y1={20+i*20} x2="342" y2={20+i*20} stroke="#54758c" strokeOpacity=".22" strokeDasharray="3 5"/><line x1={25+i*50} y1="12" x2={25+i*50} y2="150" stroke="#54758c" strokeOpacity=".16"/></g>)}
@@ -100,7 +86,7 @@ export const WorkspaceHero: React.FC<WorkspaceHeroProps> = ({ workspace, hasTrac
         <p>{copy.detail}</p>
         <div className={'syn-workspace-hero-status ' + (hasTrack || sourceIndependent ? 'is-ready' : '')}><i/>{status}</div>
       </div>
-      <div className="syn-workspace-hero-art">
+      <div className="syn-workspace-hero-art" data-testid="workspace-hero-graphic">
         <InstrumentGraphic workspace={workspace}/>
         <span>INSTRUMENT GRAPHIC · NOT MEASURED SOURCE DATA</span>
       </div>
