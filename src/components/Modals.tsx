@@ -1,6 +1,7 @@
 import React from 'react';
 import { Download, X } from 'lucide-react';
 import type { AppSettings, ExportConfig } from '../types/mastering';
+import { changeViewMode, parseViewMode, readViewMode } from '../ui/viewMode';
 
 interface ExportModalProps {
   open: boolean;
@@ -352,6 +353,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <option value="engineering">Engineering Mode (Full Technical)</option>
               <option value="guided">Guided Mode (Contextual DSP Explanations)</option>
             </select>
+          </label>
+
+          <label className="flex flex-col gap-1 text-[#9CA3AF]">
+            Layout (Desktop / Mobile view)
+            <select
+              aria-label="Layout view"
+              defaultValue={readViewMode()}
+              onChange={(e) => changeViewMode(parseViewMode(e.target.value))}
+              className="bg-[#090A0E] border border-[#2B2E3A] rounded px-2.5 py-1.5 text-[#F7F8FA] min-h-[40px]"
+            >
+              <option value="auto">Automatic (by screen size)</option>
+              <option value="desktop">Desktop view</option>
+              <option value="mobile">Mobile view</option>
+            </select>
+            <span className="text-[10px] text-[#6B7280]">Saved on this device. The page reloads to apply it; your session is kept by auto-save.</span>
           </label>
 
           <label className="flex items-center justify-between text-[#F7F8FA]">
