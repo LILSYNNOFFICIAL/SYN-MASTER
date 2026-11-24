@@ -3,6 +3,7 @@ import type { ExportConfig } from '../types/mastering';
 export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   filename: 'SYN_Master_Output',
   format: 'wav',
+  selectedFormats: ['wav'],
   wavBitDepth: 24,
   flacBitDepth: 24,
   flacCompression: 5,
