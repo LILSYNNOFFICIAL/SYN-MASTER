@@ -59,6 +59,10 @@ export const WorkspaceNavigation: React.FC<Props> = ({
     else if (activeTab === 'qc') setSelectedPrimary('loudness');
     else if (activeTab !== 'studio') setSelectedPrimary('more');
     else if (!['dashboard', 'equalizer', 'dynamics'].includes(selectedPrimary)) setSelectedPrimary('dashboard');
+
+    if (activeTab === 'studio' && selectedPrimary === 'equalizer') {
+      document.querySelector('[data-testid="central-spectrum"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   }, [activeTab, selectedPrimary]);
 
   useEffect(() => {
