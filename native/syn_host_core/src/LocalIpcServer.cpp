@@ -167,6 +167,34 @@ void LocalIpcServer::setScanHandler(ScanTriggerCallback cb) {
   m_scanHandler = std::move(cb);
 }
 
+bool LocalIpcServer::startScan(const std::string& modeIn) {
+#ifdef SYN_HAS_IXWEBSOCKET
+  std::string mode = modeIn;
+  if (mode != "incremental" && mode != "full" && mode != "force") mode = "incremental";
+  if (!m_scanHandler) return false;
+  if (m_scanInProgress.exchange(true)) return false;
+  m_scanDone = 0;
+  m_scanTotal = 0;
+  std::thread([this, mode]() {
+    m_scanHandler(mode, "", [this](int done, int total, const std::string& b, const std::string& st) {
+      m_scanDone = done;
+      m_scanTotal = total;
+      broadcastNotification("catalog.scanProgress", nlohmann::json({
+          {"completed", done},
+          {"total", total},
+          {"currentBundle", b},
+          {"status", st},
+      }).dump());
+    });
+    m_scanInProgress = false;
+  }).detach();
+  return true;
+#else
+  (void)modeIn;
+  return false;
+#endif
+}
+
 void LocalIpcServer::setShutdownHandler(std::function<void()> cb) {
   m_shutdownHandler = std::move(cb);
 }
@@ -266,6 +294,7 @@ bool LocalIpcServer::start(std::string& errorOut) {
                   nlohmann::json({{"error", "Invalid pairing code or token"}}).dump());
             }
 
+            m_pairedOnce = true;
             nlohmann::json body = {
                 {"paired", true},
                 {"sessionToken", m_config.sessionToken},
@@ -398,6 +427,10 @@ bool LocalIpcServer::start(std::string& errorOut) {
         }
 
         if (msg->type == ix::WebSocketMessageType::Close) {
+          if (state->authenticated) {
+            state->authenticated = false;
+            --m_authedClients;
+          }
           std::lock_guard<std::mutex> lock(m_impl->wsMutex);
           m_impl->clients.erase(&ws);
           return;
@@ -446,7 +479,9 @@ bool LocalIpcServer::start(std::string& errorOut) {
         if (method == "host.auth") {
           std::string tok = params.value("sessionToken", "");
           if (SecurityPolicy::constantTimeEquals(tok, m_config.sessionToken)) {
+            if (!state->authenticated) ++m_authedClients;
             state->authenticated = true;
+            m_pairedOnce = true;
             sendResult({{"authenticated", true}, {"hostVersion", "0.2.0"}, {"milestone", 2}});
           } else {
             sendError(4001, "Invalid session token");
@@ -577,26 +612,15 @@ bool LocalIpcServer::start(std::string& errorOut) {
 
         if (method == "catalog.scan") {
           std::string mode = params.value("mode", "incremental");
-          if (mode != "incremental" && mode != "full" && mode != "force") mode = "incremental";
-          if (m_scanInProgress.exchange(true)) {
+          if (m_scanInProgress.load()) {
             sendResult({{"started", false}, {"alreadyRunning", true}});
             return;
           }
-          if (m_scanHandler) {
-            std::thread([this, mode]() {
-              m_scanHandler(mode, "", [this](int done, int total, const std::string& b, const std::string& st) {
-                broadcastNotification("catalog.scanProgress", nlohmann::json({
-                    {"completed", done},
-                    {"total", total},
-                    {"currentBundle", b},
-                    {"status", st},
-                }).dump());
-              });
-              m_scanInProgress = false;
-            }).detach();
-          } else {
-            m_scanInProgress = false;
+          if (!startScan(mode)) {
+            sendResult({{"started", false}, {"alreadyRunning", m_scanInProgress.load()}});
+            return;
           }
+          if (mode != "incremental" && mode != "full" && mode != "force") mode = "incremental";
           sendResult({{"started", true}, {"mode", mode}});
           return;
         }

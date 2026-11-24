@@ -50,6 +50,18 @@ public:
   void setShutdownHandler(std::function<void()> cb);
   void broadcastNotification(const std::string& method, const std::string& paramsJson);
 
+  // Companion-window status hooks (read from the GUI thread; all lock-free).
+  // startScan() runs the same path as the catalog.scan RPC and broadcasts progress
+  // to the web app; returns false if a scan is already running or no handler is set.
+  bool startScan(const std::string& mode);
+  bool isScanInProgress() const { return m_scanInProgress.load(); }
+  int scanCompleted() const { return m_scanDone.load(); }
+  int scanTotal() const { return m_scanTotal.load(); }
+  // A browser client completed /v1/auth/pair at least once this launch.
+  bool hasPairedOnce() const { return m_pairedOnce.load(); }
+  // Number of WebSocket clients currently authenticated with the session token.
+  int authenticatedClientCount() const { return m_authedClients.load(); }
+
   static std::string serializePluginJson(const PluginDescriptor& d);
 
 private:
@@ -62,6 +74,10 @@ private:
   std::function<void()> m_shutdownHandler;
   std::atomic<bool> m_running{false};
   std::atomic<bool> m_scanInProgress{false};
+  std::atomic<int> m_scanDone{0};
+  std::atomic<int> m_scanTotal{0};
+  std::atomic<bool> m_pairedOnce{false};
+  std::atomic<int> m_authedClients{0};
 
   struct Impl;
   std::unique_ptr<Impl> m_impl;
