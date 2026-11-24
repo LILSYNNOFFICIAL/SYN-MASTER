@@ -2959,7 +2959,7 @@ export default function App() {
             </section>
           )}
 
-          {activeTab !== 'studio' && <WorkspaceHero workspace={activeTab} hasTrack={Boolean(activeTrack)} />}
+          {activeTab !== 'studio' && activeTab !== 'ai' && <WorkspaceHero workspace={activeTab} hasTrack={Boolean(activeTrack)} />}
 
           {activeTab === 'stems' && <StemIntelligencePanel />}
 
