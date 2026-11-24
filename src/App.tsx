@@ -2090,7 +2090,7 @@ export default function App() {
   return (
     <div className="syn-workstation min-h-screen lg:h-screen w-full flex flex-col bg-[#070709] text-[#F7F8FA] lg:overflow-hidden">
       {/* Zone 3-Part Top Bar Contract */}
-      <header className="h-14 shrink-0 px-4 border-b border-[#242732] bg-[#0B0C10] flex items-center justify-between gap-8">
+      <header className="syn-app-header h-14 shrink-0 px-4 border-b border-[#242732] bg-[#0B0C10] flex items-center justify-between gap-8">
         {/* Zone 1: Single-line Brand Lockup */}
         <div className="flex items-center gap-2.5 whitespace-nowrap shrink-0">
           <img
@@ -2105,7 +2105,8 @@ export default function App() {
         </div>
 
         {/* BlueNote-grade command menu: grouped actions, keyboard-friendly native disclosure menus */}
-        <nav aria-label="Application Menu" className="syn-menubar">
+        <details className="syn-mobile-command-menu"><summary>Menu</summary>
+          <nav aria-label="Application Menu" className="syn-menubar">
           <details className="syn-menu-group">
             <summary>File</summary>
             <div className="syn-menu-panel" role="menu" aria-label="File">
@@ -2156,16 +2157,17 @@ export default function App() {
               <button role="menuitem" type="button" onClick={(event) => { setActiveTab('lab'); event.currentTarget.closest('details')?.removeAttribute('open'); }}>Spectral Analysis</button>
             </div>
           </details>
-        </nav>
+          </nav>
+        </details>
 
         {/* Zone 3: Primary CTA */}
         <div className="flex items-center shrink-0">
           <button
             type="button"
             onClick={() => setExportModalOpen(true)}
-            className="px-4 py-1.5 rounded bg-[#D4AF37] text-[#070709] text-xs font-bold hover:bg-[#F2CA52] whitespace-nowrap shrink-0"
+            className="syn-header-export px-4 py-1.5 rounded bg-[#D4AF37] text-[#070709] text-xs font-bold hover:bg-[#F2CA52] whitespace-nowrap shrink-0"
           >
-            Export Master
+            <span className="hidden sm:inline">Export Master</span><span className="sm:hidden">Export</span>
           </button>
         </div>
       </header>
@@ -2307,19 +2309,19 @@ export default function App() {
         )}
 
         {/* Center Mastering Stage */}
-        <main className={`lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none${activeTab === 'studio' && activeTrack ? ' syn-daw-main' : ''}`}>
+        <main data-layout={activeTab} className="syn-daw-main lg:flex-1 shrink-0 lg:shrink min-w-0 lg:overflow-y-auto p-4 flex flex-col gap-4 bg-[#070709] order-first lg:order-none">
           {activeTrack && activeTab !== 'studio' && (
             <section data-testid="mastering-control-desk" aria-label="Mastering Control Desk"
-              className="rounded-xl border border-[#D4AF37]/65 bg-gradient-to-br from-[#151006] via-[#0D0B06] to-[#070604] p-3.5 shadow-[0_12px_32px_rgba(0,0,0,.35)]">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
+              className="syn-control-desk rounded-xl border border-[#D4AF37]/65 bg-gradient-to-br from-[#151006] via-[#0D0B06] to-[#070604] p-3.5 shadow-[0_12px_32px_rgba(0,0,0,.35)]">
+              <div className="syn-control-desk-layout flex flex-wrap items-center justify-between gap-3">
+                <div className="syn-control-desk-info min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[10px] font-black uppercase tracking-[.18em] text-[#F2CA52]">Mastering Control Desk</span>
                     <span className={`rounded border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${directorRunning ? 'border-[#D4AF37] bg-[#D4AF37]/15 text-[#F2CA52]' : postAnalysisState.status === 'ready' ? 'border-[#8B6A1B] bg-[#D4AF37]/10 text-[#E8C85A]' : 'border-[#4A3917] text-[#B6A780]'}`}>
                       {directorRunning ? (directorStage || 'PROCESSING') + ' · PASS ' + directorPass + '/10' : postAnalysisState.status === 'ready' ? 'MASTER ANALYSIS READY' : postAnalysisState.status === 'processing' ? 'ANALYZING MASTER' : 'READY TO ANALYZE'}
                     </span>
                   </div>
-                  <div className="mt-1 truncate text-xs font-semibold text-[#F6EED8]">{activeTrack.name}</div>
+                  <div className="syn-control-desk-track mt-1 text-xs font-semibold text-[#F6EED8]">{activeTrack.name}</div>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono-tabular text-[#B6A780]">
                     <span>Source {activeTrack.analysis.integratedLufs.toFixed(1)} LUFS</span>
                     <span>Master {postAnalysisState.status === 'ready' && postAnalysis ? postAnalysis.integratedLufs.toFixed(1) + ' LUFS' : 'Not verified'}</span>
@@ -2327,8 +2329,8 @@ export default function App() {
                     <span>Objective {objectiveId.toUpperCase()}</span>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" disabled={directorRunning} onClick={handleAnalyzeTrack}
+                <div className="syn-control-desk-actions flex flex-wrap items-center gap-2">
+                  <button type="button" disabled={directorRunning} onClick={handleAnalyzeTrack>
                     className="rounded-md border border-[#8B6A1B] bg-[#171208] px-3 py-2 text-[11px] font-bold text-[#E8C85A] hover:border-[#F2CA52] disabled:opacity-45">
                     ANALYZE TRACK
                   </button>
