@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BrainCircuit, MessageSquareText, Plus, Square, Upload } from 'lucide-react';
+import { BrainCircuit, Download, MessageSquareText, Plus, Square, Upload } from 'lucide-react';
 import type {
   AudioAnalysis,
   CompressorParams,
@@ -68,6 +68,8 @@ export interface MasterConsoleProps {
   timeline?: React.ReactNode;
   /** Opens the AI Assistant (Mastering Director) workspace. Planning / explanations, not the one-click fix. */
   onAskAi?: () => void;
+  /** Opens the Export Master dialog (step 4 of the guided flow). */
+  onExport?: () => void;
   /** Session "Mode" from the ribbon (MasteringMode). Shown on the console and used to suggest a preset. */
   mode?: string;
   /** Drag the target marker on the loudness meter: sets a custom integrated-loudness target. */
@@ -221,6 +223,14 @@ const LoudnessBar: React.FC<{ lufs: number | null; targetLufs: number; disabled?
   );
 };
 
+const StepLabel: React.FC<{ n: number; text: string; hint?: string; className?: string }> = ({ n, text, hint, className = '' }) => (
+  <div className={`syn-step-label ${className}`}>
+    <span className="syn-step-num" aria-hidden="true">{n}</span>
+    <span className="syn-step-text"><span className="sr-only">Step {n}: </span>{text}</span>
+    {hint && <small className="syn-step-hint">{hint}</small>}
+  </div>
+);
+
 export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
   const [eqView, setEqView] = useState<'eq' | 'spectrum' | 'spectrogram'>('eq');
   const [presetId, setPresetId] = useState<string>(p.presets[0]?.id ?? '');
@@ -301,7 +311,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
     );
 
   const fixButton = (
-    <div className="syn2-fix-centerpiece syn-fixai-wrap syn-area-fix">
+    <div className="syn2-fix-centerpiece syn-fixai-wrap">
       <button
         type="button"
         className={`syn-fixai${p.running ? ' is-running' : ''}`}
@@ -337,6 +347,18 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
   return (
     <section className="syn-console" aria-label="SYN-MASTER console" data-testid="syn-console" data-mode={p.mode}>
       <LightRibbons className="syn-console-ribbons" />
+
+      <div className="syn-flow-top">
+        <div className="syn-flow-step syn-area-player">
+          <StepLabel n={1} text="Import" hint="Load a track, seek and set fades" />
+          {p.timeline}
+        </div>
+        <div className="syn-flow-step syn-flow-fix syn-area-fix">
+          <StepLabel n={2} text="Fix with AI" hint="One press: analyze, fix, verify" />
+          {fixButton}
+        </div>
+      </div>
+      <StepLabel n={3} text="Master it yourself" hint="EQ, dynamics, tone, width and loudness: every change redraws the visuals" className="syn-area-step3 syn-step-wide" />
 
       <div className="syn-console-col syn-console-left">
         <Card title="Input" area="input" className="syn-card-knob">{inputKnob(116, 'Input trim')}</Card>
@@ -410,8 +432,6 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
           )}
         </section>
 
-        {p.timeline}
-
         <div className="syn-console-bottom">
           <Card title="Global" area="global" className="syn-card-global">
             <label className="syn-field">
@@ -442,7 +462,14 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               </div>
             )}
           </Card>
-          {fixButton}
+          <div className="syn-export-step syn-area-export">
+            <StepLabel n={4} text="Export" />
+            <button type="button" className="syn-export-master" onClick={p.onExport} disabled={!p.hasTrack || !p.onExport || p.running}
+              aria-label="Export Master: choose format and render the final master">
+              <Download className="w-5 h-5" aria-hidden="true" />
+              <span>Export Master</span>
+            </button>
+          </div>
           <Card title="Presets" area="presets" className="syn-card-presets">
             <select value={presetId} onChange={(e) => setPresetId(e.target.value)} aria-label="Mastering preset" className="syn-preset-select">
               {p.presets.map((pr) => (

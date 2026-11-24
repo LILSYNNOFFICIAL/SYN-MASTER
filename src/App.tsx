@@ -2374,6 +2374,7 @@ export default function App() {
       onOpenStereoLab={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
       notice={statusNotice}
       onAskAi={() => setActiveTab('ai')}
+      onExport={() => setExportModalOpen(true)}
       mode={mode}
       onTargetLufs={(lufs) => {
         setTargetPresetId(null);
