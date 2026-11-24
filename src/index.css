@@ -1382,3 +1382,7 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 .syn-rack-shell [data-processor-id] {
   border-color:rgba(77,143,181,.25);
 }
+
+/* Keep the command/navigation layer above transport and processor panels. */
+.syn-daw-global-tabs{position:relative;z-index:40}
+.syn-daw-global-tabs .syn-primary-nav-more,.syn-daw-global-tabs [role="dialog"],.syn-daw-global-tabs [role="menu"]{position:relative;z-index:41}
