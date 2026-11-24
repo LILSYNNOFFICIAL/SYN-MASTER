@@ -424,3 +424,12 @@ The client-entered cloud token is a shared bearer credential, not individual use
 
 - [x] **First-load chunking:** Export and Preferences dialogs now use React lazy imports and mount only when opened, keeping the initial workstation bundle from loading those dialog modules up front. The updated JS chunk sizes will be recorded from the next Web CI run.
 - [x] **PWA shell caching:** service-worker installation now primes the navigation shell, manifest, and 192/512 icons, and only caches responses with a known content length below 8 MiB. AI endpoints and model files remain excluded.
+
+## Android and tablet responsive layout update — November 23, 2026
+
+- [x] **Responsive workstation breakpoint:** the touch-first stacked layout now activates through 1024 CSS pixels, covering narrow Android/tablet browser viewports that previously retained the two-column library rail.
+- [x] **Full-width mastering workspace:** the mastering stage, spectrum panel, and processor rack are constrained to the available viewport width when stacked; the spectrum panel retains a 220 px minimum height.
+- [x] **Readable mastering meters:** the eight technical readouts use a two-column grid in the touch-first layout, with a single-column fallback on very narrow screens.
+- [x] **Compact command header:** brand and export action share the first row, while the command menus occupy a horizontally scrollable second row to avoid compressing the workstation.
+- [ ] **Physical Android acceptance:** verify the live synced build in Chrome/Chrome Canary on the target phone at portrait and landscape widths. GitHub CI and CSS inspection do not replace this device check.
+- **Scope:** this is a CSS-only responsive layout change. React state, Web Audio routing, DSP, mastering algorithms, and audio engine modules were not modified.
