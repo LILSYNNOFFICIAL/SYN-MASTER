@@ -2421,7 +2421,7 @@ export default function App() {
           <button
             type="button"
             className="syn-icon-btn syn-library-toggle"
-            aria-label={libraryOpen ? 'Close audio library' : 'Open audio library, presets, chains and projects'}
+            aria-label={libraryOpen ? 'Close menu' : 'Open menu: workspaces, audio library, presets, chains and projects'}
             aria-expanded={libraryOpen}
             aria-controls="syn-library-drawer"
             onClick={() => setLibraryOpen((v) => !v)}
@@ -2629,9 +2629,30 @@ export default function App() {
         {libraryOpen && (
           <button type="button" className="syn-library-backdrop" aria-label="Close audio library" onClick={() => setLibraryOpen(false)} />
         )}
-        {!fullscreenWorkspace && (
+        {(
           <div id="syn-library-drawer" className="syn-library-drawer" data-open={libraryOpen ? 'true' : 'false'}
             onKeyDown={(e) => { if (e.key === 'Escape') setLibraryOpen(false); }}>
+          <nav className="syn-drawer-nav" aria-label="Workspaces">
+            <div className="syn-drawer-nav-title">Navigate</div>
+            <div className="syn-drawer-nav-grid">
+              {([
+                { id: 'studio', label: 'Dashboard' },
+                { id: 'reference', label: 'Reference Match' },
+                { id: 'ai', label: 'AI Director' },
+                { id: 'lab', label: 'Analysis Lab' },
+                { id: 'stems', label: 'Stem Studio' },
+                { id: 'qc', label: 'Quality Check' },
+                { id: 'battle', label: 'A/B Battle' },
+                { id: 'plugins', label: 'Plugins & Host' },
+              ] as const).map((item) => (
+                <button key={item.id} type="button" className="syn-drawer-nav-item" aria-current={activeTab === item.id ? 'page' : undefined}
+                  onClick={() => { setActiveTab(item.id); setLibraryOpen(false); }}>{item.label}</button>
+              ))}
+              <button type="button" className="syn-drawer-nav-item" onClick={() => { setLibraryOpen(false); setExportModalOpen(true); }}>Export</button>
+              <button type="button" className="syn-drawer-nav-item" onClick={() => { setLibraryOpen(false); setSettingsModalOpen(true); }}>Settings</button>
+            </div>
+            <div className="syn-drawer-nav-title">Library</div>
+          </nav>
           <LeftLibraryPanel
             activeTrack={activeTrack}
             referenceTrack={referenceTrack}

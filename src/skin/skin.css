@@ -378,3 +378,13 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
   .syn-player-play{padding:0 10px;}
   .syn-player-fades{grid-column:1 / -1;}
 }
+
+/* Round 3 · B: hamburger drawer navigation */
+.syn-library-drawer{overflow-y:auto;}
+.syn-library-drawer > aside{flex:0 0 auto !important;height:auto !important;overflow:visible !important;}
+.syn-drawer-nav{padding:14px 12px 4px;display:flex;flex-direction:column;gap:8px;}
+.syn-drawer-nav-title{font:800 10px/1 var(--syn-font-body,inherit);letter-spacing:.2em;text-transform:uppercase;color:var(--skin-cyan,#3FE0FF);text-shadow:0 0 8px var(--glow-cyan);padding:4px 2px;}
+.syn-drawer-nav-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.syn-drawer-nav-item{min-height:38px;padding:8px 10px;border-radius:10px;border:1px solid var(--line-blue);background:rgba(46,168,255,.06);color:#CFE9FF;font-size:12px;font-weight:700;text-align:left;transition:box-shadow .15s,border-color .15s,background .15s;}
+.syn-drawer-nav-item:hover{border-color:var(--line-blue-strong);box-shadow:0 0 12px var(--glow-blue-soft);}
+.syn-drawer-nav-item[aria-current="page"]{background:linear-gradient(180deg,rgba(63,224,255,.22),rgba(46,168,255,.12));border-color:var(--line-blue-strong);color:#fff;box-shadow:0 0 14px var(--glow-blue);}
