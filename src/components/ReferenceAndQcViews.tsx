@@ -226,6 +226,8 @@ interface QcProps {
   onSeek?: (sec: number) => void;
   /** 'source' when the report was run on the source because the master render is not ready. */
   qcBasis?: 'master' | 'source';
+  /** Platform Preview panel (monitoring only), rendered under the live loudness panel. */
+  platformPanel?: React.ReactNode;
 }
 
 export const QualityControlView: React.FC<QcProps> = ({
@@ -239,6 +241,7 @@ export const QualityControlView: React.FC<QcProps> = ({
   durationSec = 0,
   onSeek,
   qcBasis = 'master',
+  platformPanel,
 }) => {
   const profile = profiles.find((p) => p.id === selectedProfileId);
   return (
@@ -286,6 +289,7 @@ export const QualityControlView: React.FC<QcProps> = ({
           onSeek={onSeek}
         />
       )}
+      {platformPanel}
       {qcReport && qcBasis === 'source' && (
         <p className="syn-qc-basis text-[11px]">Checks below are run on the source; they switch to the rendered master as soon as it is ready.</p>
       )}

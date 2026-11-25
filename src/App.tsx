@@ -120,6 +120,7 @@ const ReferenceMatchView = React.lazy(() =>
 const QualityControlView = React.lazy(() =>
   import('./components/ReferenceAndQcViews').then(({ QualityControlView }) => ({ default: QualityControlView })),
 );
+const PlatformPreviewPanel = React.lazy(() => import('./components/platform/PlatformPreviewPanel'));
 const PluginManagerView = React.lazy(() =>
   import('./components/PluginManagerView').then(({ PluginManagerView }) => ({ default: PluginManagerView })),
 );
@@ -134,6 +135,8 @@ import { FixItStage } from './components/studio/FixItStage';
 const WhatAiChangedPanel = React.lazy(() => import('./components/studio/WhatAiChangedPanel').then(({ WhatAiChangedPanel }) => ({ default: WhatAiChangedPanel })));
 const FxRackWindow = React.lazy(() => import('./components/studio/FxRackWindow').then(({ FxRackWindow }) => ({ default: FxRackWindow })));
 import { TimelinePlayer } from './components/studio/TimelinePlayer';
+import { PlatformPreviewSelector, usePlatformPreviewSelection } from './components/platform/PlatformPreviewSelector';
+import { compressorMakeupDb, getPlatformRule, predictForPlatform, type MasterLevels } from './dsp/platformRules';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
 import { buildDiagnosticLog } from './director/diagnosticLog';
@@ -1311,6 +1314,35 @@ export default function App() {
     if (qcReport || !activeTrack) return qcReport;
     return runQualityControl(activeTrack.analysis, activeTrack.analysis, activeQcProfile, exportConfig);
   }, [qcReport, activeTrack, activeQcProfile, exportConfig]);
+
+  // Platform Preview (monitoring only): the playback gain a streaming platform would apply to the
+  // master. It sits on the playback bus after the chain and never touches render, Fix All or export.
+  const platformSelection = usePlatformPreviewSelection();
+  const platformLevels = useMemo<MasterLevels | null>(() => {
+    const a = postAnalysisState.status === 'ready' && postAnalysis ? postAnalysis : activeTrack?.analysis ?? null;
+    return a ? { integratedLufs: a.integratedLufs, truePeakDb: a.truePeakDb, samplePeakDb: a.samplePeakDb } : null;
+  }, [postAnalysis, postAnalysisState.status, activeTrack]);
+  useEffect(() => {
+    const prediction = platformLevels
+      ? predictForPlatform(platformLevels, platformSelection.platformId, platformSelection.spotifyLevel)
+      : null;
+    const rule = getPlatformRule(platformSelection.platformId, platformSelection.spotifyLevel);
+    engineRef.current?.setPlatformPreview(
+      prediction?.gainDb ?? 0,
+      rule.limiter && prediction?.limiterEngaged
+        ? {
+            thresholdDb: rule.limiter.thresholdDbfs,
+            attackMs: rule.limiter.attackMs,
+            releaseMs: rule.limiter.releaseMs,
+            makeupDb: compressorMakeupDb(rule.limiter.thresholdDbfs, 20),
+          }
+        : null,
+    );
+  }, [platformLevels, platformSelection]);
+  const getPlatformMasterAudio = useCallback(() => {
+    const channels = postChannelsRef.current ?? sourceChannelsRef.current;
+    return channels && activeTrack ? { channels, sampleRate: activeTrack.sampleRate } : null;
+  }, [activeTrack]);
 
   const currentChainFingerprint = useMemo(
     () => computeChainFingerprint(chain, chainBypassed),
@@ -2548,6 +2580,7 @@ export default function App() {
           onSeek={seekTo}
           onTogglePlay={togglePlay}
           onImport={handleUploadSourceFile}
+          extra={<PlatformPreviewSelector levels={platformLevels} onOpenPanel={() => setActiveTab('qc')} />}
         />
       }
     />
@@ -3371,6 +3404,22 @@ export default function App() {
               selectedProfileId={qcTargetId}
               onSelectProfile={setQcTargetId}
               onAutoFixQc={handleAutoFixQc}
+              platformPanel={
+                <React.Suspense fallback={null}>
+                  <PlatformPreviewPanel
+                    levels={platformLevels}
+                    getMasterAudio={getPlatformMasterAudio}
+                    engine={engineRef.current}
+                    onPauseMain={() => {
+                      if (isPlaying) {
+                        engineRef.current?.pause();
+                        setIsPlaying(false);
+                        telemetryStore.publish({ isPlaying: false });
+                      }
+                    }}
+                  />
+                </React.Suspense>
+              }
             />
           )}
 

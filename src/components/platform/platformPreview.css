@@ -1,0 +1,69 @@
+/* Platform Preview (monitoring only). Uses the console skin tokens from src/skin/skin.css. */
+.syn-pp-compact{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;margin:4px 0 2px;font-size:11px;color:#CFE9FF;}
+.syn-pp-compact .syn-pp-icon{width:14px;height:14px;color:var(--skin-cyan,#3FE0FF);opacity:.6;}
+.syn-pp-compact.is-active .syn-pp-icon{opacity:1;filter:drop-shadow(0 0 4px var(--glow-cyan,rgba(63,224,255,.6)));}
+.syn-pp-field select,.syn-pp-pickers select,.syn-pp-codec-controls select{min-height:32px;padding:0 8px;border-radius:9px;border:1px solid var(--line-blue,rgba(46,168,255,.45));
+  background:rgba(4,10,20,.8);color:#E6F4FF;font:600 11px var(--syn-font-body,inherit);}
+.syn-pp-field select:focus-visible,.syn-pp-pickers select:focus-visible,.syn-pp-codec-controls select:focus-visible,.syn-pp-more:focus-visible,.syn-pp-row:focus-visible{outline:2px solid var(--skin-cyan,#3FE0FF);outline-offset:2px;}
+.syn-pp-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+.syn-pp-readout{display:inline-flex;align-items:baseline;gap:6px;padding:3px 9px;border-radius:999px;border:1px solid var(--line-blue,rgba(46,168,255,.45));background:rgba(46,168,255,.08);font-variant-numeric:tabular-nums;}
+.syn-pp-readout b{color:#fff;font-weight:800;}
+.syn-pp-tp{color:#9FC6E8;}
+.syn-pp-tag{padding:0 6px;border-radius:6px;background:rgba(245,184,46,.18);color:var(--skin-gold,#F5B82E);font-weight:700;text-transform:uppercase;letter-spacing:.05em;font-size:9px;}
+.syn-pp-readout.risk-lossy-headroom{border-color:rgba(245,184,46,.6);}
+.syn-pp-readout.risk-clip{border-color:rgba(224,64,251,.8);box-shadow:0 0 10px rgba(224,64,251,.35);}
+.syn-pp-more{min-height:32px;padding:0 10px;border-radius:9px;border:1px solid var(--line-blue,rgba(46,168,255,.45));background:transparent;color:#CFE9FF;font:700 11px var(--syn-font-body,inherit);cursor:pointer;}
+.syn-pp-more:hover{background:rgba(46,168,255,.16);}
+
+.syn-pp-panel{display:flex;flex-direction:column;gap:12px;padding:14px;border-radius:16px;border:1px solid var(--line-blue,rgba(46,168,255,.45));background:var(--panel-blue,rgba(7,16,29,.94));color:#E6F4FF;min-width:0;}
+.syn-pp-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:flex-start;}
+.syn-pp-head .syn-card-title{display:flex;align-items:center;gap:6px;}
+.syn-pp-sub{margin:2px 0 0;font-size:11px;color:#9FB6CC;max-width:62ch;}
+.syn-pp-pickers,.syn-pp-codec-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;}
+.syn-pp-pickers label,.syn-pp-codec-controls label{display:flex;flex-direction:column;gap:3px;font-size:10px;color:#9FB6CC;text-transform:uppercase;letter-spacing:.06em;}
+.syn-pp-pickers select,.syn-pp-codec-controls select{min-height:40px;font-size:12px;}
+.syn-pp-empty{font-size:12px;color:#9FB6CC;}
+.syn-pp-verdict{padding:10px 12px;border-radius:12px;border:1px solid var(--line-blue,rgba(46,168,255,.45));background:rgba(46,168,255,.06);}
+.syn-pp-verdict.risk-lossy-headroom{border-color:rgba(245,184,46,.55);}
+.syn-pp-verdict.risk-clip{border-color:rgba(224,64,251,.75);}
+.syn-pp-sentence{margin:0 0 8px;font-size:14px;font-weight:700;color:#fff;}
+.syn-pp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0;}
+.syn-pp-stats div{min-width:0;}
+.syn-pp-stats dt{font-size:10px;color:#9FB6CC;text-transform:uppercase;letter-spacing:.05em;}
+.syn-pp-stats dd{margin:0;font:800 14px var(--syn-font-body,inherit);font-variant-numeric:tabular-nums;color:#fff;}
+.syn-pp-advice{display:flex;gap:6px;align-items:center;margin:8px 0 0;font-size:11px;color:var(--skin-gold,#F5B82E);}
+.syn-pp-note,.syn-pp-foot{margin:6px 0 0;font-size:10.5px;color:#8FA6BC;}
+.syn-pp-table{display:flex;flex-direction:column;gap:4px;}
+.syn-pp-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,.7fr) minmax(0,.9fr) minmax(0,1.2fr);gap:8px;align-items:center;min-height:40px;padding:6px 10px;border-radius:10px;
+  border:1px solid rgba(46,168,255,.18);background:rgba(4,10,20,.55);color:#DDEEFF;font:600 12px var(--syn-font-body,inherit);text-align:left;cursor:pointer;font-variant-numeric:tabular-nums;}
+.syn-pp-row:hover{background:rgba(46,168,255,.12);}
+.syn-pp-row.is-selected{border-color:var(--line-blue-strong,rgba(63,224,255,.75));box-shadow:0 0 12px var(--glow-blue-soft,rgba(46,168,255,.22));}
+.syn-pp-row.risk-lossy-headroom > span:nth-child(3){color:var(--skin-gold,#F5B82E);}
+.syn-pp-row.risk-clip > span:nth-child(3){color:var(--skin-magenta,#E040FB);font-weight:800;}
+.syn-pp-row-head{cursor:default;min-height:0;background:transparent;border-color:transparent;font-size:10px;color:#9FB6CC;text-transform:uppercase;letter-spacing:.05em;}
+.syn-pp-row-head:hover{background:transparent;}
+.syn-pp-name i{color:var(--skin-gold,#F5B82E);font-style:normal;}
+.syn-pp-why{color:#9FB6CC;font-weight:500;}
+.syn-pp-codec{border-top:1px solid rgba(46,168,255,.2);padding-top:10px;display:flex;flex-direction:column;gap:8px;}
+.syn-pp-codec h4{margin:0;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#CFE9FF;}
+.syn-pp-error{margin:0;font-size:12px;color:#FF9BD2;}
+.syn-pp-flag{display:flex;align-items:center;gap:6px;margin:0;font-size:12.5px;font-weight:700;}
+.syn-pp-flag.is-bad{color:#FF9BD2;}
+.syn-pp-flag.is-good{color:#8DF5C3;}
+.syn-pp-codec-result{display:flex;flex-direction:column;gap:8px;}
+.syn-pp-ab{display:flex;flex-wrap:wrap;gap:8px;}
+.syn-pp-ab .is-on{border-color:var(--line-blue-strong,rgba(63,224,255,.75));background:rgba(63,224,255,.2);color:#fff;box-shadow:0 0 14px var(--glow-blue,rgba(46,168,255,.55));}
+
+@media (max-width: 640px){
+  .syn-pp-stats{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .syn-pp-row{grid-template-columns:minmax(0,1.3fr) minmax(0,.8fr) minmax(0,1fr);}
+  .syn-pp-row > span:nth-child(4){display:none;}
+  .syn-pp-pickers,.syn-pp-codec-controls{width:100%;}
+  .syn-pp-pickers label,.syn-pp-codec-controls label{flex:1 1 140px;}
+  .syn-pp-encode{flex:1 1 100%;}
+  .syn-pp-ab .syn-player-btn{flex:1 1 auto;}
+}
+@media (prefers-reduced-motion: reduce){
+  .syn-pp-row,.syn-pp-more,.syn-pp-readout{transition:none;}
+  .syn-pp-panel .animate-spin{animation:none;}
+}

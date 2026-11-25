@@ -36,6 +36,14 @@ type AudioContextWithSink = AudioContext & {
   outputLatency?: number;
 };
 
+export interface PlatformPreviewLimiter {
+  thresholdDb: number;
+  attackMs: number;
+  releaseMs: number;
+  /** Automatic makeup gain of the Web Audio compressor to cancel (dB). */
+  makeupDb: number;
+}
+
 export type AuditionTarget =
   | 'mastered'
   | 'original'
@@ -74,6 +82,15 @@ export class SynAudioEngine {
   private chainInputGain: GainNode | null = null;
   private chainOutputGain: GainNode | null = null;
   private monitorGain: GainNode | null = null;
+  /**
+   * Platform Preview (monitoring only, never rendered or exported): the playback gain a streaming
+   * platform would apply, plus an optional playback-limiter model (Spotify Loud).
+   */
+  private platformGain: GainNode | null = null;
+  private platformLimiter: DynamicsCompressorNode | null = null;
+  private platformLimiterTrim: GainNode | null = null;
+  private platformGainDb = 0;
+  private platformLimiterSpec: PlatformPreviewLimiter | null = null;
   private splitter: ChannelSplitterNode | null = null;
   private analyserL: AnalyserNode | null = null;
   private analyserR: AnalyserNode | null = null;
@@ -120,7 +137,10 @@ export class SynAudioEngine {
       this.analyserR = this.ctx.createAnalyser();
       this.analyserR.fftSize = 1024;
 
-      this.chainOutputGain.connect(this.monitorGain);
+      this.platformGain = this.ctx.createGain();
+      this.platformGain.gain.value = dbToLinear(this.platformGainDb);
+      this.chainOutputGain.connect(this.platformGain);
+      this.connectPlatformOutput();
       this.monitorGain.connect(this.analyserMain);
       this.analyserMain.connect(this.splitter);
       this.splitter.connect(this.analyserL, 0);
@@ -233,6 +253,9 @@ export class SynAudioEngine {
     this.chainInputGain = null;
     this.chainOutputGain = null;
     this.monitorGain = null;
+    this.platformGain = null;
+    this.platformLimiter = null;
+    this.platformLimiterTrim = null;
     this.splitter = null;
     this.analyserL = null;
     this.analyserR = null;
@@ -260,6 +283,68 @@ export class SynAudioEngine {
     if (this.monitorGain && this.ctx) {
       this.monitorGain.gain.setTargetAtTime(this.monitorVolume, this.ctx.currentTime, 0.015);
     }
+  }
+
+  /**
+   * Platform Preview gain (dB) and optional playback limiter. Monitoring only: it sits after the
+   * chain output on the playback bus and is never part of a render, verification or export.
+   */
+  public setPlatformPreview(gainDb: number, limiter: PlatformPreviewLimiter | null = null): void {
+    this.platformGainDb = Number.isFinite(gainDb) ? Math.max(-30, Math.min(30, gainDb)) : 0;
+    const limiterChanged = JSON.stringify(limiter) !== JSON.stringify(this.platformLimiterSpec);
+    this.platformLimiterSpec = limiter;
+    if (this.platformGain && this.ctx) {
+      this.platformGain.gain.setTargetAtTime(dbToLinear(this.platformGainDb), this.ctx.currentTime, 0.02);
+      if (limiterChanged) this.connectPlatformOutput();
+    }
+  }
+
+  /** Called when main playback starts (the codec-audition player stops its snippet). */
+  public onMainPlay?: () => void;
+
+  public getPlatformPreviewGainDb(): number {
+    return this.platformGainDb;
+  }
+
+  private connectPlatformOutput(): void {
+    if (!this.ctx || !this.platformGain || !this.monitorGain) return;
+    try { this.platformGain.disconnect(); } catch { /* not connected */ }
+    if (this.platformLimiter) { try { this.platformLimiter.disconnect(); } catch { /* ignore */ } }
+    if (this.platformLimiterTrim) { try { this.platformLimiterTrim.disconnect(); } catch { /* ignore */ } }
+    this.platformLimiter = null;
+    this.platformLimiterTrim = null;
+    const spec = this.platformLimiterSpec;
+    if (!spec) {
+      // No limiter in the path when the model does not need one (the compressor node adds latency).
+      this.platformGain.connect(this.monitorGain);
+      return;
+    }
+    // Approximation of a sample-peak playback limiter with Web Audio's compressor; its automatic
+    // makeup gain is cancelled so only peaks above the threshold are reduced.
+    const comp = this.ctx.createDynamicsCompressor();
+    comp.threshold.value = spec.thresholdDb;
+    comp.knee.value = 0;
+    comp.ratio.value = 20;
+    comp.attack.value = spec.attackMs / 1000;
+    comp.release.value = spec.releaseMs / 1000;
+    const trim = this.ctx.createGain();
+    trim.gain.value = dbToLinear(-spec.makeupDb);
+    this.platformGain.connect(comp);
+    comp.connect(trim);
+    trim.connect(this.monitorGain);
+    this.platformLimiter = comp;
+    this.platformLimiterTrim = trim;
+  }
+
+  /**
+   * Playback-bus input that carries the Platform Preview gain (codec-audition snippets connect
+   * here so they are heard through the same platform model). Pauses the main transport first.
+   */
+  public acquirePlatformPreviewInput(): { ctx: AudioContext; input: AudioNode } | null {
+    const ctx = this.ensureContext();
+    if (!this.platformGain) return null;
+    if (this.isPlaying) this.pause();
+    return { ctx, input: this.platformGain };
   }
 
   public setLoudnessTrimDb(db: number): void {
@@ -816,6 +901,7 @@ export class SynAudioEngine {
     if (!buf) return;
     const ctx = this.ensureContext();
     this.stopSourceOnly();
+    this.onMainPlay?.();
 
     this.rebuildLiveGraph();
     const offset = Math.max(0, Math.min(buf.duration - 0.02, startAtSec ?? this.pauseOffsetSec));

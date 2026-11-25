@@ -21,6 +21,8 @@ interface Props {
   onTogglePlay: () => void;
   onImport: (file: File) => void;
   disabled?: boolean;
+  /** Optional compact control rendered under the transport (Platform Preview selector). */
+  extra?: React.ReactNode;
 }
 
 function fmt(sec: number): string {
@@ -82,6 +84,7 @@ export const TimelinePlayer: React.FC<Props> = (p) => {
             <SkipForward className="w-3.5 h-3.5" />
           </button>
       </div>
+      {p.extra}
       <div className="syn-player-controls">
         <label className="syn-player-btn syn-player-import">
           <Upload className="w-4 h-4" aria-hidden="true" /> Import Track
