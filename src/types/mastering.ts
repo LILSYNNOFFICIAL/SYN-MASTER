@@ -551,6 +551,11 @@ export interface QCReport {
   warningCount: number;
   failCount: number;
   checks: QCCheckItem[];
+  /**
+   * Read-only Platform Preview hint: predicted playback gain and true peak per streaming platform
+   * (src/dsp/platformRules.ts). Never a check, never part of a gate or of the counts above.
+   */
+  platformHints?: import('../dsp/platformRules').PlatformQcHint[];
 }
 
 export type ExportAudioFormat = 'wav' | 'mp3' | 'ogg' | 'flac' | 'm4a' | 'mid' | 'webm-opus';

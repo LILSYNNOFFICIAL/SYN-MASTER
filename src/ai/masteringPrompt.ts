@@ -16,6 +16,7 @@ import type {
 } from '../types/mastering.ts';
 import { validateChainAgainstInventory } from '../director/processorInventory.ts';
 import { summarizeVocalBalanceForPrompt, type VocalBalanceContext } from './vocalBalancePrompt.ts';
+import { formatPlatformHintsForPrompt } from '../dsp/platformRules.ts';
 
 export interface StrategyPromptInput {
   analysis: AudioAnalysis;
@@ -154,11 +155,12 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
     summarizeAnalysisForPrompt('ORIGINAL SOURCE', input.preAnalysis),
     summarizeAnalysisForPrompt('CURRENT PROCESSED PASS', input.postAnalysis),
     `INDEPENDENT SYN-QC EVALUATION:\n${qcSummary}`,
+    formatPlatformHintsForPrompt(input.qcReport?.platformHints),
     `Current Chain JSON:\n${JSON.stringify(chainForPrompt(input.currentChain))}`,
     `Objectives: Target LUFS=${input.targetLufs}, Max True Peak=${input.targetTruePeakDb} dBTP, Preserve Dynamics=${input.preserveDynamics}`,
     ...(input.vocalBalance !== undefined ? [summarizeVocalBalanceForPrompt(input.vocalBalance)] : []),
     'Evaluate unintended degradation (excessive limiting, distortion/THD, phase loss, L/R imbalance, noise floor, LUFS miss) and output a refined chain resolving QC warnings/failures without degrading dynamics.',
-  ].join('\n\n');
+  ].filter(Boolean).join('\n\n');
   return prompt;
 }
 
