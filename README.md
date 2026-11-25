@@ -346,6 +346,30 @@ AI endpoint errors returned to clients are intentionally generic. Detailed excep
 
 SYN MASTER is intentionally account-free for now: there is no in-app registration, login, user profile, or multi-user identity layer. The limiter is not an access-control boundary. Do not expose the Gemini-backed API as an unrestricted public endpoint. For a remote deployment, place the entire application behind a private access boundary before sharing it. Google Cloud Run can enforce invocation access through Cloud IAM/IAP, but that relies on Google identities and is separate from SYN MASTER application accounts. If identity-based access is not wanted, use a local-only deployment or a private gateway/tunnel that injects a server-side access credential. Never embed a gateway credential in browser code. Confirm the actual deployment's ingress and access settings before assuming it is private.
 
+## Bring your own AI provider (BYO-AI)
+
+Built-in Gemini (through this app's server and its server-only `GEMINI_API_KEY`) stays the default and is unchanged. Under **Settings → AI Provider** a user can instead route the AI *suggestion* step to their own provider. The provider only proposes a chain: every suggestion goes through the same prompt, JSON schema and validation as the built-in route, and the Director still renders, re-measures and gates every pass. A provider can never mark a master as passed. If a provider call fails or its output fails validation, that pass falls back to built-in Gemini and the run log says why.
+
+**Where the code lives:** `src/ai/providerPresets.ts` (data-only preset list), `src/ai/providerAdapters.ts` (request shaping, response parsing, error classification, key redaction), `src/ai/modelNames.ts` (model-name sanity check and lifecycle table), `src/ai/masteringClient.ts` (fallback routing, Test connection), `src/ai/providerStore.ts` (settings). Tests: `src/ai/providerAdapters.test.ts`, `src/ai/providerModels.test.ts` (mocked `fetch`, no real keys).
+
+**Native presets and default models** (checked against the official model lists on 2026-11-25):
+
+| Preset | Default model | Endpoint | Source |
+| --- | --- | --- | --- |
+| Google Gemini (your key) | `gemini-4-hydrogen` (stable, free tier available; same model the built-in server route uses) | `POST …/v1beta/models/{model}:generateContent`, key in `x-goog-api-key` | https://ai.google.dev/gemini-api/docs/models |
+| OpenAI | `gpt-6.2-sol` | `POST https://api.openai.com/v1/chat/completions`, `response_format: json_schema` | https://developers.openai.com/api/docs/models/gpt-6.2-sol |
+| Anthropic Claude | `claude-sonnet-5-5` | `POST https://api.anthropic.com/v1/messages`, strategy schema as a tool with `tool_choice: auto` | https://docs.claude.com/en/docs/about-claude/models/overview |
+| xAI (Grok) | `grok-4.7` | `POST https://api.x.ai/v1/chat/completions` (OpenAI-compatible), `response_format: json_object` | https://docs.x.ai/docs/models |
+| OpenRouter | `openai/gpt-6.2-sol` | OpenAI-compatible | https://openrouter.ai/api/v1/models |
+
+Replaced stale defaults: `gemini-2.5-pro` (deprecated, API requests route to `gemini-3.8-flash` from 2026-12-01), `gpt-4.1` (deprecated, shuts down 2027-01-14), `claude-sonnet-4-5` (deprecated, retires 2026-11-30), `grok-4` (retired 2026-05-15, redirected to `grok-4.3`). Claude Sonnet 5.5 / Opus 5.5 reject a forced `tool_choice` with HTTP 400, so the Anthropic adapter now uses `tool_choice: auto` plus an explicit instruction, and also accepts a plain JSON text reply. Other presets (Groq, Mistral, DeepSeek, Together, Fireworks, Perplexity, Cerebras, local servers, agents) were not re-verified.
+
+**Model-name sanity check** (`checkModelName`): a blank field uses the preset default; names with spaces/quotes, URLs, or anything that looks like an API key are rejected (a key-like value is never echoed back); a model from another vendor on a native preset (e.g. `gpt-…` on Anthropic) is rejected with the right example; deprecated ids run but add a warning to the run notices and to Test connection; retired ids are blocked before any request, with the documented replacement. OpenAI-compatible gateways and local servers accept any name. Update the lifecycle table in `src/ai/modelNames.ts` when providers announce retirements.
+
+**Error messages:** errors are classified as `config`, `network` (CORS / private-network / server down), `auth` (401/403, and Gemini's 400 "API key not valid"), `model` (404 on a native endpoint, or a 400/404 whose body names the model; the message names the model sent and the current default), `http` (404 on a custom base URL points at the URL; 429 says rate limit / quota), `timeout`, `cancelled`, and `parse` (empty reply, refusal, output-token limit, blocked prompt, non-JSON). Keys are scrubbed from every message.
+
+**Setup notes:** keys are entered in the browser and sent only to the chosen provider (sessionStorage by default; localStorage only with "Remember on this device"); they never touch this app's server. Anthropic requires the `anthropic-dangerous-direct-browser-access` header for browser calls, which the adapter sends. Providers marked "CORS unverified" may block browser calls; use OpenRouter or a local gateway if Test connection reports "Network / CORS blocked". Local servers (Ollama, LM Studio, OpenClaw) must allow this app's origin.
+
 ## CI
 
 ### Web CI
@@ -519,7 +543,7 @@ Open items, in priority order:
 5. [x] **Live spectrum sample rate:** the live FFT mapping uses `AudioContext.sampleRate` published by `SynAudioEngine.getLiveTelemetry()` instead of assuming 48 kHz.
 6. **AI Assistant page:** reskinned only. Rebuild its layout to match the console.
 7. **Plugins & Host tab + Windows companion:** restyle the tab (connection status, plugin list, add-to-chain, params, Open Editor). Give the companion window a JUCE LookAndFeel in the same skin. Add a release workflow `.github/workflows/windows-companion-release.yml` and tag v0.1.0. Ports: HTTP 127.0.0.1:47832, WS 127.0.0.1:47833; pairing code SYN-XXXX-XXXX. See docs/VST_COMPANION.md.
-8. **BYO-AI leftovers:** shimmer calibration on real audio, best-candidate fallback when every pass is rejected, BYO docs, and checking that the model names (`claude-sonnet-4-5`, `grok-4`) are current.
+8. **BYO-AI leftovers:** [x] model names verified and stale defaults replaced (see *Bring your own AI provider*), [x] model-name sanity check + clearer provider errors, [x] mocked-fetch tests per provider, [x] BYO docs. Best-candidate fallback already exists (`src/director/safeCandidateFallback.ts`, P1-9; the Director also always keeps the best validated checkpoint), so nothing was added. Still open: shimmer calibration on real audio; a live call against each provider with a real key.
 9. **Cleanup:** leftover old-dashboard CSS and the duplicate `:root` block in `src/index.css`, and native `assert` tests.
 
 Rules: commit small working changes straight to `main`. Stay AI Studio compatible: same entry files, assets under `public/`, no new backend or build steps, Gemini key server-only. Don't change the DSP defaults, the default Gemini provider, or the Fix-All verification loop unless an item says to. Run `npm run lint`, `npm run build` and `npx tsx --test` on touched tests. Update this README as you go.
