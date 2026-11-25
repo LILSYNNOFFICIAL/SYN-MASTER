@@ -4,7 +4,7 @@
 1. **Visual Studio 2022** (Community / Pro / Enterprise) with **Desktop development with C++** workload (MSVC v143 x64 toolset + Windows 11 SDK).
 2. **CMake 3.25+** (`winget install Kitware.CMake`) and **Git** (`winget install Git.Git`).
 3. *(Optional)* **Ninja** (`winget install Ninja-build.Ninja`) if using the `windows-x64-ninja` preset.
-4. Network access on initial configure so `FetchContent` pulls pinned dependencies (`JUCE 8.0.6`, `nlohmann/json v3.11.3`, `IXWebSocket v11.4.5`, `SQLite 3.47.2`).
+4. Network access on initial configure so `FetchContent` pulls pinned dependencies (`JUCE 8.0.17-security`, `nlohmann/json v3.11.3`, `IXWebSocket v11.4.5`, `SQLite 3.47.2`).
 
 > **Environment Honesty Note**: Linux containers cannot cross-compile Windows MSVC/Win32/WASAPI/VST3 binaries. On Linux/POSIX CI, `g++ -std=c++20` compiles and verifies all portable core units (`WindowsPeInspector`, `SecurityPolicy`, `SpscRingBuffer`, `AudioRouter`, `PluginInstanceManager` + portable `syn-plugin-worker` IPC crash/timeout tests). Genuine Windows `.exe` and `.vst3` compilation must run on Windows 11 x64 (`windows-x64-release` preset or `.github/workflows/windows-x64-build.yml`).
 

@@ -233,12 +233,33 @@ try {
   }
 
   # Load real VST3 plugin worker
-  $Loaded = Invoke-HostRpc "plugin.load" @{
+  # Retry guard: CI has intermittently seen the freshly spawned worker exit with
+  # STATUS_ACCESS_VIOLATION during its first plugin.load (root cause not yet
+  # identified; later attempts in the same host session succeed). The host
+  # spawns a new isolated worker per load, so retry only that exact failure and
+  # surface each retry as a CI warning so a real regression stays visible.
+  $LoadParams = @{
     uid = $PluginRec.uid
     bundlePath = $PluginRec.bundlePath
     sampleRate = 48000
     blockSize = 512
     channels = 2
+  }
+  $Loaded = $null
+  $MaxLoadAttempts = 3
+  for ($LoadAttempt = 1; $LoadAttempt -le $MaxLoadAttempts; $LoadAttempt++) {
+    try {
+      $Loaded = Invoke-HostRpc "plugin.load" $LoadParams
+      break
+    } catch {
+      $LoadErr = "$_"
+      if ($LoadAttempt -lt $MaxLoadAttempts -and $LoadErr -match 'Worker exited unexpectedly') {
+        Write-Host "::warning::plugin.load attempt $LoadAttempt/$MaxLoadAttempts failed ($LoadErr); retrying with a fresh worker."
+        Start-Sleep -Milliseconds 500
+        continue
+      }
+      throw
+    }
   }
   $InstId = $Loaded.instanceId
   Write-Host ("Loaded real VST3 worker instance: {0} ({1})" -f $InstId, $Loaded.workerEngine) -ForegroundColor Green

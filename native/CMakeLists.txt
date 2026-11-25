@@ -79,13 +79,15 @@ if(SYN_FETCH_DEPS)
   endif()
 
   if(SYN_USE_JUCE)
-    # JUCE 8 (Dual-licensed: AGPLv3 OR Commercial JUCE EULA)
-    # JUCE 8.0.6 bundles VST3 SDK 3.7.x (Steinberg VST3 License OR GPLv3). VST3 SDK 3.8.0+ is
-    # MIT licensed but needs a newer JUCE pin; see docs/VST_COMPANION.md (Licensing).
+    # JUCE 8 (dual licensed: AGPLv3 OR commercial JUCE licence). SYN-MASTER uses the AGPLv3
+    # option, so the native companion is AGPL-3.0-only (see native/LICENSE).
+    # JUCE 8.0.17-security is the latest 8.0.x security release (2026-11-02). It bundles the
+    # Steinberg VST3 SDK 3.8.0, which is MIT licensed
+    # (modules/juce_audio_processors_headless/format_types/VST3_SDK/LICENSE.txt).
     FetchContent_Declare(
       JUCE
       GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-      GIT_TAG 8.0.6
+      GIT_TAG 8.0.17-security
       GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(JUCE)
