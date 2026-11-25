@@ -1651,6 +1651,29 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 .syn-eq-empty { display: grid; place-items: center; min-height: 220px; }
 .syn-eq-panel canvas[data-testid="spectrum-canvas"] { border-radius: 12px; }
 
+/* Keep the six-view selector from imposing a one-row intrinsic width on mobile. */
+@media (max-width: 640px) {
+  .syn-eq-panel,
+  .syn-eq-head { min-width: 0; }
+  .syn-eq-head > [aria-label="EQ view"] {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .syn-eq-head > [aria-label="EQ view"] > button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 4px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.15;
+  }
+}
+
+
 .syn-ceq-plot { position: relative; padding: 0 0 18px 30px; }
 .syn-ceq-svg {
   display: block; width: 100%; height: clamp(170px, 22vh, 250px); border-radius: 12px; touch-action: none;
