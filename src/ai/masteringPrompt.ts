@@ -15,6 +15,7 @@ import type {
   QCReport,
 } from '../types/mastering.ts';
 import { validateChainAgainstInventory } from '../director/processorInventory.ts';
+import { summarizeVocalBalanceForPrompt, type VocalBalanceContext } from './vocalBalancePrompt.ts';
 
 export interface StrategyPromptInput {
   analysis: AudioAnalysis;
@@ -26,6 +27,8 @@ export interface StrategyPromptInput {
   userGenreOverride?: string;
   referenceAnalysis?: AudioAnalysis | null;
   availablePlugins?: Array<{ name: string; role: string; manufacturer: string }>;
+  /** Vocal Rebalance context: whether stems are cached and the measured vocal balance. */
+  vocalBalance?: VocalBalanceContext | null;
 }
 
 export interface RefinePromptInput {
@@ -36,6 +39,7 @@ export interface RefinePromptInput {
   targetTruePeakDb: number;
   preserveDynamics: boolean;
   qcReport?: QCReport | null;
+  vocalBalance?: VocalBalanceContext | null;
 }
 
 export function summarizeAnalysisForPrompt(label: string, a: AudioAnalysis): string {
@@ -76,7 +80,8 @@ Valid paramsJson schemas by processor type:
 12. "clipper": {"ceilingDb":-6..0,"driveDb":0..12,"softness":0..100,"oversampling":1|2|4} (place before the limiter)
 13. "multiband-maximizer": {"lowCrossHz":number,"highCrossHz":number,"low":{"preGainDb":number,"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"postGainDb":number,"bypass":false},"mid":{...same},"high":{...same},"ceilingDb":number,"releaseMs":number}
 14. "dither": {"bitDepth":16|20|24,"shape":"tpdf"|"tpdf-hp"|"shaped","autoBlank":true} (always LAST; only when delivering below 32-bit float)
-15. "match-eq": {"amount":0-100,"smoothing":1|2|3|6|12|24,"maxBoostDb":0-12,"maxCutDb":0-12,"lowHz":20-2000,"highHz":1000-20000,"channel":"stereo"|"mid"|"side","phase":"linear"|"minimum"} (Ozone-style Match EQ: the engine learns the long-term average spectrum of the source and of the loaded REFERENCE track and applies amount% of the smoothed difference, limited to maxBoostDb / maxCutDb and faded out below lowHz / above highHz; it matches tonal shape, not loudness. ONLY when the prompt says Match EQ is AVAILABLE; at most one; place it early (after restore, before other EQ and dynamics). Stay conservative: amount 30-60, smoothing 3 or wider (1/3 octave or 1/1-1/2 for broad tilt), maxBoostDb/maxCutDb 1.5-3, lowHz >= 30, highHz <= 16000, "stereo" unless the reference differs mainly in side/mid balance. Never send learned spectra; the engine supplies them.)`;
+15. "match-eq": {"amount":0-100,"smoothing":1|2|3|6|12|24,"maxBoostDb":0-12,"maxCutDb":0-12,"lowHz":20-2000,"highHz":1000-20000,"channel":"stereo"|"mid"|"side","phase":"linear"|"minimum"} (Ozone-style Match EQ: the engine learns the long-term average spectrum of the source and of the loaded REFERENCE track and applies amount% of the smoothed difference, limited to maxBoostDb / maxCutDb and faded out below lowHz / above highHz; it matches tonal shape, not loudness. ONLY when the prompt says Match EQ is AVAILABLE; at most one; place it early (after restore, before other EQ and dynamics). Stay conservative: amount 30-60, smoothing 3 or wider (1/3 octave or 1/1-1/2 for broad tilt), maxBoostDb/maxCutDb 1.5-3, lowHz >= 30, highHz <= 16000, "stereo" unless the reference differs mainly in side/mid balance. Never send learned spectra; the engine supplies them.)
+16. "vocal-rebalance": {"vocalGainDb":-12..6,"bassEnabled":boolean,"bassGainDb":-12..6,"drumsEnabled":boolean,"drumsGainDb":-12..6,"sensitivity":0..100,"smoothingMs":5..500} (Ozone Master Rebalance style: raises/lowers the vocal, and optionally bass/drums, inside the finished mix using cached AI stems; phase-preserving, 0 dB = untouched. Use ONLY when the VOCAL REBALANCE block says stems are cached and the vocal is buried or too loud for the objective; keep moves small; always FIRST in the chain.)`;
 
 /** What each user-selected Mode asks of the strategy. Sent as its own line next to the Objective. */
 export const MODE_MEANINGS: Record<MasteringMode, string> = {
@@ -130,6 +135,7 @@ export function buildStrategyUserPrompt(input: StrategyPromptInput): string {
       ? summarizeAnalysisForPrompt('REFERENCE TRACK MEASUREMENTS', input.referenceAnalysis)
       : '',
     formatMatchEqAvailability(Boolean(input.referenceAnalysis)),
+    input.vocalBalance !== undefined ? summarizeVocalBalanceForPrompt(input.vocalBalance) : '',
     'Design an optimal, explainable surgical mastering chain ending with a limiter or maximizer, explicitly stating supporting telemetry and potential tradeoffs in each processor reason.',
   ].filter(Boolean);
   return promptParts.join('\n\n');
@@ -150,6 +156,7 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
     `INDEPENDENT SYN-QC EVALUATION:\n${qcSummary}`,
     `Current Chain JSON:\n${JSON.stringify(chainForPrompt(input.currentChain))}`,
     `Objectives: Target LUFS=${input.targetLufs}, Max True Peak=${input.targetTruePeakDb} dBTP, Preserve Dynamics=${input.preserveDynamics}`,
+    ...(input.vocalBalance !== undefined ? [summarizeVocalBalanceForPrompt(input.vocalBalance)] : []),
     'Evaluate unintended degradation (excessive limiting, distortion/THD, phase loss, L/R imbalance, noise floor, LUFS miss) and output a refined chain resolving QC warnings/failures without degrading dynamics.',
   ].join('\n\n');
   return prompt;
@@ -162,7 +169,7 @@ export const PROCESSOR_JSON_SCHEMA = {
     type: {
       type: 'string',
       description:
-        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither, match-eq',
+        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither, match-eq, vocal-rebalance',
     },
     name: { type: 'string' },
     intensity: { type: 'number', description: '0 to 100' },

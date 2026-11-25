@@ -14,6 +14,7 @@ export type ProcessorType =
   | 'multiband-maximizer'
   | 'dither'
   | 'match-eq'
+  | 'vocal-rebalance'
   | 'external-vst3';
 
 export type MasteringMode =
@@ -242,6 +243,25 @@ export interface DitherParams {
   autoBlank: boolean; // no dither in digital silence (keeps fades/edges clean)
 }
 
+/**
+ * Vocal Rebalance (Ozone Master Rebalance style). Raises or lowers the vocal (and optionally
+ * bass and drums) inside a finished stereo master using cached HT-Demucs stems of the source.
+ * Phase-preserving: only the gain DIFFERENCE is added (out = mix + (g - 1) * w(t) * stem), so
+ * 0 dB on every stem is bit-exact pass-through. Must sit first in the chain (the stems belong
+ * to the source track); validation hoists it there.
+ */
+export interface VocalRebalanceParams {
+  vocalGainDb: number; // -12 to +6
+  bassEnabled: boolean;
+  bassGainDb: number; // -12 to +6
+  drumsEnabled: boolean;
+  drumsGainDb: number; // -12 to +6
+  /** 0 = apply the gain to the whole stem; higher = only where the stem clearly dominates the mix (less bleed). */
+  sensitivity: number; // 0 to 100
+  /** Time smoothing of the sensitivity weighting (zero-phase), ms. */
+  smoothingMs: number; // 5 to 500
+}
+
 export interface MultibandMaximizerBand {
   preGainDb: number; // -6 to +12 (Maximus "pre")
   thresholdDb: number; // -36 to 0
@@ -355,6 +375,7 @@ export type ProcessorParams =
   | { type: 'multiband-maximizer'; data: MultibandMaximizerParams }
   | { type: 'dither'; data: DitherParams }
   | { type: 'match-eq'; data: MatchEqParams }
+  | { type: 'vocal-rebalance'; data: VocalRebalanceParams }
   | { type: 'external-vst3'; data: ExternalVST3Params };
 
 export interface ProcessorModule {

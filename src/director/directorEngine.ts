@@ -1832,6 +1832,12 @@ export interface RunAutonomousDirectorOptions {
   externalPlugins?: ExternalPluginRecord[];
   hostConnected?: boolean;
   initialChain?: ProcessorModule[];
+  /**
+   * Modules the caller has already gated to run before the planned chain when no initialChain
+   * is given (e.g. a Vocal Rebalance the local policy proposed because stems are cached).
+   * They are rendered, re-measured and judged by the objective gate like the rest of the pass.
+   */
+  leadModules?: ProcessorModule[];
   externalProcessor?: ExternalPluginProcessCallback;
   /** Timeline fades applied after the chain on every render the loop measures. */
   postFades?: FadeSettings | null;
@@ -2293,7 +2299,9 @@ export async function runAutonomousDirectorLoop(
   let workingChain: ProcessorModule[] =
     opts.initialChain && opts.initialChain.length > 0
       ? prepareChain(validateChain(structuredClone(opts.initialChain)), true)
-      : structuredClone(plan.chain);
+      : opts.leadModules && opts.leadModules.length > 0
+        ? validateChain([...structuredClone(opts.leadModules), ...structuredClone(plan.chain)])
+        : structuredClone(plan.chain);
 
   emit(
     'Building chain',

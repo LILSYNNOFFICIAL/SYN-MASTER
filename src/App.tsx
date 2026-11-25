@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Maximize2,
   Menu,
@@ -42,7 +42,7 @@ import type {
   WorkspaceTab,
 } from './types/mastering';
 import { analyzeAudioBuffer, extractWaveformPeaks } from './dsp/analyzer';
-import { createProcessorModule, validateChain } from './dsp/chainValidation';
+import { createProcessorModule, hoistVocalRebalance, validateChain } from './dsp/chainValidation';
 import { generateDemoMasterStem } from './dsp/demoAudio';
 import {
   renderMixedChain,
@@ -51,6 +51,8 @@ import {
 import { type DynamicEqTrace, type ProcessorMeterTelemetry } from './dsp/offlineDsp';
 import { chainHasSoloedBand } from './dsp/eqDesign';
 import { renderAndAnalyzeOffThread } from './dsp/workerClient';
+import { getActiveRebalanceStems, getRebalanceStemState, setActiveRebalanceSource, subscribeRebalanceStems } from './services/rebalanceStemStore';
+import type { VocalBalanceContext } from './ai/vocalBalancePrompt';
 import { filterSourceTransientClickAnalysis } from './dsp/clickDetect';
 import { MASTERING_PRESETS } from './dsp/presets';
 import { QC_TARGET_PROFILES, runQualityControl } from './dsp/qc';
@@ -443,6 +445,12 @@ export default function App() {
     [activeTrack],
   );
 
+  // Vocal Rebalance stem cache follows the active source; a new stem set re-runs the preview render.
+  const rebalanceStemState = useSyncExternalStore(subscribeRebalanceStems, getRebalanceStemState, getRebalanceStemState);
+  useEffect(() => {
+    setActiveRebalanceSource(activeTrack ? sourceChannelsRef.current : null, activeTrack?.sampleRate ?? 0);
+  }, [activeTrack]);
+
   // Prefetch the split-out rack UI right after first paint.
   useEffect(() => {
     const t = window.setTimeout(() => { void loadMasteringRack(); }, 0);
@@ -532,7 +540,7 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [chain, chainBypassed, activeTrack, hostSnapshot.status, processExternalStage, fades, getRenderSource]);
+  }, [chain, chainBypassed, activeTrack, hostSnapshot.status, processExternalStage, fades, getRenderSource, rebalanceStemState.version]);
 
   // Sync live Web Audio chain
   useEffect(() => {
@@ -637,9 +645,11 @@ export default function App() {
       );
       setUndoStack((u) => [...u.slice(-24), undoSnapshot]);
       setRedoStack([]);
-      setChain(nextChain);
+      // Vocal Rebalance works on source stems, so it always stays first (no-op for other chains).
+      const ordered = hoistVocalRebalance(nextChain);
+      setChain(ordered);
       if (correctionLabel) {
-        recordCorrection(correctionLabel, nextChain);
+        recordCorrection(correctionLabel, ordered);
       }
     },
     [chain, recordCorrection],
@@ -1459,6 +1469,25 @@ export default function App() {
     setDirectorPlan(plan);
     setAiStrategy(plan.strategy);
 
+    // Vocal Rebalance: AI may use it (and the local Director may add a small vocal move) only
+    // when stems are already cached for this track; every proposal passes the policy gate.
+    // Loaded on demand (keeps the initial bundle in budget).
+    const { gateVocalRebalanceChain, measureVocalBalance, planLocalVocalRebalance, vocalBalanceRange } =
+      await import('./director/vocalRebalancePolicy');
+    if (isStale()) return;
+    const rebalanceStemSet = getActiveRebalanceStems();
+    const vocalBalance: VocalBalanceContext = {
+      stemsCached: Boolean(rebalanceStemSet),
+      measurement: rebalanceStemSet ? measureVocalBalance(rebalanceStemSet, src[0], src[1] ?? src[0]) : null,
+      range: vocalBalanceRange(objectiveId),
+    };
+    const rebalanceNotes: string[] = [];
+    const gateRebalance = (proposed: ProcessorModule[]): ProcessorModule[] => {
+      const gated = gateVocalRebalanceChain(proposed, vocalBalance);
+      rebalanceNotes.push(...gated.notes);
+      return gated.chain;
+    };
+
     // Optional cloud AI (active provider; built-in Gemini by default) initial strategy in Autonomous/Assisted when user opted in
     const aiProviderLog: string[] = [];
     const aiProviderUsed = describeProvider(getActiveProviderConfig());
@@ -1486,6 +1515,8 @@ export default function App() {
             role: m.role,
             manufacturer: m.manufacturer,
           })),
+          // Only sent when stems are cached, so prompts for tracks without stems are unchanged.
+          ...(vocalBalance.stemsCached ? { vocalBalance } : {}),
         };
         // Built-in Gemini (default): exactly the existing server call.
         const builtinStrategy = async () => {
@@ -1510,7 +1541,7 @@ export default function App() {
         const strat = providerRun.result as unknown as AIMasteringStrategy;
         const invCheck = validateChainAgainstInventory(strat.chain);
         if (invCheck.valid && invCheck.sanitizedChain.length > 0) {
-          strat.chain = invCheck.sanitizedChain;
+          strat.chain = gateRebalance(invCheck.sanitizedChain);
           geminiInitialChain = strat.chain;
           setAiStrategy(strat);
         } else {
@@ -1533,6 +1564,17 @@ export default function App() {
         if (!isStale()) setAiLoading(false);
       }
     }
+
+    // Local Director: a conservative vocal-only move when stems are cached and the measured
+    // balance is clearly outside the objective range (never used when the AI planned the chain).
+    const localRebalance = !geminiInitialChain && runOperatingMode !== 'assisted' ? planLocalVocalRebalance(vocalBalance) : null;
+    const leadModules = localRebalance
+      ? gateRebalance([createProcessorModule('vocal-rebalance', { params: localRebalance })]).filter((m) => m.type === 'vocal-rebalance')
+      : [];
+    if (localRebalance && leadModules.length > 0) {
+      aiProviderLog.push(`Vocal Rebalance: measured vocal-to-music ${vocalBalance.measurement?.vocalToMusicDb} dB vs range ${vocalBalance.range.low}..${vocalBalance.range.high} dB; local Director proposes ${localRebalance.vocalGainDb > 0 ? '+' : ''}${localRebalance.vocalGainDb} dB on the vocal stem.`);
+    }
+    aiProviderLog.push(...rebalanceNotes.splice(0));
 
     if (aiProviderLog.length > 0 && !isStale()) {
       const planEntries: DirectorActivityEntry[] = aiProviderLog.map((message, idx) => ({
@@ -1586,6 +1628,7 @@ export default function App() {
         externalPlugins: hostSnapshot.plugins,
         hostConnected: hostSnapshot.status === 'connected',
         initialChain: geminiInitialChain ?? (runOperatingMode === 'assisted' ? chain : undefined),
+        leadModules,
         externalProcessor: processExternalStage,
         postFades: getPostFades(),
         maxIterations: forceAutonomous ? 10 : maxIterations,
@@ -1596,13 +1639,14 @@ export default function App() {
         aiRefineCallback:
           useGeminiCloud && runOperatingMode === 'autonomous'
             ? async (ctx) => {
+                const refineCtx = vocalBalance.stemsCached ? { ...ctx, vocalBalance } : ctx;
                 const builtinRefine = async () => {
                   assertCloudAiAvailable();
                   const res = await fetch('/api/ai/refine', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() },
                     signal: AbortSignal.timeout(12_000),
-                    body: JSON.stringify(ctx),
+                    body: JSON.stringify(refineCtx),
                   });
                   const data = await readBuiltinAiResponse(res);
                   return data.refined;
@@ -1610,7 +1654,7 @@ export default function App() {
                 let run: Awaited<ReturnType<typeof requestRefine>>;
                 try {
                   run = await runProviderCall('refine', (opts) =>
-                    requestRefine(getActiveProviderConfig(), ctx, builtinRefine, opts),
+                    requestRefine(getActiveProviderConfig(), refineCtx, builtinRefine, opts),
                   );
                 } catch (err) {
                   if (!(err instanceof CloudAiRateLimitError)) throw err;
@@ -1621,7 +1665,9 @@ export default function App() {
                 }
                 aiProviderLog.push(...run.notices.map((n) => `Refine: ${n}`));
                 if (run.producedBy) aiProviderLog.push(`Refine: suggestion produced by ${run.producedBy}.`);
-                return { chain: run.result?.chain ?? null, producedBy: run.producedBy, notices: run.notices };
+                const refinedChain = run.result?.chain ? gateRebalance(run.result.chain) : null;
+                const gateNotices = rebalanceNotes.splice(0);
+                return { chain: refinedChain, producedBy: run.producedBy, notices: [...run.notices, ...gateNotices] };
               }
             : undefined,
         onProgress: (upd) => {

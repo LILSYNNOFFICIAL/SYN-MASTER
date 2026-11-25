@@ -15,7 +15,7 @@ import {
   generateGeminiMasterStrategy,
   refineGeminiIteration,
 } from './src/server/aiMastering.ts';
-import { isValidAnalysisPayload, sanitizeAvailablePlugins } from './src/server/aiPayloadValidation.ts';
+import { isValidAnalysisPayload, sanitizeAvailablePlugins, sanitizeVocalBalance } from './src/server/aiPayloadValidation.ts';
 import { createRateLimiter } from './src/server/requestLimiter.mjs';
 import { createAiSpendLimiter, createAiSpendMiddleware, readAiSpendLimitsFromEnv } from './src/server/aiSpendLimiter.mjs';
 import { createAiAccessGuard } from './src/server/aiAccess.ts';
@@ -343,6 +343,7 @@ app.post('/api/ai/master', async (req, res) => {
       userGenreOverride,
       referenceAnalysis,
       availablePlugins,
+      vocalBalance,
     } = req.body ?? {};
     if (!isValidAnalysisPayload(analysis)) {
       res.status(400).json({ error: 'Valid audio analysis telemetry is required.' });
@@ -376,6 +377,7 @@ app.post('/api/ai/master', async (req, res) => {
       userGenreOverride: typeof userGenreOverride === 'string' ? userGenreOverride.slice(0, 60) : undefined,
       referenceAnalysis,
       availablePlugins: safePlugins,
+      vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
     res.json({ strategy });
   } catch (err) {
@@ -393,6 +395,7 @@ app.post('/api/ai/refine', async (req, res) => {
       targetTruePeakDb,
       preserveDynamics,
       qcReport,
+      vocalBalance,
     } = req.body ?? {};
     if (
       !isValidAnalysisPayload(preAnalysis) ||
@@ -428,6 +431,7 @@ app.post('/api/ai/refine', async (req, res) => {
       targetTruePeakDb: parsedTargetTp,
       preserveDynamics: preserveDynamics !== false,
       qcReport,
+      vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
     res.json({ refined });
   } catch (err) {

@@ -2,6 +2,7 @@ import { applyFadesInPlace, hasFades, type FadeSettings } from './fades';
 import { applyClipper, applyDither, applyTransientShaper } from './extraProcessors';
 import { applyRepair } from './repair';
 import { applyMatchEq } from './matchEq';
+import { applyVocalRebalance, fingerprintStereo, getRebalanceStems, type VocalRebalanceTelemetry } from './vocalRebalance';
 import type {
   BassEnhancerParams,
   CompressorParams,
@@ -21,6 +22,7 @@ import type {
   RestoreParams,
   SaturationParams,
   StereoImagerParams,
+  VocalRebalanceParams,
 } from '../types/mastering';
 import { dbToLinear, linearToDb, maxInterSampleAbsAt, measureIntegratedLufs } from './analyzer';
 import {
@@ -60,6 +62,8 @@ export interface ProcessorMeterTelemetry {
   inputPeakDb: number;
   outputPeakDb: number;
   gainReductionDb: number;
+  /** Vocal Rebalance only: whether cached stems were applied, and the effective stem gains. */
+  rebalance?: VocalRebalanceTelemetry;
 }
 
 export interface OfflineDspResult {
@@ -1727,6 +1731,13 @@ export function processChainOffline(
       telemetry.push({ id: mod.id, inputPeakDb, outputPeakDb: inputPeakDb, gainReductionDb: 0 });
       continue;
     }
+    // Vocal Rebalance stems belong to the audio they were separated from: look them up by the
+    // fingerprint of this module's own (pre input-gain) input, so a rebalance after other
+    // processing or on another track renders as a no-op instead of a wrong mix.
+    let rebalanceTelemetry: VocalRebalanceTelemetry | undefined;
+    const rebalanceStems = mod.type === 'vocal-rebalance'
+      ? getRebalanceStems(fingerprintStereo(left, right, sampleRate))
+      : null;
 
     const useWetDry = mod.wetDry < 99.5;
     let dryL: Float32Array | null = null;
@@ -1813,6 +1824,17 @@ export function processChainOffline(
         // Telemetry: no gain reduction; the dither level is not a GR value.
         applyDither(left, right, mod.params as DitherParams, intensityScale);
         break;
+      case 'vocal-rebalance':
+        rebalanceTelemetry = applyVocalRebalance(
+          left,
+          right,
+          mod.params as VocalRebalanceParams,
+          rebalanceStems,
+          sampleRate,
+          intensityScale,
+          inGain,
+        );
+        break;
     }
 
     // Wet/Dry parallel blend
@@ -1840,6 +1862,7 @@ export function processChainOffline(
       inputPeakDb,
       outputPeakDb,
       gainReductionDb: grDb,
+      ...(rebalanceTelemetry ? { rebalance: rebalanceTelemetry } : {}),
     });
   }
 

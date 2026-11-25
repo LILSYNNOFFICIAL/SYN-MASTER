@@ -2,6 +2,7 @@ import type { AudioAnalysis, ProcessorModule } from '../types/mastering';
 import { analyzeAudioBuffer, extractWaveformPeaks } from './analyzer';
 import type { FadeSettings } from './fades';
 import { processChainOffline, type DynamicEqTrace, type ProcessorMeterTelemetry } from './offlineDsp';
+import { registerRebalanceStems, type RebalanceStemSet } from './vocalRebalance';
 
 export interface DspWorkerRequest {
   id: number;
@@ -16,6 +17,17 @@ export interface DspWorkerRequest {
   /** Preview-only: record Dynamic EQ traces. */
   collectDynamicEqTraces?: boolean;
 }
+
+/**
+ * Makes cached Vocal Rebalance stems resident in the worker (sent once per worker and stem
+ * set, before the first render that needs them). No reply; messages are processed in order.
+ */
+export interface DspWorkerPutStemsMessage {
+  kind: 'put-rebalance-stems';
+  set: RebalanceStemSet;
+}
+
+export type DspWorkerMessage = DspWorkerRequest | DspWorkerPutStemsMessage;
 
 export interface DspWorkerSuccessResponse {
   id: number;
@@ -33,8 +45,17 @@ export interface DspWorkerErrorResponse {
   error: string;
 }
 
-self.onmessage = (ev: MessageEvent<DspWorkerRequest>) => {
-  const req = ev.data;
+self.onmessage = (ev: MessageEvent<DspWorkerMessage>) => {
+  const msg = ev.data;
+  if (msg && msg.kind === 'put-rebalance-stems') {
+    try {
+      registerRebalanceStems(msg.set);
+    } catch {
+      // A malformed stem set is ignored: the rebalance then renders as a no-op (telemetry says so).
+    }
+    return;
+  }
+  const req = msg;
   try {
     const processed = processChainOffline(req.channels, req.sampleRate, req.chain, req.postFades, {
       takeOwnership: true,

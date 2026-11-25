@@ -30,6 +30,11 @@ export const MODULE_CATALOG: CatalogItem[] = [
     build: () => mk('restore', 'AI Repair (De-click / De-shimmer)', { hissReduction: 0, deEssAmount: 0, resonanceSuppress: 0, declick: 55, decrackle: 20, spikeRepair: true, deShimmer: 30 }),
   },
   {
+    id: 'vocal-rebalance', label: 'Vocal Rebalance', category: 'Repair', type: 'vocal-rebalance',
+    description: 'Raise or lower the vocal (and bass / drums) in the finished mix using AI stems. Always first in the chain',
+    build: () => mk('vocal-rebalance', 'Vocal Rebalance'),
+  },
+  {
     id: 'restore', label: 'Restore & Cleanup', category: 'Repair', type: 'restore',
     description: 'DC removal, hum notch, hiss gate, de-ess, resonance trim',
     build: () => mk('restore', 'SYN-Restore Cleanup'),

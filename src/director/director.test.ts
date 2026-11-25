@@ -116,10 +116,11 @@ function makeOverCompressedStereo(durationSec = 1.0): Float32Array[] {
   return [L, R];
 }
 
-test('Verified Processor Inventory exposes all 15 native processors and rejects invalid payloads', () => {
+test('Verified Processor Inventory exposes all 16 native processors and rejects invalid payloads', () => {
   const keys = Object.keys(VERIFIED_NATIVE_PROCESSOR_INVENTORY);
-  assert.equal(keys.length, 15);
+  assert.equal(keys.length, 16);
   assert.ok(keys.includes('match-eq'));
+  assert.ok(keys.includes('vocal-rebalance'));
 
   const invalidType = validateChainAgainstInventory([
     { type: 'magic-maximizer', name: 'Fake', params: {} },

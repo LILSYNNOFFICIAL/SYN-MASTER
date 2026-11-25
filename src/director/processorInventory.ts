@@ -12,7 +12,7 @@ export interface InventoryParamBound {
 export interface VerifiedProcessorDescriptor {
   type: ProcessorType;
   displayName: string;
-  role: 'cleanup' | 'eq' | 'dynamics' | 'color' | 'stereo' | 'limiting';
+  role: 'cleanup' | 'eq' | 'dynamics' | 'color' | 'stereo' | 'limiting' | 'balance';
   realtimeSupported: boolean;
   offlineSupported: boolean;
   maxRecommendedInstances: number;
@@ -258,6 +258,24 @@ export const VERIFIED_NATIVE_PROCESSOR_INVENTORY: Record<
       highHz: { min: 1000, max: 20000, defaultValue: 18000, unit: 'Hz' },
       channel: { options: ['stereo', 'mid', 'side'], defaultValue: 'stereo' },
       phase: { options: ['linear', 'minimum'], defaultValue: 'linear' },
+    },
+  },
+  'vocal-rebalance': {
+    type: 'vocal-rebalance',
+    displayName: PROCESSOR_DEFAULT_NAMES['vocal-rebalance'],
+    role: 'balance',
+    // Offline only (preview render, export, Fix All). Realtime playback uses the last render.
+    realtimeSupported: false,
+    offlineSupported: true,
+    maxRecommendedInstances: 1,
+    parameters: {
+      vocalGainDb: { min: -12, max: 6, defaultValue: 0, unit: 'dB' },
+      bassEnabled: { defaultValue: false },
+      bassGainDb: { min: -12, max: 6, defaultValue: 0, unit: 'dB' },
+      drumsEnabled: { defaultValue: false },
+      drumsGainDb: { min: -12, max: 6, defaultValue: 0, unit: 'dB' },
+      sensitivity: { min: 0, max: 100, defaultValue: 30, unit: '%' },
+      smoothingMs: { min: 5, max: 500, defaultValue: 40, unit: 'ms' },
     },
   },
   'multiband-maximizer': {

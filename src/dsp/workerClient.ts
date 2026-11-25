@@ -9,9 +9,29 @@ import {
 import { processChainOffline, type DynamicEqTrace, type ProcessorMeterTelemetry } from './offlineDsp.ts';
 import type {
   DspWorkerErrorResponse,
+  DspWorkerMessage,
   DspWorkerRequest,
   DspWorkerSuccessResponse,
 } from './dspWorker.ts';
+import type { VocalRebalanceParams } from '../types/mastering.ts';
+import { fingerprintStereo, getRebalanceStems, rebalanceIsActive, type RebalanceStemSet } from './vocalRebalance.ts';
+
+/**
+ * The cached Vocal Rebalance stems a render needs, or null: an enabled rebalance with a stem
+ * away from 0 dB and a stem set registered for exactly this source audio.
+ */
+export function rebalanceStemsForRender(
+  chain: ProcessorModule[],
+  sourceChannels: Float32Array[],
+  sampleRate: number,
+): RebalanceStemSet | null {
+  const mod = chain.find((m) => m.type === 'vocal-rebalance' && m.enabled && !m.bypassed);
+  if (!mod || !sourceChannels[0]) return null;
+  if (!rebalanceIsActive(mod.params as VocalRebalanceParams, mod.intensity / 100)) return null;
+  const left = sourceChannels[0];
+  const right = sourceChannels[1] ?? sourceChannels[0];
+  return getRebalanceStems(fingerprintStereo(left, right, sampleRate));
+}
 
 export interface OffThreadRenderResult {
   channels: Float32Array[];
@@ -38,7 +58,7 @@ interface DspWorkerLike {
   onmessage: ((event: MessageEvent<DspWorkerResponse>) => void) | null;
   onerror: ((event: ErrorEvent) => void) | null;
   onmessageerror: ((event: MessageEvent) => void) | null;
-  postMessage(message: DspWorkerRequest, transfer?: Transferable[]): void;
+  postMessage(message: DspWorkerMessage, transfer?: Transferable[]): void;
   terminate(): void;
 }
 
@@ -82,6 +102,8 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
   let worker: DspWorkerLike | null = null;
   let nextJobId = 1;
   const pendingJobs = new Map<number, PendingJob>();
+  /** Rebalance stem sets already resident in the current worker (reset with the worker). */
+  let workerStemFingerprints = new Set<string>();
 
   const clearPending = (id: number, error?: Error, response?: DspWorkerSuccessResponse) => {
     const pending = pendingJobs.get(id);
@@ -95,6 +117,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
   const failWorker = (reason: unknown) => {
     const failedWorker = worker;
     worker = null;
+    workerStemFingerprints = new Set<string>();
     try {
       failedWorker?.terminate();
     } catch {
@@ -110,6 +133,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       const created = workerFactory();
       if (!created) return null;
       worker = created;
+      workerStemFingerprints = new Set<string>();
       created.onmessage = (event) => {
         const message = event.data;
         if (!message || !Number.isInteger(message.id)) return;
@@ -230,6 +254,19 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       postFades,
       ...preview,
     };
+
+    // Vocal Rebalance: copy the cached stems into the worker once (structured clone; the main
+    // thread keeps its copy for export / fallback renders).
+    const stems = rebalanceStemsForRender(chain, sourceChannels, sampleRate);
+    if (stems && !workerStemFingerprints.has(stems.fingerprint)) {
+      try {
+        currentWorker.postMessage({ kind: 'put-rebalance-stems', set: stems });
+        workerStemFingerprints.add(stems.fingerprint);
+      } catch (error) {
+        failWorker(error);
+        return fallbackOrThrow(error);
+      }
+    }
 
     try {
       const response = await new Promise<DspWorkerSuccessResponse>((resolve, reject) => {

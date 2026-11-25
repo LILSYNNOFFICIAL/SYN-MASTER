@@ -30,6 +30,7 @@ import type {
 } from '../types/mastering';
 import { EQ_CHANNELS, EQ_SUBTYPES, DYNAMIC_EQ_TYPES, allowedSlopes, resolveSubtype } from './eqDesign.ts';
 import { MATCH_EQ_CHANNELS, MATCH_EQ_LIMITS, MATCH_EQ_SMOOTHING_OPTIONS, isValidSpectrumSet } from './matchEq.ts';
+import { DEFAULT_VOCAL_REBALANCE_PARAMS, sanitizeVocalRebalanceParams } from './vocalRebalance.ts';
 
 /** Band limits shared by the editors and AI validation. */
 export const MAX_EQ_BANDS = 8;
@@ -57,6 +58,7 @@ export const PROCESSOR_DEFAULT_NAMES: Record<ProcessorType, string> = {
   'multiband-maximizer': 'Multiband Maximizer (Maximus-style)',
   dither: 'Dither',
   'match-eq': 'Match EQ',
+  'vocal-rebalance': 'Vocal Rebalance',
   'external-vst3': 'External VST3 Plugin',
 };
 
@@ -174,6 +176,8 @@ export function createDefaultParams(type: ProcessorType): ProcessorModule['param
         channel: 'stereo',
         phase: 'linear',
       } satisfies MatchEqParams;
+    case 'vocal-rebalance':
+      return { ...DEFAULT_VOCAL_REBALANCE_PARAMS };
     case 'clipper':
       return { ceilingDb: -0.8, driveDb: 1.5, softness: 60, oversampling: 4 } satisfies ClipperParams;
     case 'multiband-maximizer':
@@ -481,6 +485,8 @@ export function validateProcessorParams(
       }
       return out;
     }
+    case 'vocal-rebalance':
+      return sanitizeVocalRebalanceParams(src);
     case 'clipper': {
       const def = defaults as ClipperParams;
       const os = Number(src.oversampling);
@@ -578,6 +584,7 @@ const VALID_TYPES = new Set<ProcessorType>([
   'multiband-maximizer',
   'dither',
   'match-eq',
+  'vocal-rebalance',
   'external-vst3',
 ]);
 
@@ -605,5 +612,17 @@ export function validateChain(rawChain: unknown): ProcessorModule[] {
       }),
     );
   }
-  return validated;
+  return hoistVocalRebalance(validated);
+}
+
+/**
+ * Vocal Rebalance works on stems of the SOURCE, so it must see the unprocessed track: keep a
+ * single instance and move it to the head of the chain. Chains without it are returned as-is.
+ */
+export function hoistVocalRebalance(chain: ProcessorModule[]): ProcessorModule[] {
+  const first = chain.findIndex((m) => m.type === 'vocal-rebalance');
+  if (first < 0) return chain;
+  const rest = chain.filter((m) => m.type !== 'vocal-rebalance');
+  if (first === 0 && rest.length === chain.length - 1) return chain;
+  return [chain[first], ...rest];
 }

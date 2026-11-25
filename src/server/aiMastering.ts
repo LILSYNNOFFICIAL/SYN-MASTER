@@ -1,4 +1,5 @@
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import type { VocalBalanceContext } from '../ai/vocalBalancePrompt.ts';
 import type {
   AudioAnalysis,
   CustomObjectiveSpec,
@@ -66,7 +67,7 @@ const PROCESSOR_SCHEMA = {
     type: {
       type: Type.STRING,
       description:
-        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither, match-eq',
+        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither, match-eq, vocal-rebalance',
     },
     name: { type: Type.STRING },
     intensity: { type: Type.NUMBER, description: '0 to 100' },
@@ -127,6 +128,7 @@ export async function generateGeminiMasterStrategy(input: {
   userGenreOverride?: string;
   referenceAnalysis?: AudioAnalysis | null;
   availablePlugins?: Array<{ name: string; role: string; manufacturer: string }>;
+  vocalBalance?: VocalBalanceContext | null;
 }) {
   const ai = getAiClient();
   const prompt = buildStrategyUserPrompt(input);
@@ -176,6 +178,7 @@ export async function refineGeminiIteration(input: {
   targetTruePeakDb: number;
   preserveDynamics: boolean;
   qcReport?: QCReport | null;
+  vocalBalance?: VocalBalanceContext | null;
 }) {
   const ai = getAiClient();
   const prompt = buildRefineUserPrompt(input);

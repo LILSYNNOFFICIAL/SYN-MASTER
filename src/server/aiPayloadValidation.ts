@@ -117,3 +117,35 @@ export function sanitizeAvailablePlugins(value: unknown): PluginSanitizationResu
   }
   return { valid: true, value: sanitized };
 }
+
+export interface SafeVocalBalance {
+  stemsCached: boolean;
+  measurement: { vocalToMusicDb: number; vocalActiveRatio: number; bassToMixDb: number; drumsToMixDb: number } | null;
+  range: { low: number; high: number };
+}
+
+/**
+ * Vocal Rebalance context for the prompt: only bounded finite numbers pass. Anything malformed
+ * becomes "stems not cached", which tells the model not to use the processor.
+ */
+export function sanitizeVocalBalance(value: unknown): SafeVocalBalance | undefined {
+  if (value === undefined) return undefined;
+  const notCached: SafeVocalBalance = { stemsCached: false, measurement: null, range: { low: -7, high: 2 } };
+  if (!isRecord(value)) return notCached;
+  const num = (v: unknown, min: number, max: number): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? Math.round(v * 100) / 100 : null;
+  const range = isRecord(value.range) ? value.range : {};
+  const low = num(range.low, -30, 10);
+  const high = num(range.high, -30, 10);
+  if (low === null || high === null || low > high) return notCached;
+  let measurement: SafeVocalBalance['measurement'] = null;
+  if (isRecord(value.measurement)) {
+    const m = value.measurement;
+    const v = num(m.vocalToMusicDb, -60, 40);
+    const a = num(m.vocalActiveRatio, 0, 1);
+    const b = num(m.bassToMixDb, -120, 20);
+    const d = num(m.drumsToMixDb, -120, 20);
+    if (v !== null && a !== null && b !== null && d !== null) measurement = { vocalToMusicDb: v, vocalActiveRatio: a, bassToMixDb: b, drumsToMixDb: d };
+  }
+  return { stemsCached: value.stemsCached === true, measurement, range: { low, high } };
+}

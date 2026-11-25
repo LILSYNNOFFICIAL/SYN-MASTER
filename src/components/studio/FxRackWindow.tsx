@@ -38,6 +38,7 @@ const TYPE_BADGE: Record<ProcessorType, string> = {
   'multiband-maximizer': 'MBMX',
   dither: 'DTHR',
   'match-eq': 'MEQ',
+  'vocal-rebalance': 'VOX',
   'external-vst3': 'VST3',
 };
 
