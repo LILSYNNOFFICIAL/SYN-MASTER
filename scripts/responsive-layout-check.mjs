@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
 
-const baseUrl = `http://127.0.0.1:${process.env.SYN_RESPONSIVE_PORT ?? 4180}`;
-const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(process.env.SYN_RESPONSIVE_PORT ?? 4180), '--strictPort'], {
+const port = process.env.SYN_RESPONSIVE_PORT ?? '4180';
+const baseUrl = `http://127.0.0.1:${port}`;
+const server = spawn(process.execPath, ['server.ts'], {
   stdio: 'ignore',
-  env: process.env,
+  env: {
+    ...process.env,
+    NODE_ENV: 'production',
+    PORT: port,
+    HOST: '127.0.0.1',
+    SYN_MASTER_AI_ACCESS_TOKEN: 'responsive-layout-check-token-0123456789abcdef',
+  },
 });
 
 async function waitForPreview() {
@@ -297,6 +305,143 @@ async function runViewport(browser, width, height, mobile) {
   }
 }
 
+function makeToneWav(sampleRate = 48000, durationSec = 1, frequency = 260) {
+  const frames = Math.floor(sampleRate * durationSec);
+  const dataBytes = frames * 2 * 4;
+  const wav = Buffer.alloc(44 + dataBytes);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36 + dataBytes, 4);
+  wav.write('WAVE', 8);
+  wav.write('fmt ', 12);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(3, 20);
+  wav.writeUInt16LE(2, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 8, 28);
+  wav.writeUInt16LE(8, 32);
+  wav.writeUInt16LE(32, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(dataBytes, 40);
+  for (let i = 0; i < frames; i++) {
+    const sample = 0.5 * Math.sin((2 * Math.PI * frequency * i) / sampleRate);
+    wav.writeFloatLE(sample, 44 + i * 8);
+    wav.writeFloatLE(sample, 48 + i * 8);
+  }
+  return wav;
+}
+
+async function extractWavFromStoreZip(download) {
+  const archive = await readFile(await download.path());
+  let offset = 0;
+  while (offset + 30 <= archive.length && archive.readUInt32LE(offset) === 0x04034b50) {
+    const method = archive.readUInt16LE(offset + 8);
+    const compressedSize = archive.readUInt32LE(offset + 18);
+    const nameLength = archive.readUInt16LE(offset + 26);
+    const extraLength = archive.readUInt16LE(offset + 28);
+    const nameStart = offset + 30;
+    const name = archive.toString('utf8', nameStart, nameStart + nameLength);
+    const dataStart = nameStart + nameLength + extraLength;
+    const dataEnd = dataStart + compressedSize;
+    if (method !== 0) throw new Error(`Unexpected compressed ZIP entry: ${name}`);
+    if (name.toLowerCase().endsWith('.wav')) return archive.subarray(dataStart, dataEnd);
+    offset = dataEnd;
+  }
+  throw new Error('Export ZIP did not contain a WAV file.');
+}
+
+async function runWavExportE2E(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  try {
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.locator('.syn-console').waitFor({ state: 'visible', timeout: 15000 });
+    const audioInput = page.locator('input[type="file"][accept*="audio"]').first();
+    await audioInput.setInputFiles({
+      name: 'dynamic-eq-fades-test.wav',
+      mimeType: 'audio/wav',
+      buffer: makeToneWav(),
+    });
+    await page.locator('.syn2-wave').waitFor({ state: 'visible', timeout: 30000 });
+
+    const waveform = page.locator('.syn2-wave');
+    const box = await waveform.boundingBox();
+    assert.ok(box && box.width > 100, 'Imported track must expose an interactive timeline');
+    const dragHandle = async (fromX, toX) => {
+      await page.mouse.move(fromX, box.y + 28);
+      await page.mouse.down();
+      await page.mouse.move(toX, box.y + 28, { steps: 4 });
+      await page.mouse.up();
+    };
+    await dragHandle(box.x + 7, box.x + box.width * 0.1);
+    await dragHandle(box.x + box.width - 7, box.x + box.width * 0.9);
+    const fadeControls = await page.locator('.syn-player-fades').innerText();
+    assert.match(fadeControls, /Fade in\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-in');
+    assert.match(fadeControls, /Fade out\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-out');
+
+    await page.locator('.syn-eq-head .syn-seg button').filter({ hasText: 'Dynamic EQ' }).click();
+    const addDynamicEq = page.getByRole('button', { name: /Add Dynamic EQ/i });
+    if (await addDynamicEq.isVisible()) await addDynamicEq.click();
+    await page.locator('.syn-deq').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="render-peak-telemetry"]').waitFor({ state: 'visible', timeout: 30000 });
+
+    const exportWav = async (name) => {
+      await page.locator('.syn-header-export').click();
+      const dialog = page.getByRole('dialog', { name: 'Export Master Audio' });
+      await dialog.waitFor({ state: 'visible' });
+      await dialog.getByLabel('Output Filename').fill(name);
+      await dialog.getByLabel('WAV Bit Depth').selectOption('32');
+      const downloadEvent = page.waitForEvent('download', { timeout: 120000 });
+      await dialog.getByRole('button', { name: 'Render ZIP Package' }).click();
+      const download = await downloadEvent;
+      const wav = await extractWavFromStoreZip(download);
+      await dialog.getByRole('button', { name: 'Close Export Modal' }).click();
+      await dialog.waitFor({ state: 'hidden' });
+      return wav;
+    };
+
+    const power = page.locator('.syn-deq-power');
+    if (await power.innerText() === 'ON') await power.click();
+    const bypassedWav = await exportWav('dynamic-eq-bypassed');
+    if (await power.innerText() !== 'ON') await power.click();
+    const activeWav = await exportWav('dynamic-eq-active');
+
+    const inspect = (wav) => {
+      assert.equal(wav.toString('ascii', 0, 4), 'RIFF');
+      assert.equal(wav.toString('ascii', 8, 12), 'WAVE');
+      const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+      assert.equal(view.getUint16(34, true), 32, 'Export should contain 32-bit float WAV samples');
+      const frameCount = (wav.length - 44) / 8;
+      const rms = (start, end) => {
+        let power = 0;
+        const first = Math.floor(frameCount * start);
+        const last = Math.floor(frameCount * end);
+        for (let i = first; i < last; i++) power += view.getFloat32(44 + i * 8, true) ** 2;
+        return Math.sqrt(power / Math.max(1, last - first));
+      };
+      return {
+        frameCount,
+        earlyRms: rms(0.005, 0.025),
+        midRms: rms(0.4, 0.6),
+        lateRms: rms(0.975, 0.995),
+      };
+    };
+
+    const bypassed = inspect(bypassedWav);
+    const active = inspect(activeWav);
+    assert.ok(bypassed.frameCount > 40000, 'Exported WAV must contain the imported song');
+    assert.ok(bypassed.earlyRms < bypassed.midRms * 0.3, 'Exported WAV must include the timeline fade-in');
+    assert.ok(active.lateRms < active.midRms * 0.3, 'Exported WAV must include the timeline fade-out');
+    assert.ok(active.midRms < bypassed.midRms * 0.9, 'Enabling Dynamic EQ must change the exported audio');
+    assert.deepEqual(pageErrors, [], `Browser runtime errors during WAV export: ${pageErrors.join('; ')}`);
+    console.log('PASS production-browser export: WAV includes timeline fades and Dynamic EQ processing');
+  } finally {
+    await context.close();
+  }
+}
+
 try {
   await waitForPreview();
   const browser = await chromium.launch({ headless: true });
@@ -306,6 +451,7 @@ try {
     await runViewport(browser, 412, 915, true);
     await runViewport(browser, 1024, 900, false);
     await runViewport(browser, 1440, 1000, false);
+    await runWavExportE2E(browser);
   } finally {
     await browser.close();
   }

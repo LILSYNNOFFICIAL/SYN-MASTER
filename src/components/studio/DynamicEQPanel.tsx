@@ -104,12 +104,12 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, onAdd, onChange, onTog
             </label>
             <Field
               label="Range"
-              value={b.mode === 'boost' ? Math.max(0.5, b.maxCutDb) : Math.min(-0.5, b.maxCutDb)}
-              min={b.mode === 'boost' ? 0.5 : -12}
-              max={b.mode === 'boost' ? 12 : -0.5}
+              value={b.mode === 'boost' ? Math.max(0, b.maxCutDb) : b.maxCutDb}
+              min={b.mode === 'boost' ? 0 : -12}
+              max={b.mode === 'boost' ? 12 : 0}
               step={0.1}
               unit="dB"
-              display={`${(b.mode === 'boost' ? Math.max(0.5, b.maxCutDb) : Math.min(-0.5, b.maxCutDb)).toFixed(1)} dB`}
+              display={`${(b.mode === 'boost' ? Math.max(0, b.maxCutDb) : b.maxCutDb).toFixed(1)} dB`}
               onChange={(v) => setBand(b.id, { maxCutDb: v })}
               disabled={!b.enabled}
             />

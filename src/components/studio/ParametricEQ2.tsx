@@ -184,39 +184,6 @@ export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, o
     for (let i = N - 1; i >= 0; i--) d += ` L${((i / (N - 1)) * W).toFixed(1)},${(mid + env[i] * amp).toFixed(1)}`;
     return d + ' Z';
   }, [isConsole, waveformPeaks]);
-  // Live approximation while the processed render catches up (it is re-rendered offline on
-  // every change): estimate the broadband level change of the current EQ curve against the
-  // curve the shown blanket was rendered with, weighted by the track's spectrum, and scale the
-  // blanket by it immediately. The real render replaces it (and resets the scale) when it lands.
-  const [blanketBaseDb, setBlanketBaseDb] = useState<number[] | null>(null);
-  const latestTotalDbRef = useRef(totalDb);
-  latestTotalDbRef.current = totalDb;
-  useEffect(() => {
-    setBlanketBaseDb(latestTotalDbRef.current);
-  }, [waveformPeaks]);
-  const specWeights = useMemo(() => {
-    if (!spectrum || !spectrum.spectrumBinsFreq?.length) return curveFreqs.map(() => 1);
-    const fs = spectrum.spectrumBinsFreq;
-    const ds = spectrum.spectrumBinsDb;
-    let j = 0;
-    return curveFreqs.map((f) => {
-      while (j < fs.length - 1 && fs[j + 1] <= f) j++;
-      return Math.pow(10, (ds[j] ?? -120) / 10);
-    });
-  }, [spectrum, curveFreqs]);
-  const blanketScale = useMemo(() => {
-    const base = blanketBaseDb;
-    if (!isConsole || !base || base.length !== totalDb.length) return 1;
-    let eNow = 0;
-    let eBase = 0;
-    for (let i = 0; i < totalDb.length; i++) {
-      const w = specWeights[i] ?? 0;
-      eNow += w * Math.pow(10, totalDb[i] / 10);
-      eBase += w * Math.pow(10, base[i] / 10);
-    }
-    if (!(eBase > 0) || !(eNow > 0)) return 1;
-    return Math.max(0.5, Math.min(1.4, Math.sqrt(eNow / eBase)));
-  }, [isConsole, totalDb, specWeights, blanketBaseDb]);
   const blanketHeadRef = useRef<SVGLineElement | null>(null);
   useEffect(() => {
     if (!isConsole || !durationSec) return;
@@ -319,8 +286,7 @@ export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, o
             ))}
             {blanketPath && (
               <g className="syn-ceq-blanket" pointerEvents="none">
-                <path d={blanketPath} className="syn-ceq-blanket-path" data-live={Math.abs(blanketScale - 1) > 0.005 ? 'true' : 'false'}
-                  transform={Math.abs(blanketScale - 1) > 0.005 ? `translate(0 ${H / 2}) scale(1 ${blanketScale.toFixed(4)}) translate(0 ${-H / 2})` : undefined}
+                <path d={blanketPath} className="syn-ceq-blanket-path" data-live="false"
                   fill={`url(#${uid}-blanket)`} stroke={`url(#${uid}-spec)`} strokeWidth={0.8} strokeOpacity={0.5} filter={`url(#${uid}-soft)`} />
                 {durationSec > 0 && <line ref={blanketHeadRef} x1={0} x2={0} y1={0} y2={H} className="syn-ceq-playhead" />}
               </g>

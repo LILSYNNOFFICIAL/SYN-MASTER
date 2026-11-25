@@ -530,9 +530,9 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                       />
                       <RotaryKnob
                         label="Max Cut"
-                        value={band.mode === 'boost' ? Math.max(0.5, band.maxCutDb) : Math.min(-0.5, band.maxCutDb)}
-                        min={band.mode === 'boost' ? 0.5 : -12}
-                        max={band.mode === 'boost' ? 12 : -0.5}
+                        value={band.mode === 'boost' ? Math.max(0, band.maxCutDb) : band.maxCutDb}
+                        min={band.mode === 'boost' ? 0 : -12}
+                        max={band.mode === 'boost' ? 12 : 0}
                         step={0.1}
                         defaultValue={-3}
                         unit="dB"

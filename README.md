@@ -508,17 +508,25 @@ Owner feedback round 2 ("more blue glow everywhere"). Skin lives in `src/skin/sk
 
 ## ChatGPT handoff — next steps (Nov 24, 2026, after commit 9e58e66)
 
-Current state: GUI redesign rounds 1–3 are on `main` (skin in `src/skin/skin.css`, guided 1–4 console flow, TimelinePlayer with seek + S-curve fades, real EQ waveform blanket, Ask AI under FIX ALL, Ozone-style imager, live QC loudness, Dynamic EQ tab, Mode sent to the AI as its own line). Build, lint and 215/215 tests pass. See the "GUI redesign status" sections above.
+Current state: GUI redesign rounds 1–3 are on `main` (skin in `src/skin/skin.css`, guided 1–4 console flow, TimelinePlayer with seek + S-curve fades, real EQ waveform blanket, Ask AI under FIX ALL, Ozone-style imager, live QC loudness, Dynamic EQ tab, Mode sent to the AI as its own line). The current accuracy follow-up passes lint/build and 219 of 220 tests; one FFmpeg-dependent test is skipped when FFmpeg is unavailable. See the "GUI redesign status" sections above.
 
 Open items, in priority order:
-1. **Verify in a real browser:** a full WAV export contains the timeline fades and the Dynamic EQ (unit tests cover the render path, but no download has been clicked through). Run Fix All end to end with the new Mode line.
-2. [x] **Dynamic EQ ratio knob:** ratio and cut/boost mode are implemented in the offline and realtime preview paths, with legacy chains defaulting to the original ≈2.9:1 cut slope. The console and rack expose ratio and mode controls.
-3. **EQ live preview jump:** the drag-time estimate ignores the limiter/maximizer, so the waveform jumps and then settles. Estimate post-limiter level, or hold the previous size while dragging.
+1. **Verify in a real browser:** a full WAV export contains the timeline fades and the Dynamic EQ (automated WAV-byte coverage now checks both). Run Fix All end to end with the new Mode line; a browser download and real Fix All run remain unverified.
+2. [x] **Dynamic EQ ratio knob:** ratio and cut/boost mode are implemented in the offline processor and exposed in the console and rack; legacy chains preserve the original ≈2.9:1 cut slope. Mastered playback uses the exact offline render rather than a static realtime approximation.
+3. [x] **EQ live preview jump:** removed the pre-limiter broadband level estimate. The waveform blanket now holds the last completed offline render until the next render replaces it.
 4. **Mobile checks:** drag-seek on a real phone, mobile menubar dropdown positions, glow performance on slow devices, prefers-reduced-motion.
-5. [x] **Live spectrum sample rate:** the live FFT mapping now uses `AudioContext.sampleRate` published by `SynAudioEngine.getLiveTelemetry()` instead of assuming 48 kHz.
+5. [x] **Live spectrum sample rate:** the live FFT mapping uses `AudioContext.sampleRate` published by `SynAudioEngine.getLiveTelemetry()` instead of assuming 48 kHz.
 6. **AI Assistant page:** reskinned only. Rebuild its layout to match the console.
 7. **Plugins & Host tab + Windows companion:** restyle the tab (connection status, plugin list, add-to-chain, params, Open Editor). Give the companion window a JUCE LookAndFeel in the same skin. Add a release workflow `.github/workflows/windows-companion-release.yml` and tag v0.1.0. Ports: HTTP 127.0.0.1:47832, WS 127.0.0.1:47833; pairing code SYN-XXXX-XXXX. See docs/VST_COMPANION.md.
 8. **BYO-AI leftovers:** shimmer calibration on real audio, best-candidate fallback when every pass is rejected, BYO docs, and checking that the model names (`claude-sonnet-4-5`, `grok-4`) are current.
 9. **Cleanup:** leftover old-dashboard CSS and the duplicate `:root` block in `src/index.css`, and native `assert` tests.
 
 Rules: commit small working changes straight to `main`. Stay AI Studio compatible: same entry files, assets under `public/`, no new backend or build steps, Gemini key server-only. Don't change the DSP defaults, the default Gemini provider, or the Fix-All verification loop unless an item says to. Run `npm run lint`, `npm run build` and `npx tsx --test` on touched tests. Update this README as you go.
+
+### Accuracy follow-up — Nov 25, 2026
+
+- [x] EQ drag preview holds its prior rendered waveform; it no longer scales from an estimate that omits limiter behavior.
+- [x] Dynamic EQ fallback in the realtime Web Audio graph is neutral rather than a static filter that misrepresents the offline detector. Mastered playback continues to use the exact offline render.
+- [x] Add regression coverage for legacy ratio/mode migration, bounds, boost, and a WAV-byte render containing both Dynamic EQ attenuation and post-chain fades.
+- [x] The live output readout exposes current sample peak and live gain reduction; the console also exposes last-render peak-stage input/output and gain reduction, alongside measured final true peak.
+- [ ] Browser download/Fix-All e2e, phone/Android Chrome and low-end device checks, listening parity, and calibration on representative real music remain manual acceptance tasks. This environment has no supplied owner source track or physical device.

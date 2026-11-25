@@ -15,6 +15,7 @@ import type {
   SaturationParams,
   TransientShaperParams,
 } from '../../types/mastering';
+import type { ProcessorMeterTelemetry } from '../../dsp/offlineDsp';
 import { LOUDNESS_TARGET_PRESETS } from '../../dsp/loudnessTargets';
 import { MODULE_CATALOG } from '../studio/moduleCatalog';
 import { ParametricEQ2 } from '../studio/ParametricEQ2';
@@ -34,6 +35,7 @@ import { telemetryStore, type RuntimeTelemetryState } from '../../engine/telemet
  */
 export interface MasterConsoleProps {
   chain: ProcessorModule[];
+  stageTelemetry?: ProcessorMeterTelemetry[];
   chainBypassed: boolean;
   onChangeChain: (next: ProcessorModule[]) => void;
   sampleRate: number;
@@ -159,7 +161,7 @@ const LiveLevel: React.FC = () => {
       const pk = Math.max(live.peakL, live.peakR);
       sm = sm * 0.75 + (Number.isFinite(rms) ? rms : -90) * 0.25;
       el.dataset.live = 'true';
-      el.textContent = `Live RMS ${sm.toFixed(1)} dBFS · peak ${Number.isFinite(pk) ? pk.toFixed(1) : '-inf'} dBFS`;
+      el.textContent = `Live RMS ${sm.toFixed(1)} dBFS · peak ${Number.isFinite(pk) ? pk.toFixed(1) : '-inf'} dBFS · GR ${live.gainReductionDb.toFixed(1)} dB`;
     };
     update(telemetryStore.getSnapshot());
     return telemetryStore.subscribe(update);
@@ -267,6 +269,19 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
   const shown = p.master ?? p.source;
   const lufs = shown?.integratedLufs ?? null;
   const tp = shown?.truePeakDb ?? null;
+  const peakStageTelemetry = (p.stageTelemetry ?? []).filter((entry) => {
+    const module = chain.find((candidate) => candidate.id === entry.id);
+    return module && ['limiter', 'maximizer', 'multiband-maximizer', 'clipper'].includes(module.type);
+  });
+  const peakStageInputDb = peakStageTelemetry.length
+    ? Math.max(...peakStageTelemetry.map((entry) => entry.inputPeakDb))
+    : null;
+  const peakStageOutputDb = peakStageTelemetry.length
+    ? Math.max(...peakStageTelemetry.map((entry) => entry.outputPeakDb))
+    : null;
+  const peakStageGainReductionDb = peakStageTelemetry.length
+    ? Math.max(...peakStageTelemetry.map((entry) => entry.gainReductionDb))
+    : null;
   const gate = p.report?.targetGate ?? null;
   const pct = p.running ? Math.min(100, Math.round((Math.max(0, p.pass) / Math.max(1, p.maxPasses)) * 100)) : p.report ? 100 : 0;
 
@@ -521,6 +536,11 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
           <div className="syn-loud-target">Target {p.targetLufs} LUFS · TP {tp !== null ? tp.toFixed(2) : '—'} / {p.maxTruePeakDb} dBTP</div>
           <LoudnessBar lufs={lufs} targetLufs={p.targetLufs} disabled={p.running} onTarget={p.onTargetLufs} />
           <LiveLevel />
+          {peakStageTelemetry.length > 0 && (
+            <div className="syn-loud-src" data-testid="render-peak-telemetry">
+              Last render · peak stage {peakStageInputDb!.toFixed(1)} → {peakStageOutputDb!.toFixed(1)} dBFS · GR {peakStageGainReductionDb!.toFixed(1)} dB
+            </div>
+          )}
           <div className="syn-loud-src">{p.master ? 'Measured on the rendered master' : p.source ? 'Source measurement' : 'No signal'}</div>
         </Card>
       </div>

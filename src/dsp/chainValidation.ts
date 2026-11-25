@@ -250,8 +250,8 @@ export function validateProcessorParams(
             q: clamp(Number(bo.q), 0.5, 10, 2.0),
             thresholdDb: clamp(Number(bo.thresholdDb), -45, 0, -20),
             maxCutDb: mode === 'boost'
-              ? clamp(Number(bo.maxCutDb), 0.5, 12, 3)
-              : clamp(Number(bo.maxCutDb), -12, -0.05, -3),
+              ? clamp(Number(bo.maxCutDb), 0, 12, 3)
+              : clamp(Number(bo.maxCutDb), -12, 0, -3),
             ratio: clamp(Number(bo.ratio), 1.0, 20.0, 20 / 7),
             mode,
             attackMs: clamp(Number(bo.attackMs), 1, 100, 10),

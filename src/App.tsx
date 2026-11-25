@@ -415,7 +415,7 @@ export default function App() {
     [activeTrack],
   );
 
-  // Recompute offline DSP analysis off the main UI thread (debounced 60ms; the EQ blanket shows a live approximation meanwhile)
+  // Recompute offline DSP analysis off the main UI thread (debounced 60ms; the EQ blanket holds the prior completed render meanwhile)
   useEffect(() => {
     const src = getRenderSource();
     const track = activeTrack;
@@ -2353,6 +2353,7 @@ export default function App() {
   const masterConsole = (
     <MasterConsole
       chain={chain}
+      stageTelemetry={stageTelemetry}
       chainBypassed={chainBypassed}
       onChangeChain={(next) => {
         updateChainWithHistory(next);

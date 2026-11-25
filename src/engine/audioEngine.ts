@@ -2,7 +2,6 @@ import type {
   BassEnhancerParams,
   ClipperParams,
   CompressorParams,
-  DynamicEQParams,
   LimiterParams,
   MaximizerParams,
   MultibandCompParams,
@@ -643,33 +642,10 @@ export class SynAudioEngine {
         restoreNodes[restoreNodes.length - 1].connect(wetGain);
         trackNodes(restoreNodes);
       } else if (mod.type === 'dynamic-eq') {
-        const p = mod.params as DynamicEQParams;
-        const enabledBands = p.bands.filter((b) => b.enabled && (
-          (b.mode === 'boost' ? b.maxCutDb > 0.05 : b.maxCutDb < -0.05)
-        ));
-        const audioCtx = this.ctx;
-        if (enabledBands.length > 0 && audioCtx) {
-          const dynNodes = enabledBands.map((b) => {
-            const bq = audioCtx.createBiquadFilter();
-            bq.type = 'peaking';
-            bq.frequency.value = b.freq;
-            bq.Q.value = b.q;
-            const ratio = Number.isFinite(b.ratio) ? Math.max(1, b.ratio ?? 20 / 7) : 20 / 7;
-            const slope = 1 - 1 / ratio;
-            bq.gain.value = b.mode === 'boost'
-              ? b.maxCutDb * 0.45 * intensity
-              : b.maxCutDb * 0.45 * (slope / 0.65) * intensity;
-            return bq;
-          });
-          stageIn.connect(dynNodes[0]);
-          for (let i = 0; i < dynNodes.length - 1; i++) {
-            dynNodes[i].connect(dynNodes[i + 1]);
-          }
-          dynNodes[dynNodes.length - 1].connect(wetGain);
-          trackNodes(dynNodes);
-        } else {
-          stageIn.connect(wetGain);
-        }
+        // A static BiquadFilterNode cannot reproduce the offline detector envelope.
+        // Keep this fallback neutral; mastered playback uses the exact offline render
+        // installed as mastered-external once the render completes.
+        stageIn.connect(wetGain);
       } else if (mod.type === 'limiter' || mod.type === 'maximizer') {
         const driveGain = this.ctx.createGain();
         const lim = this.ctx.createDynamicsCompressor();
@@ -901,7 +877,7 @@ export class SynAudioEngine {
   }
 
   public getLiveTelemetry(): LiveMeterSnapshot | null {
-    if (!this.analyserL || !this.analyserR || !this.analyserMain) return null;
+    if (!this.ctx || !this.analyserL || !this.analyserR || !this.analyserMain) return null;
     this.analyserL.getFloatTimeDomainData(this.tdBufL);
     this.analyserR.getFloatTimeDomainData(this.tdBufR);
     this.analyserMain.getByteFrequencyData(this.fftBuf);
@@ -938,7 +914,7 @@ export class SynAudioEngine {
       rmsR: linearToDb(Math.sqrt(sumSqR / n)),
       correlation,
       gainReductionDb: Number(totalGr.toFixed(2)),
-      sampleRate: this.ctx?.sampleRate ?? 48000,
+      sampleRate: this.ctx.sampleRate,
       fftBins: this.fftBuf,
       timeDomainL: this.tdBufL,
       timeDomainR: this.tdBufR,

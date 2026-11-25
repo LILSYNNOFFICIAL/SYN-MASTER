@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { createProcessorModule, createDefaultParams } from './chainValidation';
 import { renderMixedChain } from './mixedChainRenderer';
 import type { DynamicEQParams, ParametricEQParams } from '../types/mastering';
+import { DEFAULT_EXPORT_CONFIG } from './exportDefaults';
+import { encodeWavBlob } from './wavEncoder';
+import { fadeGain, type FadeSettings } from './fades';
 
 // Round 3 · G: the console's Dynamic EQ tab only adds the existing 'dynamic-eq' module to the
 // chain. These checks prove that module reaches the export renderer (renderMixedChain is the
@@ -60,4 +63,40 @@ test('Default chain without Dynamic EQ is bit-identical (feature is default-off)
   const bypassed = createProcessorModule('dynamic-eq', { bypassed: true });
   const c = await renderMixedChain(src, sr, [eq, bypassed], undefined);
   assert.deepEqual(Array.from(c.channels[0]), Array.from(a.channels[0]), 'a bypassed Dynamic EQ must not change the output');
+});
+
+test('WAV export render contains Dynamic EQ processing and post-chain timeline fades', async () => {
+  const sr = 48000;
+  const src = tone(sr, 1, 1000, 0.5);
+  const params: DynamicEQParams = {
+    bands: [{ id: 'd1', enabled: true, freq: 1000, q: 2, thresholdDb: -30, maxCutDb: -6, ratio: 4, mode: 'cut', attackMs: 5, releaseMs: 100 }],
+  };
+  const fades: FadeSettings = { inSec: 0.1, outSec: 0.1, inCurve: 'linear', outCurve: 'linear' };
+  const rendered = await renderMixedChain(src, sr, [createProcessorModule('dynamic-eq', { params })], undefined, fades);
+  const withoutFades = await renderMixedChain(src, sr, [createProcessorModule('dynamic-eq', { params })]);
+  const wav = new Uint8Array(await encodeWavBlob(rendered.channels, sr, {
+    ...DEFAULT_EXPORT_CONFIG,
+    sampleRate: sr,
+    wavBitDepth: 32,
+    ceilingDb: 0,
+  }).arrayBuffer());
+  assert.equal(new TextDecoder().decode(wav.subarray(0, 4)), 'RIFF');
+  assert.equal(new TextDecoder().decode(wav.subarray(8, 12)), 'WAVE');
+
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  const inIndex = Math.floor(sr * 0.05);
+  const outIndex = Math.floor(sr) - 1 - Math.floor(sr * 0.05);
+  const encodedIn = view.getFloat32(44 + inIndex * 8, true);
+  const encodedOut = view.getFloat32(44 + outIndex * 8, true);
+  assert.ok(Math.abs(encodedIn - withoutFades.channels[0][inIndex] * fadeGain(0.5, 'linear')) < 1e-6, 'encoded WAV must contain the timeline fade-in');
+  assert.ok(Math.abs(encodedOut - withoutFades.channels[0][outIndex] * fadeGain(0.5, 'linear')) < 1e-6, 'encoded WAV must contain the timeline fade-out');
+
+  let sourcePower = 0;
+  let renderedPower = 0;
+  for (let i = Math.floor(sr * 0.4); i < Math.floor(sr * 0.6); i++) {
+    const sample = view.getFloat32(44 + i * 8, true);
+    sourcePower += src[0][i] ** 2;
+    renderedPower += sample ** 2;
+  }
+  assert.ok(renderedPower < sourcePower * 0.5, 'encoded WAV must contain Dynamic EQ attenuation');
 });
