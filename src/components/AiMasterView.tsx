@@ -337,6 +337,15 @@ export const AiMasterView: React.FC<Props> = ({
   const sourceLimitations = effectiveVerification?.activeFindings.filter(
     (finding) => isSourceLimitationFinding(finding.findingId),
   ) ?? [];
+  const reportIsVerified = Boolean(
+    directorReport &&
+    directorReport.status === 'converged' &&
+    directorReport.qcReport.failCount === 0 &&
+    (directorReport.postFixVerification?.activeFindings ?? []).every((finding) =>
+      isSourceLimitationFinding(finding.findingId),
+    ) &&
+    (directorReport.postFixVerification?.newlyIntroducedFindings.length ?? 0) === 0
+  );
   const effectivePost: AudioAnalysis | null = effectiveVerification
     ? effectiveVerification.analysisFresh && effectiveVerification.postAnalysis
       ? effectiveVerification.postAnalysis
@@ -1431,14 +1440,12 @@ export const AiMasterView: React.FC<Props> = ({
       {directorReport && (
         <div
           data-testid="ai-optimization-report"
-          className={`p-4 rounded bg-[#111217] border flex flex-col gap-3 text-xs ${directorReport.status === 'converged' && directorReport.qcReport.failCount === 0 && (directorReport.postFixVerification?.activeFindings ?? []).every((finding) => isSourceLimitationFinding(finding.findingId)) && (directorReport.postFixVerification?.newlyIntroducedFindings.length ?? 0) === 0 ? 'border-[#34D399]/35' : 'border-[#F59E0B]/45'}`}
+          className={`p-4 rounded bg-[#111217] border flex flex-col gap-3 text-xs ${reportIsVerified ? 'border-[#34D399]/35' : 'border-[#F59E0B]/45'}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${directorReport.status === 'converged' && directorReport.qcReport.failCount === 0 && (directorReport.postFixVerification?.activeFindings ?? []).every((finding) => isSourceLimitationFinding(finding.findingId)) && (directorReport.postFixVerification?.newlyIntroducedFindings.length ?? 0) === 0 ? 'text-[#34D399]' : 'text-[#F59E0B]'`}>
-                {directorReport.status === 'converged' && directorReport.qcReport.failCount === 0 && (directorReport.postFixVerification?.activeFindings ?? []).every((finding) => isSourceLimitationFinding(finding.findingId)) && (directorReport.postFixVerification?.newlyIntroducedFindings.length ?? 0) === 0
-                  ? <Check className="w-4 h-4" />
-                  : <AlertTriangle className="w-4 h-4" />}
+              <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${reportIsVerified ? 'text-[#34D399]' : 'text-[#F59E0B]'}`}>
+                {reportIsVerified ? <Check className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
                 Final Optimization Report ({directorReport.objective.label} · {directorReport.iterationsExecuted} Pass(es))
               </h3>
               <span className="font-mono-tabular text-[11px] text-[#9CA3AF]">
