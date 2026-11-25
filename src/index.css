@@ -271,6 +271,11 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 .syn2-issue.sev-high { border-left-color: var(--s2-bad); }
 .syn2-issue.sev-moderate { border-left-color: #E8A33A; }
 .syn2-issue.sev-low, .syn2-issue.sev-info { border-left-color: var(--s2-gold-lo); }
+/* Current verification status takes precedence over original source severity. */
+.syn2-issue.is-fixed { border-left-color: var(--s2-good); }
+.syn2-issue.is-not-fixed { border-left-color: var(--s2-bad); }
+.syn2-issue.is-advisory { border-left-color: #E8A33A; }
+.syn2-issue.is-open { border-left-color: var(--s2-dim); }
 .syn2-issue-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .syn2-issue-title { font: 800 13px var(--syn-font-display); color: var(--s2-text); }
 .syn2-issue-cat { font: 600 10px var(--syn-font-mono); color: var(--s2-dim); text-transform:uppercase; letter-spacing:.1em; }
