@@ -149,8 +149,10 @@ async function runViewport(browser, width, height, mobile) {
         assert.equal(await emptyState.isVisible(), true, `${label} must explain its no-source/no-host state`);
         const instrumentSurface = page.locator(`main.syn-daw-main[data-syn-skin="instrument"][data-workspace="${id}"]`);
         assert.equal(await instrumentSurface.isVisible(), true, `${label} must render inside the shared instrument-grade workspace surface`);
-        const heroGraphic = page.locator(`[data-testid="workspace-hero"][data-workspace="${id}"] [data-testid="workspace-hero-graphic"]`);
-        assert.equal(await heroGraphic.isVisible(), true, `${label} must retain its purpose-built instrument graphic`);
+        if (id !== 'qc') {
+          const heroGraphic = page.locator(`[data-testid="workspace-hero"][data-workspace="${id}"] [data-testid="workspace-hero-graphic"]`);
+          assert.equal(await heroGraphic.isVisible(), true, `${label} must retain its purpose-built instrument graphic`);
+        }
       }
       await page.locator('.syn-primary-nav-item').filter({ hasText: 'Dashboard' }).click();
       await page.getByRole('button', { name: /LOAD DEMO SESSION/i }).click({ timeout: 15000 });
@@ -215,18 +217,17 @@ async function runViewport(browser, width, height, mobile) {
     assert.notEqual(await firstKnob.getAttribute('aria-valuenow'), before, 'Console knob must respond to the keyboard');
     await page.keyboard.press('ArrowDown');
     assert.equal(await page.locator('.syn2-wave-wrap').count(), 0, 'The default mastering workspace must use the unified waveform-behind-EQ visualization, not a second stacked waveform panel');
-    const eqPrecedesFix = await page.evaluate(() => {
+    // Guided flow (README round 3 · A): 1 Import/timeline → 2 Fix with AI → 3 Master it yourself (EQ).
+    const fixPrecedesEq = await page.evaluate(() => {
       const eq = document.querySelector('[data-testid="central-spectrum"]');
       const fix = document.querySelector('.syn2-fix-centerpiece');
-      return Boolean(eq && fix && eq.getBoundingClientRect().bottom <= fix.getBoundingClientRect().top + 1);
+      return Boolean(eq && fix && fix.getBoundingClientRect().bottom <= eq.getBoundingClientRect().top + 1);
     });
-    if (mobile) assert.equal(eqPrecedesFix, true, 'PRAGMATIC EQ must appear above the FIX ALL AI centerpiece on mobile');
+    if (mobile) assert.equal(fixPrecedesEq, true, 'FIX ALL AI (step 2) must appear above the EQ (step 3) on mobile');
 
-    await page.getByRole('button', { name: /Timeline & fades/ }).click();
-    assert.equal(await page.locator('.syn2-wave-wrap').count(), 1, 'Timeline and fade editing must remain available on demand');
-    await inspectLayout(page, width, 'studio-timeline-expanded');
-    await page.getByRole('button', { name: /Hide timeline & fades/ }).click();
-    assert.equal(await page.locator('.syn2-wave-wrap').count(), 0, 'Collapsing the timeline must restore the unified default visualization');
+    // The always-visible TimelinePlayer replaced the old "Timeline & fades" toggle.
+    assert.equal(await page.locator('.syn-player .syn2-wave').count(), 1, 'Timeline and fade editing must stay available in the TimelinePlayer');
+    await inspectLayout(page, width, 'studio-timeline');
 
     await page.locator('.syn-library-toggle').click();
     await page.locator('.syn-library-drawer[data-open="true"]').waitFor({ state: 'visible', timeout: 5000 });
@@ -259,7 +260,8 @@ async function runViewport(browser, width, height, mobile) {
         await page.locator('.syn-workspace-menu-item').filter({ hasText: label }).click();
       }
       await page.locator(`main[data-layout="${id}"]`).waitFor({ state: 'visible', timeout: 10000 });
-      if (id !== 'studio') {
+      // QC's static hero illustration was removed (README round 3 · I: Live Loudness panel instead).
+      if (id !== 'studio' && id !== 'qc') {
         const workspaceHero = page.locator(`[data-testid="workspace-hero"][data-workspace="${id}"]`);
         await workspaceHero.waitFor({ state: 'visible', timeout: 10000 });
         assert.equal(await workspaceHero.locator('[data-testid="workspace-hero-graphic"]').isVisible(), true, `${label} must display its workspace-specific instrument graphic`);
@@ -301,7 +303,7 @@ async function runViewport(browser, width, height, mobile) {
 
     assert.deepEqual(pageErrors, [], `Browser runtime errors at ${width}px: ${pageErrors.join('; ')}`);
   } finally {
-    await context.close();
+    await context.close().catch(() => undefined);
   }
 }
 
@@ -323,7 +325,8 @@ function makeToneWav(sampleRate = 48000, durationSec = 1, frequency = 260) {
   wav.write('data', 36);
   wav.writeUInt32LE(dataBytes, 40);
   for (let i = 0; i < frames; i++) {
-    const sample = 0.5 * Math.sin((2 * Math.PI * frequency * i) / sampleRate);
+    // 260 Hz sits on the default Dynamic EQ band; 1 kHz is an untouched reference partial.
+    const sample = 0.5 * Math.sin((2 * Math.PI * frequency * i) / sampleRate) + 0.2 * Math.sin((2 * Math.PI * 1000 * i) / sampleRate);
     wav.writeFloatLE(sample, 44 + i * 8);
     wav.writeFloatLE(sample, 48 + i * 8);
   }
@@ -351,8 +354,15 @@ async function extractWavFromStoreZip(download) {
 
 async function runWavExportE2E(browser) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
+  // Headless Chromium exposes showSaveFilePicker but can never answer it; use the download
+  // fallback (the path Android Chrome / Firefox / Safari take) so the ZIP arrives as a download.
+  await context.addInitScript(() => { delete window.showSaveFilePicker; });
   const page = await context.newPage();
   const pageErrors = [];
+  const t0 = Date.now();
+  const step = (msg) => { if (process.env.SYN_DEBUG) console.error(`[export e2e +${((Date.now() - t0) / 1000).toFixed(1)}s] ${msg}`); };
+  page.on('crash', () => console.error('PAGE CRASHED during export e2e'));
+  if (process.env.SYN_DEBUG) page.on('console', (m) => console.error('console:', m.text()));
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   try {
@@ -364,6 +374,7 @@ async function runWavExportE2E(browser) {
       mimeType: 'audio/wav',
       buffer: makeToneWav(),
     });
+    step('imported');
     await page.locator('.syn2-wave').waitFor({ state: 'visible', timeout: 30000 });
 
     const waveform = page.locator('.syn2-wave');
@@ -375,16 +386,19 @@ async function runWavExportE2E(browser) {
       await page.mouse.move(toX, box.y + 28, { steps: 4 });
       await page.mouse.up();
     };
+    step('fades');
     await dragHandle(box.x + 7, box.x + box.width * 0.1);
     await dragHandle(box.x + box.width - 7, box.x + box.width * 0.9);
     const fadeControls = await page.locator('.syn-player-fades').innerText();
     assert.match(fadeControls, /Fade in\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-in');
     assert.match(fadeControls, /Fade out\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-out');
 
+    step('dynamic eq tab');
     await page.locator('.syn-eq-head .syn-seg button').filter({ hasText: 'Dynamic EQ' }).click();
     const addDynamicEq = page.getByRole('button', { name: /Add Dynamic EQ/i });
     if (await addDynamicEq.isVisible()) await addDynamicEq.click();
     await page.locator('.syn-deq').waitFor({ state: 'visible', timeout: 10000 });
+    step('telemetry');
     await page.locator('[data-testid="render-peak-telemetry"]').waitFor({ state: 'visible', timeout: 30000 });
 
     const exportWav = async (name) => {
@@ -394,6 +408,7 @@ async function runWavExportE2E(browser) {
       await dialog.getByLabel('Output Filename').fill(name);
       await dialog.getByLabel('WAV Bit Depth').selectOption('32');
       const downloadEvent = page.waitForEvent('download', { timeout: 120000 });
+      downloadEvent.catch(() => undefined); // surface the real failure instead of this rejection
       await dialog.getByRole('button', { name: 'Render ZIP Package' }).click();
       const download = await downloadEvent;
       const wav = await extractWavFromStoreZip(download);
@@ -404,8 +419,10 @@ async function runWavExportE2E(browser) {
 
     const power = page.locator('.syn-deq-power');
     if (await power.innerText() === 'ON') await power.click();
+    step('export 1');
     const bypassedWav = await exportWav('dynamic-eq-bypassed');
     if (await power.innerText() !== 'ON') await power.click();
+    step('export 2');
     const activeWav = await exportWav('dynamic-eq-active');
 
     const inspect = (wav) => {
@@ -421,8 +438,23 @@ async function runWavExportE2E(browser) {
         for (let i = first; i < last; i++) power += view.getFloat32(44 + i * 8, true) ** 2;
         return Math.sqrt(power / Math.max(1, last - first));
       };
+      const sampleRate = view.getUint32(24, true);
+      const toneDb = (freq) => {
+        const first = Math.floor(frameCount * 0.4);
+        const last = Math.floor(frameCount * 0.6);
+        const k = 2 * Math.cos((2 * Math.PI * freq) / sampleRate);
+        let s1 = 0;
+        let s2 = 0;
+        for (let i = first; i < last; i++) {
+          const s0 = view.getFloat32(44 + i * 8, true) + k * s1 - s2;
+          s2 = s1;
+          s1 = s0;
+        }
+        return 10 * Math.log10((s1 * s1 + s2 * s2 - k * s1 * s2) / (last - first) ** 2 + 1e-30);
+      };
       return {
         frameCount,
+        lowVsRefDb: toneDb(260) - toneDb(1000),
         earlyRms: rms(0.005, 0.025),
         midRms: rms(0.4, 0.6),
         lateRms: rms(0.975, 0.995),
@@ -434,11 +466,21 @@ async function runWavExportE2E(browser) {
     assert.ok(bypassed.frameCount > 40000, 'Exported WAV must contain the imported song');
     assert.ok(bypassed.earlyRms < bypassed.midRms * 0.3, 'Exported WAV must include the timeline fade-in');
     assert.ok(active.lateRms < active.midRms * 0.3, 'Exported WAV must include the timeline fade-out');
-    assert.ok(active.midRms < bypassed.midRms * 0.9, 'Enabling Dynamic EQ must change the exported audio');
+    if (process.env.SYN_DEBUG) console.error('export e2e rms', JSON.stringify({ bypassed, active }));
+    let maxDiff = 0;
+    const bv = new DataView(bypassedWav.buffer, bypassedWav.byteOffset, bypassedWav.byteLength);
+    const av = new DataView(activeWav.buffer, activeWav.byteOffset, activeWav.byteLength);
+    for (let o = 44; o + 4 <= Math.min(bypassedWav.length, activeWav.length); o += 4) maxDiff = Math.max(maxDiff, Math.abs(bv.getFloat32(o, true) - av.getFloat32(o, true)));
+    if (process.env.SYN_DEBUG) console.error('export e2e max sample diff', maxDiff);
+    // The maximizer re-levels the whole master, so compare the 260 Hz band against the 1 kHz reference
+    // instead of overall RMS: the Dynamic EQ must cut 260 Hz relative to the untouched partial.
+    const deqCutDb = active.lowVsRefDb - bypassed.lowVsRefDb;
+    assert.ok(maxDiff > 1e-3, 'Enabling Dynamic EQ must change the exported samples');
+    assert.ok(deqCutDb < -1.5, `Enabling Dynamic EQ must cut 260 Hz relative to 1 kHz in the export (got ${deqCutDb.toFixed(2)} dB)`);
     assert.deepEqual(pageErrors, [], `Browser runtime errors during WAV export: ${pageErrors.join('; ')}`);
     console.log('PASS production-browser export: WAV includes timeline fades and Dynamic EQ processing');
   } finally {
-    await context.close();
+    await context.close().catch(() => undefined);
   }
 }
 
@@ -446,12 +488,15 @@ try {
   await waitForPreview();
   const browser = await chromium.launch({ headless: true });
   try {
-    await runViewport(browser, 360, 800, true);
-    await runViewport(browser, 375, 812, true);
-    await runViewport(browser, 412, 915, true);
-    await runViewport(browser, 1024, 900, false);
-    await runViewport(browser, 1440, 1000, false);
-    await runWavExportE2E(browser);
+    // SYN_RESPONSIVE_ONLY=360,1440,export runs a subset (local runs are time-limited).
+    const only = process.env.SYN_RESPONSIVE_ONLY?.split(',');
+    const want = (key) => !only || only.includes(String(key));
+    if (want(360)) await runViewport(browser, 360, 800, true);
+    if (want(375)) await runViewport(browser, 375, 812, true);
+    if (want(412)) await runViewport(browser, 412, 915, true);
+    if (want(1024)) await runViewport(browser, 1024, 900, false);
+    if (want(1440)) await runViewport(browser, 1440, 1000, false);
+    if (want('export')) await runWavExportE2E(browser);
   } finally {
     await browser.close();
   }
