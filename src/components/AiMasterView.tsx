@@ -77,6 +77,8 @@ interface Props {
   convergenceThreshold: number;
   aiLoading: boolean;
   aiError: string | null;
+  /** Friendly notice (e.g. cloud AI limit reached; FIX ALL used the local DSP planner). */
+  aiNotice?: string | null;
   onChangeOperatingMode: (mode: DirectorOperatingMode) => void;
   onChangeObjectiveId: (id: MasteringObjectiveId) => void;
   onChangeCustomObjective: (spec: CustomObjectiveSpec) => void;
@@ -171,6 +173,7 @@ export const AiMasterView: React.FC<Props> = ({
   convergenceThreshold,
   aiLoading,
   aiError,
+  aiNotice,
   onChangeOperatingMode,
   onChangeObjectiveId,
   onChangeCustomObjective,
@@ -652,6 +655,12 @@ export const AiMasterView: React.FC<Props> = ({
                 {directorReport.rolledBack ? ' (Rolled Back to Best)' : ''}
               </div>
             )}
+          </div>
+        )}
+
+        {aiNotice && (
+          <div role="status" data-testid="ai-cloud-limit-notice" className="p-2.5 rounded bg-[#F59E0B]/10 border border-[#F59E0B]/40 text-xs text-[#FCD34D]">
+            {aiNotice}
           </div>
         )}
 

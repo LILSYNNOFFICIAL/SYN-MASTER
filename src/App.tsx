@@ -137,6 +137,7 @@ import { requestRefine, requestStrategy } from './ai/masteringClient';
 import { AiProviderChip, AiProviderPanel } from './components/AiProviderPanel';
 import { describeProvider } from './ai/providerAdapters';
 import { getActiveProviderConfig, getBuiltinAccessHeaders, runProviderCall } from './ai/providerStore';
+import { CloudAiRateLimitError, assertCloudAiAvailable, friendlyCloudAiLimitNotice, readBuiltinAiResponse } from './ai/cloudRateLimit';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -315,6 +316,8 @@ export default function App() {
   const [aiStrategy, setAiStrategy] = useState<AIMasteringStrategy | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  // Friendly, non-error notice (for example the cloud AI spend limit: FIX ALL fell back to the local planner).
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
   const [iterations, setIterations] = useState<IterationPass[]>([]);
   const [battleCandidates, setBattleCandidates] = useState<BattleCandidate[]>([]);
   const [battleGenerating, setBattleGenerating] = useState(false);
@@ -1430,6 +1433,7 @@ export default function App() {
 
     directorRunningRef.current = true;
     setAiError(null);
+    setAiNotice(null);
     setAiChainAccepted(null);
     setPreAiChainSnapshot(structuredClone(chain));
     setDirectorRunning(true);
@@ -1485,14 +1489,15 @@ export default function App() {
         };
         // Built-in Gemini (default): exactly the existing server call.
         const builtinStrategy = async () => {
+          // While the server's spend limit cooldown runs, skip the request entirely.
+          assertCloudAiAvailable();
           const res = await fetch('/api/ai/master', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() },
             signal: AbortSignal.timeout(12_000),
             body: JSON.stringify(strategyInput),
           });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || `Server responded ${res.status}`);
+          const data = await readBuiltinAiResponse(res);
           return data.strategy;
         };
         const providerRun = await runProviderCall('strategy', (opts) =>
@@ -1515,7 +1520,14 @@ export default function App() {
         }
       } catch (err) {
         if (!isStale()) {
-          setAiError(err instanceof Error ? err.message : 'Cloud Gemini request failed');
+          if (err instanceof CloudAiRateLimitError) {
+            // Not an error for the user: the run continues on the local DSP planner.
+            const notice = friendlyCloudAiLimitNotice(err);
+            setAiNotice(notice);
+            aiProviderLog.push(`Plan: ${notice}`);
+          } else {
+            setAiError(err instanceof Error ? err.message : 'Cloud Gemini request failed');
+          }
         }
       } finally {
         if (!isStale()) setAiLoading(false);
@@ -1585,19 +1597,28 @@ export default function App() {
           useGeminiCloud && runOperatingMode === 'autonomous'
             ? async (ctx) => {
                 const builtinRefine = async () => {
+                  assertCloudAiAvailable();
                   const res = await fetch('/api/ai/refine', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() },
                     signal: AbortSignal.timeout(12_000),
                     body: JSON.stringify(ctx),
                   });
-                  const data = await res.json();
-                  if (!res.ok) throw new Error(data.error || `Refine error ${res.status}`);
+                  const data = await readBuiltinAiResponse(res);
                   return data.refined;
                 };
-                const run = await runProviderCall('refine', (opts) =>
-                  requestRefine(getActiveProviderConfig(), ctx, builtinRefine, opts),
-                );
+                let run: Awaited<ReturnType<typeof requestRefine>>;
+                try {
+                  run = await runProviderCall('refine', (opts) =>
+                    requestRefine(getActiveProviderConfig(), ctx, builtinRefine, opts),
+                  );
+                } catch (err) {
+                  if (!(err instanceof CloudAiRateLimitError)) throw err;
+                  // Spend limit reached mid-run: this pass is refined by the deterministic director.
+                  const notice = friendlyCloudAiLimitNotice(err);
+                  if (!isStale()) setAiNotice(notice);
+                  return { chain: null, producedBy: null, notices: [notice] };
+                }
                 aiProviderLog.push(...run.notices.map((n) => `Refine: ${n}`));
                 if (run.producedBy) aiProviderLog.push(`Refine: suggestion produced by ${run.producedBy}.`);
                 return { chain: run.result?.chain ?? null, producedBy: run.producedBy, notices: run.notices };
@@ -2422,6 +2443,7 @@ export default function App() {
       onOpenRack={() => setRackWindowOpen(true)}
       onOpenStereoLab={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
       notice={statusNotice}
+      aiNotice={aiNotice}
       onAskAi={() => setActiveTab('ai')}
       onExport={() => setExportModalOpen(true)}
       onSeek={seekTo}
@@ -3147,6 +3169,7 @@ export default function App() {
               convergenceThreshold={convergenceThreshold}
               aiLoading={aiLoading}
               aiError={aiError}
+              aiNotice={aiNotice}
               onChangeOperatingMode={setOperatingMode}
               onChangeObjectiveId={setObjectiveId}
               onChangeCustomObjective={setCustomObjective}

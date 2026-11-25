@@ -68,6 +68,10 @@ export interface MasterConsoleProps {
   onOpenStereoLab: () => void;
   /** Latest app status notice (also shown in the session ribbon on very wide screens). */
   notice?: string | null;
+  /** Friendly AI notice shown under FIX ALL (e.g. cloud AI limit reached, local planner used). */
+  aiNotice?: string | null;
+  /** "What AI changed" list rendered under FIX ALL after a run. */
+  aiChanges?: React.ReactNode;
   /** Peaks of the processed preview render (falls back to the source); drawn as the glowing blanket behind the EQ curve. */
   blanketPeaks?: number[] | null;
   /** Timeline player rendered directly under the EQ panel. */
@@ -369,6 +373,9 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
         <button type="button" className="syn-fixai-stop" onClick={p.onStop}>
           <Square className="w-3 h-3" /> Stop
         </button>
+      )}
+      {p.aiNotice && (
+        <p className="syn-fixai-notice" role="status" data-testid="console-ai-limit-notice">{p.aiNotice}</p>
       )}
     </div>
   );

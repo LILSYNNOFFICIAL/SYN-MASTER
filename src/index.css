@@ -1721,6 +1721,7 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 @keyframes syn-fix-spin { to { transform: rotate(360deg); } }
 .syn-fixai-status { max-width: 260px; text-align: center; font: 700 9px var(--syn-font-body); letter-spacing: .2em; color: var(--syn-gold); text-transform: uppercase; }
 .syn-fixai-stop { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 1px solid var(--syn-bad); border-radius: 999px; color: var(--syn-bad); font-size: 11px; font-weight: 800; letter-spacing: .1em; }
+.syn-fixai-notice { max-width: 300px; margin: 0; padding: 8px 10px; border: 1px solid rgba(245,184,46,.45); border-radius: 10px; background: rgba(245,184,46,.08); color: #FCD9A0; font: 500 11px/1.4 var(--syn-font-body); text-align: center; }
 
 /* Global / presets / loudness */
 .syn-field { display: flex; flex-direction: column; gap: 4px; font: 700 9px var(--syn-font-body); letter-spacing: .14em; color: var(--syn-dim); text-transform: uppercase; }

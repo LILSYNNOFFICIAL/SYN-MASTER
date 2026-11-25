@@ -338,6 +338,18 @@ The `GET /api/health` endpoint reports whether the server process has a non-empt
 
 The AI routes are protected by a process-local fixed-window request limiter: 20 requests per client key per minute. A 429 response includes `Retry-After`.
 
+Because cloud AI is on by default for FIX ALL, the two routes that spend `GEMINI_API_KEY` (`POST /api/ai/master`, `POST /api/ai/refine`) also have spend caps (`src/server/aiSpendLimiter.mjs`), checked after the access-token guard so unauthenticated traffic never uses the budget:
+
+| Limit | Default | Env override |
+| --- | --- | --- |
+| Strategy calls per client per minute | 3 | `SYN_AI_STRATEGY_PER_MINUTE` |
+| Refine calls per client per minute | 12 | `SYN_AI_REFINE_PER_MINUTE` |
+| Strategy calls per client per day | 40 | `SYN_AI_STRATEGY_PER_DAY` |
+| Spending calls (both routes) per client per day | 250 | `SYN_AI_CLIENT_PER_DAY` |
+| Spending calls for the whole server per day | 2000 | `SYN_AI_GLOBAL_PER_DAY` |
+
+All limits are checked before any is spent. A refused call gets HTTP 429 with `Retry-After` and `{ error, code: "ai_rate_limited", scope: "client-minute" | "client-day" | "global-day", retryAfterSec, fallback: "local-dsp-planner" }`. The client (`src/ai/cloudRateLimit.ts`) treats any 429 from these routes as a notice, not an error: FIX ALL carries on with the local DSP planner (strategy) or the deterministic director (refine), shows a friendly amber notice under FIX ALL and in the AI Assistant, and sends no further built-in AI requests until the Retry-After time has passed. Day windows are fixed 24 h windows from the first counted call; counters are in-memory per server instance.
+
 The limiter is in-memory and applies independently to each server instance. If deploying multiple instances, use a shared rate-limit store at the edge or in a shared data service. This limiter is abuse/cost friction, **not user authentication**.
 
 Express proxy trust is disabled by default. If the deployment is behind a known reverse proxy that overwrites forwarding headers, set `TRUST_PROXY_HOPS` to the exact trusted hop count (1-5). Do not enable proxy trust without confirming the ingress topology, because client-supplied forwarding headers must not be trusted.
@@ -603,3 +615,7 @@ Next work, in priority order:
 6. Remove dead old-dashboard CSS and the duplicate `:root` in `src/index.css`; replace native `assert`-based tests with always-on checks where needed.
 
 Rules: continue with small commits directly to `main`; preserve existing work; keep Google AI Studio compatibility (same entry files, assets under `public/`, no new backend/build steps, Gemini key server-only); do not change DSP defaults, the default Gemini provider or the FIX ALL verification loop unless explicitly requested. Update this README as work is verified.
+
+## FIX ALL upgrades (Nov 25, 2026)
+
+- [x] **Cloud AI spend caps** — per-client strategy/refine per-minute caps, per-client daily caps and a global daily cap on the Gemini-spending routes (env-overridable, see "AI endpoint protections and limits"); 429 with a clear message; the client falls back to the local DSP planner, shows a friendly notice and pauses built-in AI calls until Retry-After. `createRateLimiter` gained a non-consuming `peek`. Tests: `src/server/aiSpendLimiter.test.mjs`, `src/server/aiRateLimit.integration.test.mjs` (spawns the production server with no Gemini key), `src/ai/cloudRateLimit.test.ts`.
