@@ -1431,7 +1431,7 @@ export const AiMasterView: React.FC<Props> = ({
       {directorReport && (
         <div
           data-testid="ai-optimization-report"
-          className="p-4 rounded bg-[#111217] border border-[#34D399]/35 flex flex-col gap-3 text-xs"
+          className={`p-4 rounded bg-[#111217] border flex flex-col gap-3 text-xs ${directorReport.status === 'converged' && directorReport.qcReport.failCount === 0 && (directorReport.postFixVerification?.activeFindings ?? []).every((finding) => isSourceLimitationFinding(finding.findingId)) && (directorReport.postFixVerification?.newlyIntroducedFindings.length ?? 0) === 0 ? 'border-[#34D399]/35' : 'border-[#F59E0B]/45'}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
