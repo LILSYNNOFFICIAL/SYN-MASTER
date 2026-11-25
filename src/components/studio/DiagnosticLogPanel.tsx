@@ -73,7 +73,7 @@ export const DiagnosticLogPanel: React.FC<{ log: DiagnosticLog }> = ({ log }) =>
         <ul className="syn2-issues">
           {log.entries.length === 0 && <li className="text-xs text-[#B6A780]">No measured problems.</li>}
           {log.entries.map((e) => (
-            <li key={e.id} className={`syn2-issue sev-${e.severity}`}>
+            <li key={e.id} className={`syn2-issue sev-${e.severity} is-${e.status}`}>
               <div className="syn2-issue-top">
                 {statusIcon(e.status)}
                 <span className="syn2-issue-title">{e.issue}</span>
