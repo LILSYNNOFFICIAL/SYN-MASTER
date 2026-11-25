@@ -118,27 +118,30 @@ test('OpenAI request: json_schema response_format, bearer key, same system promp
   assert.equal(url, 'https://api.openai.com/v1/chat/completions');
   assert.equal(init.headers.Authorization, `Bearer ${KEY}`);
   const body = JSON.parse(init.body);
-  assert.equal(body.model, 'gpt-4.1');
+  assert.equal(body.model, 'gpt-6.2-sol');
   assert.equal(body.messages[0].content, SYSTEM_PROMPT);
   assert.equal(body.response_format.type, 'json_schema');
   assert.deepEqual(body.response_format.json_schema.schema, JSON.parse(JSON.stringify(STRATEGY_JSON_SCHEMA)));
 });
 
-test('Anthropic request: browser header, forced tool with the strategy schema', () => {
+test('Anthropic request: browser header, strategy-schema tool with auto tool_choice', () => {
   const { url, init } = shapeRequest(cfg('anthropic'), REQ);
   assert.equal(url, 'https://api.anthropic.com/v1/messages');
   assert.equal(init.headers['anthropic-dangerous-direct-browser-access'], 'true');
   assert.equal(init.headers['x-api-key'], KEY);
   const body = JSON.parse(init.body);
   assert.equal(body.system, SYSTEM_PROMPT);
-  assert.equal(body.tool_choice.name, body.tools[0].name);
+  // Current Claude models reject a forced tool_choice; "auto" + an explicit instruction is used.
+  assert.deepEqual(body.tool_choice, { type: 'auto' });
+  assert.equal(body.tools[0].name, 'submit_mastering_strategy');
+  assert.match(body.messages[0].content, /submit_mastering_strategy/);
   assert.deepEqual(body.tools[0].input_schema, JSON.parse(JSON.stringify(STRATEGY_JSON_SCHEMA)));
 });
 
 test('Gemini (own key) request: key in header not URL, upper-case responseSchema', () => {
   const { url, init } = shapeRequest(cfg('gemini'), REQ);
   assert.ok(!url.includes(KEY));
-  assert.match(url, /models\/gemini-2\.5-pro:generateContent$/);
+  assert.match(url, /models\/gemini-4-hydrogen:generateContent$/);
   assert.equal(init.headers['x-goog-api-key'], KEY);
   const body = JSON.parse(init.body);
   assert.equal(body.generationConfig.responseSchema.type, 'OBJECT');
