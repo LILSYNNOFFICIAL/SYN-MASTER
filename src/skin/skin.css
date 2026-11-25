@@ -887,3 +887,43 @@ g.is-solo .syn-eqx-node{stroke-dasharray:3 2;}
 .syn-aichg-empty{margin:0;color:var(--skin-muted);}
 @media (max-width:520px){.syn-aichg{max-width:none;}.syn-aichg-list{max-height:none;}}
 @media (prefers-reduced-motion:reduce){.syn-aichg *{transition:none!important;animation:none!important;}}
+/* ---- Vocal Rebalance (rack card + console "Vocal" tab) ---- */
+.syn-vr { display:flex; flex-direction:column; gap:.55rem; padding:.6rem .75rem; min-width:0; }
+.syn-vr.syn-eq-empty { align-items:flex-start; }
+.syn-vr-status { font-size:11px; color:#9CA3AF; display:flex; flex-direction:column; gap:.4rem; }
+.syn-vr-status svg { display:inline-block; vertical-align:-2px; }
+.syn-vr-status .is-ready { color:#7fe9ff; text-shadow:0 0 8px var(--glow-cyan); }
+.syn-vr-need { display:flex; flex-direction:column; gap:.4rem; }
+.syn-vr-warn { margin:0; font-size:11px; color:#f5c66b; }
+.syn-vr-warn.is-block { color:#ff7aa8; }
+.syn-vr-actions { display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; }
+.syn-vr-actions .syn-btn-ghost, .syn-vr-progress .syn-btn-ghost { min-height:36px; }
+.syn-vr-hq { font-size:11px; color:#9CA3AF; display:inline-flex; gap:.3rem; align-items:center; }
+.syn-vr-progress { display:flex; flex-direction:column; gap:.35rem; }
+.syn-vr-progress .syn-progress { display:block; height:4px; border-radius:2px; background:rgba(46,168,255,.15); overflow:hidden; }
+.syn-vr-progress .syn-progress > span { display:block; height:100%; background:linear-gradient(90deg,#2ea8ff,#3fe0ff); box-shadow:0 0 8px var(--glow-cyan); transition:width .3s; }
+.syn-vr-row { display:grid; grid-template-columns:6.5rem minmax(0,1fr) 4.6rem; gap:.5rem; align-items:center; }
+.syn-vr-row.is-off { opacity:.55; }
+.syn-vr-name { font-size:11px; color:#d8c48f; display:inline-flex; gap:.35rem; align-items:center; letter-spacing:.04em; text-transform:uppercase; }
+.syn-vr-row input[type=range] { width:100%; min-width:0; accent-color:#3fe0ff; min-height:28px; }
+.syn-vr-row input[type=range]:focus-visible { outline:2px solid var(--line-blue-strong); outline-offset:2px; }
+.syn-vr-value { font-variant-numeric:tabular-nums; font-size:12px; color:#e8edf6; text-align:right; }
+.syn-vr-meters { display:flex; flex-direction:column; gap:.3rem; padding:.45rem .5rem; border:1px solid var(--line-blue); border-radius:8px; background:rgba(5,10,20,.6); box-shadow:inset 0 0 12px rgba(46,168,255,.12); }
+.syn-vr-meter { display:grid; grid-template-columns:3.4rem minmax(0,1fr); gap:.5rem; align-items:center; }
+.syn-vr-meter-label { font-size:10px; color:#9CA3AF; text-transform:uppercase; letter-spacing:.06em; }
+.syn-vr-meter-track { height:6px; border-radius:3px; background:rgba(255,255,255,.06); overflow:hidden; }
+.syn-vr-meter-fill { display:block; height:100%; width:0; transition:width 80ms linear; }
+.syn-vr-meter-fill.is-vocals { background:linear-gradient(90deg,#2ea8ff,#3fe0ff); box-shadow:0 0 8px var(--glow-cyan); }
+.syn-vr-meter-fill.is-bass { background:linear-gradient(90deg,#8a5cff,#c08bff); box-shadow:0 0 8px rgba(160,110,255,.55); }
+.syn-vr-meter-fill.is-drums { background:linear-gradient(90deg,#b8902f,#f5d27a); box-shadow:0 0 8px rgba(245,210,122,.5); }
+.syn-vr-note { margin:0; font-size:10px; color:#8F7D50; }
+.syn-spin { animation:syn-vr-spin 1s linear infinite; }
+@keyframes syn-vr-spin { to { transform:rotate(360deg); } }
+@media (max-width: 640px) {
+  .syn-vr-row { grid-template-columns:5.2rem minmax(0,1fr) 4.2rem; }
+  .syn-vr-row input[type=range] { min-height:40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .syn-spin { animation:none; }
+  .syn-vr-meter-fill, .syn-vr-progress .syn-progress > span { transition:none; }
+}

@@ -9,6 +9,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type {
+  VocalRebalanceParams,
   BassEnhancerParams,
   CompressorParams,
   DynamicEQParams,
@@ -32,6 +33,7 @@ import type {
 import type { ProcessorMeterTelemetry } from '../dsp/offlineDsp';
 import { createDefaultParams } from '../dsp/chainValidation';
 import { isMatchEqLearned, matchEqPeakCorrectionDb } from '../dsp/matchEq';
+import { VocalRebalancePanel } from './studio/VocalRebalancePanel';
 import {
   BypassButton,
   HorizontalSlider,
@@ -1225,6 +1227,14 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
               </div>
             );
           })()}
+          {module.type === 'vocal-rebalance' && (
+            <VocalRebalancePanel
+              module={module}
+              compact
+              onChange={(next) => setParam<VocalRebalanceParams>(next)}
+              onToggle={(on) => commitUpdate({ ...module, enabled: true, bypassed: !on })}
+            />
+          )}
 
           {module.type === 'dither' && (() => {
             const p = module.params as DitherParams;

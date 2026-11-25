@@ -15,6 +15,7 @@ import type {
   ProcessorType,
   SaturationParams,
   TransientShaperParams,
+  VocalRebalanceParams,
 } from '../../types/mastering';
 import type { DynamicEqTrace, ProcessorMeterTelemetry } from '../../dsp/offlineDsp';
 import { LOUDNESS_TARGET_PRESETS } from '../../dsp/loudnessTargets';
@@ -24,6 +25,7 @@ import { ParametricEQ2 } from '../studio/ParametricEQ2';
 const loadDynamicEQPanel = () => import('../studio/DynamicEQPanel');
 const DynamicEQPanel = React.lazy(() => loadDynamicEQPanel().then(({ DynamicEQPanel }) => ({ default: DynamicEQPanel })));
 const MatchEQPanel = React.lazy(() => import('../studio/MatchEQPanel'));
+const VocalRebalancePanel = React.lazy(() => import('../studio/VocalRebalancePanel'));
 import { SpectrumAndEQCanvas } from '../CanvasVisualizers';
 import { ArcKnob } from './ArcKnob';
 import { GlowFader } from './GlowFader';
@@ -248,7 +250,7 @@ const StepLabel: React.FC<{ n: number; text: string; hint?: string; className?: 
 );
 
 export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
-  const [eqView, setEqView] = useState<'eq' | 'dyneq' | 'matcheq' | 'spectrum' | 'spectrogram'>('eq');
+  const [eqView, setEqView] = useState<'eq' | 'dyneq' | 'matcheq' | 'spectrum' | 'spectrogram' | 'vocal'>('eq');
   // Prefetch the code-split Dynamic EQ editor after first paint so the tab opens instantly.
   useEffect(() => {
     const t = window.setTimeout(() => { void loadDynamicEQPanel(); }, 300);
@@ -284,6 +286,12 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
     const next = [...chain];
     next.splice(at < 0 ? chain.length : at, 0, { ...item.build(), expanded: false });
     p.onChangeChain(next);
+  };
+  const vocalRb = chain.find((m) => m.type === 'vocal-rebalance');
+  // Vocal Rebalance works on source stems, so it always goes first.
+  const addVocalRebalance = () => {
+    const item = MODULE_CATALOG.find((c) => c.type === 'vocal-rebalance');
+    if (item) p.onChangeChain([{ ...item.build(), expanded: false }, ...chain]);
   };
   const ts = find('transient-shaper');
   const comp = find('compressor');
@@ -447,7 +455,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               <p className="syn-eq-sub">{eq ? eq.name : 'Precision · Color · Balance'}{p.sampleRate ? ` · ${(p.sampleRate / 1000).toFixed(1)} kHz` : ''}</p>
             </div>
             <div className="syn-seg" role="group" aria-label="EQ view">
-              {([['eq', 'EQ'], ['dyneq', 'Dynamic EQ'], ['matcheq', 'Match EQ'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
+              {([['eq', 'EQ'], ['dyneq', 'Dynamic EQ'], ['matcheq', 'Match EQ'], ['vocal', 'Vocal'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
                 <button key={id} type="button" aria-pressed={eqView === id} className={eqView === id ? 'is-on' : ''} onClick={() => setEqView(id)}>{label}</button>
               ))}
             </div>
@@ -459,6 +467,15 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
                 onAdd={addMatchEq}
                 onChange={(next) => { if (matchEq) setParams<MatchEqParams>(matchEq, next); }}
                 onToggle={(on) => { if (matchEq) patch(matchEq.id, { enabled: true, bypassed: !on }); }}
+              />
+            </React.Suspense>
+          ) : eqView === 'vocal' ? (
+            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Vocal Rebalance…</p></div>}>
+              <VocalRebalancePanel
+                module={vocalRb}
+                onAdd={addVocalRebalance}
+                onChange={(next) => { if (vocalRb) setParams<VocalRebalanceParams>(vocalRb, next); }}
+                onToggle={(on) => { if (vocalRb) patch(vocalRb.id, { enabled: true, bypassed: !on }); }}
               />
             </React.Suspense>
           ) : eqView === 'dyneq' ? (
