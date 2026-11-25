@@ -805,7 +805,7 @@ export const AiMasterView: React.FC<Props> = ({
                 {actionableActiveFindings.length > 0 && (
                   <div
                     className={`grid grid-cols-1 gap-2 ${
-                      effectiveVerification.activeFindings.length > 1 ? 'md:grid-cols-2' : ''
+                      actionableActiveFindings.length > 1 ? 'md:grid-cols-2' : ''
                     }`}
                   >
                     {actionableActiveFindings.map((vf) => (
