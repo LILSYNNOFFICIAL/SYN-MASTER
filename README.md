@@ -587,7 +587,7 @@ Band design lives in `src/dsp/eqDesign.ts` and is shared by the offline renderer
 ## ChatGPT handoff — next steps (Nov 25, 2026, after commit bf82300)
 
 Current state:
-- `main` is at `bf82300be96a376d114412952a3adf1b54c1dad0` (`feat(ui): rebuild Dynamic EQ with shared Ozone editor`).
+- Dynamic EQ implementation commit: `bf82300be96a376d114412952a3adf1b54c1dad0` (`feat(ui): rebuild Dynamic EQ with shared Ozone editor`). Current `main` also includes the README handoff update at `1470a96b81669d2d2aa47e40a66c87fffb5196ff`.
 - Dynamic EQ now uses the shared Ozone-style graph, band popover and type menu. It has draggable frequency nodes, Q handles, all seven supported curve types, eight-band capacity, threshold/detector display, cut/boost range, ratio, attack/release, knee, channel, custom sidechain and lookahead controls.
 - The panel receives the real preview-render trace, source/master spectra and sample rate. Its live curve and detector meter follow the preview playhead. Stronger cyan/gold/purple glow and reduced-motion handling are in `src/skin/skin.css`.
 - Web CI run [#45636832856](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/runs/45636832856) passed: 293/293 unit tests, TypeScript, production build, 762.5 KiB initial JS chunk budget, production startup smoke test, responsive Chromium checks at 360/375/412/1024/1440 px, and production-browser WAV export containing both timeline fades and Dynamic EQ processing.
