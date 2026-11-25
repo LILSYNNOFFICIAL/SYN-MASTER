@@ -19,6 +19,7 @@ import type {
   TransientShaperParams,
   ClipperParams,
   DitherParams,
+  MatchEqParams,
   MultibandCompParams,
   ParametricEQParams,
   ProcessorModule,
@@ -28,6 +29,7 @@ import type {
   StereoImagerParams,
 } from '../types/mastering';
 import { EQ_CHANNELS, EQ_SUBTYPES, DYNAMIC_EQ_TYPES, allowedSlopes, resolveSubtype } from './eqDesign.ts';
+import { MATCH_EQ_CHANNELS, MATCH_EQ_LIMITS, MATCH_EQ_SMOOTHING_OPTIONS, isValidSpectrumSet } from './matchEq.ts';
 
 /** Band limits shared by the editors and AI validation. */
 export const MAX_EQ_BANDS = 8;
@@ -54,6 +56,7 @@ export const PROCESSOR_DEFAULT_NAMES: Record<ProcessorType, string> = {
   clipper: 'Peak Clipper',
   'multiband-maximizer': 'Multiband Maximizer (Maximus-style)',
   dither: 'Dither',
+  'match-eq': 'Match EQ',
   'external-vst3': 'External VST3 Plugin',
 };
 
@@ -160,6 +163,17 @@ export function createDefaultParams(type: ProcessorType): ProcessorModule['param
       return { attackDb: 2, sustainDb: 0, speedMs: 15, lowCutHz: 80 } satisfies TransientShaperParams;
     case 'dither':
       return { bitDepth: 24, shape: 'tpdf', autoBlank: true } satisfies DitherParams;
+    case 'match-eq':
+      return {
+        amount: 75,
+        smoothing: 3,
+        maxBoostDb: 6,
+        maxCutDb: 6,
+        lowHz: 30,
+        highHz: 18000,
+        channel: 'stereo',
+        phase: 'linear',
+      } satisfies MatchEqParams;
     case 'clipper':
       return { ceilingDb: -0.8, driveDb: 1.5, softness: 60, oversampling: 4 } satisfies ClipperParams;
     case 'multiband-maximizer':
@@ -445,6 +459,28 @@ export function validateProcessorParams(
         autoBlank: typeof src.autoBlank === 'boolean' ? src.autoBlank : def.autoBlank,
       };
     }
+    case 'match-eq': {
+      const def = defaults as MatchEqParams;
+      const sm = Number(src.smoothing);
+      const lowHz = clamp(Number(src.lowHz), MATCH_EQ_LIMITS.lowHz[0], MATCH_EQ_LIMITS.lowHz[1], def.lowHz);
+      const out: MatchEqParams = {
+        amount: clamp(Number(src.amount), MATCH_EQ_LIMITS.amount[0], MATCH_EQ_LIMITS.amount[1], def.amount),
+        smoothing: (MATCH_EQ_SMOOTHING_OPTIONS as number[]).includes(sm) ? (sm as MatchEqParams['smoothing']) : def.smoothing,
+        maxBoostDb: clamp(Number(src.maxBoostDb), MATCH_EQ_LIMITS.maxBoostDb[0], MATCH_EQ_LIMITS.maxBoostDb[1], def.maxBoostDb),
+        maxCutDb: clamp(Math.abs(Number(src.maxCutDb)), MATCH_EQ_LIMITS.maxCutDb[0], MATCH_EQ_LIMITS.maxCutDb[1], def.maxCutDb),
+        lowHz,
+        highHz: clamp(Number(src.highHz), Math.max(MATCH_EQ_LIMITS.highHz[0], lowHz * 2), MATCH_EQ_LIMITS.highHz[1], Math.max(def.highHz, lowHz * 2)),
+        channel: (MATCH_EQ_CHANNELS as string[]).includes(String(src.channel)) ? (src.channel as MatchEqParams['channel']) : def.channel,
+        phase: src.phase === 'minimum' ? 'minimum' : 'linear',
+      };
+      // Learned spectra are kept only when complete and finite (fixed 1/24-octave grid).
+      if (isValidSpectrumSet(src.source) && isValidSpectrumSet(src.reference)) {
+        out.source = { stereo: [...src.source.stereo], mid: [...src.source.mid], side: [...src.source.side] };
+        out.reference = { stereo: [...src.reference.stereo], mid: [...src.reference.mid], side: [...src.reference.side] };
+        if (typeof src.referenceName === 'string' && src.referenceName) out.referenceName = src.referenceName.slice(0, 160);
+      }
+      return out;
+    }
     case 'clipper': {
       const def = defaults as ClipperParams;
       const os = Number(src.oversampling);
@@ -541,6 +577,7 @@ const VALID_TYPES = new Set<ProcessorType>([
   'clipper',
   'multiband-maximizer',
   'dither',
+  'match-eq',
   'external-vst3',
 ]);
 

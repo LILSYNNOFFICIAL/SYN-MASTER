@@ -13,6 +13,7 @@ export type ProcessorType =
   | 'clipper'
   | 'multiband-maximizer'
   | 'dither'
+  | 'match-eq'
   | 'external-vst3';
 
 export type MasteringMode =
@@ -299,6 +300,45 @@ export interface ExternalVST3Params {
   parameters: ExternalPluginParamValue[];
 }
 
+/** Match EQ channel mode: whole stereo signal, mid (L+R)/2 only, or side (L-R)/2 only. */
+export type MatchEqChannel = 'stereo' | 'mid' | 'side';
+/** Fractional-octave smoothing denominator: 1 = 1/1 octave ... 24 = 1/24 octave. */
+export type MatchEqSmoothing = 1 | 2 | 3 | 6 | 12 | 24;
+
+/**
+ * Long-term average spectra (dB power) sampled on the fixed 1/24-octave grid MATCH_EQ_GRID_HZ
+ * (src/dsp/matchEq.ts), one array per channel view.
+ */
+export interface MatchEqSpectrumSet {
+  stereo: number[];
+  mid: number[];
+  side: number[];
+}
+
+/**
+ * Match EQ (Ozone-style): learns the long-term average spectrum of the source and of a
+ * reference and applies a smoothed, limited correction curve. The learned spectra live in
+ * the params so renders, presets and saved projects are deterministic. Without both spectra
+ * the processor is a pass-through.
+ */
+export interface MatchEqParams {
+  /** 0-100 % of the correction curve. */
+  amount: number;
+  smoothing: MatchEqSmoothing;
+  /** Largest boost / cut the curve may apply (positive dB, 0-12). */
+  maxBoostDb: number;
+  maxCutDb: number;
+  /** Correction fades to 0 dB outside [lowHz, highHz]. */
+  lowHz: number;
+  highHz: number;
+  channel: MatchEqChannel;
+  /** Offline FIR design. 'linear' = latency-compensated linear phase; 'minimum' = minimum phase. */
+  phase: 'linear' | 'minimum';
+  source?: MatchEqSpectrumSet | null;
+  reference?: MatchEqSpectrumSet | null;
+  referenceName?: string;
+}
+
 export type ProcessorParams =
   | { type: 'parametric-eq'; data: ParametricEQParams }
   | { type: 'dynamic-eq'; data: DynamicEQParams }
@@ -314,6 +354,7 @@ export type ProcessorParams =
   | { type: 'clipper'; data: ClipperParams }
   | { type: 'multiband-maximizer'; data: MultibandMaximizerParams }
   | { type: 'dither'; data: DitherParams }
+  | { type: 'match-eq'; data: MatchEqParams }
   | { type: 'external-vst3'; data: ExternalVST3Params };
 
 export interface ProcessorModule {

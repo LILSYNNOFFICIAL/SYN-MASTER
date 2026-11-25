@@ -3,6 +3,7 @@ import type {
   ClipperParams,
   CompressorParams,
   LimiterParams,
+  MatchEqParams,
   MaximizerParams,
   MultibandCompParams,
   MultibandMaximizerParams,
@@ -16,6 +17,7 @@ import type {
 import { dbToLinear, linearToDb } from '../dsp/analyzer';
 import { isLegacyEq } from '../dsp/eqDesign';
 import { buildExtendedEqGraph } from './eqGraph';
+import { matchEqRealtimeImpulse } from '../dsp/matchEq';
 
 export type AudioLatencyMode = 'interactive' | 'balanced' | 'playback';
 
@@ -646,6 +648,23 @@ export class SynAudioEngine {
         }
         restoreNodes[restoreNodes.length - 1].connect(wetGain);
         trackNodes(restoreNodes);
+      } else if (mod.type === 'match-eq') {
+        // Realtime approximation: minimum-phase FIR (no latency) in a true-stereo convolver,
+        // whose 4-channel IR also encodes the mid/side routing. The offline render (linear
+        // phase by default) is what mastered playback, Fix All and export use.
+        const ir = matchEqRealtimeImpulse(mod.params as MatchEqParams, this.ctx.sampleRate, intensity);
+        if (!ir) {
+          stageIn.connect(wetGain);
+        } else {
+          const conv = this.ctx.createConvolver();
+          conv.normalize = false;
+          const buf = this.ctx.createBuffer(4, ir[0].length, this.ctx.sampleRate);
+          ir.forEach((ch, i) => buf.copyToChannel(ch as Float32Array<ArrayBuffer>, i));
+          conv.buffer = buf;
+          stageIn.connect(conv);
+          conv.connect(wetGain);
+          trackNodes([conv]);
+        }
       } else if (mod.type === 'dynamic-eq') {
         // A static BiquadFilterNode cannot reproduce the offline detector envelope.
         // Keep this fallback neutral; mastered playback uses the exact offline render

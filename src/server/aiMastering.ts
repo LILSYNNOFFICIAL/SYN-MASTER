@@ -66,7 +66,7 @@ const PROCESSOR_SCHEMA = {
     type: {
       type: Type.STRING,
       description:
-        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither',
+        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither, match-eq',
     },
     name: { type: Type.STRING },
     intensity: { type: Type.NUMBER, description: '0 to 100' },

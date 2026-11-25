@@ -8,7 +8,8 @@ import {
 } from './processorInventory.ts';
 
 test('inventory exposes all native processor types with explicit metadata', () => {
-  assert.equal(Object.keys(VERIFIED_NATIVE_PROCESSOR_INVENTORY).length, 14);
+  assert.equal(Object.keys(VERIFIED_NATIVE_PROCESSOR_INVENTORY).length, 15);
+  assert.ok('match-eq' in VERIFIED_NATIVE_PROCESSOR_INVENTORY);
   for (const descriptor of Object.values(VERIFIED_NATIVE_PROCESSOR_INVENTORY)) {
     assert.ok(descriptor.displayName.length > 0);
     assert.ok(descriptor.maxRecommendedInstances >= 1);

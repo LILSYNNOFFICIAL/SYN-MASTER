@@ -75,7 +75,8 @@ Valid paramsJson schemas by processor type:
 11. "transient-shaper": {"attackDb":-12..12,"sustainDb":-12..12,"speedMs":2..60,"lowCutHz":20..300}
 12. "clipper": {"ceilingDb":-6..0,"driveDb":0..12,"softness":0..100,"oversampling":1|2|4} (place before the limiter)
 13. "multiband-maximizer": {"lowCrossHz":number,"highCrossHz":number,"low":{"preGainDb":number,"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"postGainDb":number,"bypass":false},"mid":{...same},"high":{...same},"ceilingDb":number,"releaseMs":number}
-14. "dither": {"bitDepth":16|20|24,"shape":"tpdf"|"tpdf-hp"|"shaped","autoBlank":true} (always LAST; only when delivering below 32-bit float)`;
+14. "dither": {"bitDepth":16|20|24,"shape":"tpdf"|"tpdf-hp"|"shaped","autoBlank":true} (always LAST; only when delivering below 32-bit float)
+15. "match-eq": {"amount":0-100,"smoothing":1|2|3|6|12|24,"maxBoostDb":0-12,"maxCutDb":0-12,"lowHz":20-2000,"highHz":1000-20000,"channel":"stereo"|"mid"|"side","phase":"linear"|"minimum"} (Ozone-style Match EQ: the engine learns the long-term average spectrum of the source and of the loaded REFERENCE track and applies amount% of the smoothed difference, limited to maxBoostDb / maxCutDb and faded out below lowHz / above highHz; it matches tonal shape, not loudness. ONLY when the prompt says Match EQ is AVAILABLE; at most one; place it early (after restore, before other EQ and dynamics). Stay conservative: amount 30-60, smoothing 3 or wider (1/3 octave or 1/1-1/2 for broad tilt), maxBoostDb/maxCutDb 1.5-3, lowHz >= 30, highHz <= 16000, "stereo" unless the reference differs mainly in side/mid balance. Never send learned spectra; the engine supplies them.)`;
 
 /** What each user-selected Mode asks of the strategy. Sent as its own line next to the Objective. */
 export const MODE_MEANINGS: Record<MasteringMode, string> = {
@@ -95,6 +96,25 @@ export function formatModeLine(mode: MasteringMode): string {
   return `Mode: ${mode} — ${MODE_MEANINGS[mode] ?? 'user-selected mastering mode'}`;
 }
 
+/** Match EQ needs a learned reference spectrum; the app learns one whenever a reference track is loaded. */
+export function formatMatchEqAvailability(referenceLoaded: boolean): string {
+  return referenceLoaded
+    ? 'Match EQ: AVAILABLE (reference long-term spectrum learned). You may add one conservative "match-eq" to move the tonal balance toward the reference.'
+    : 'Match EQ: NOT AVAILABLE (no reference track loaded). Do not use "match-eq".';
+}
+
+/** Chain JSON for prompts: Match EQ learned spectra (hundreds of numbers) are summarised, not sent. */
+export function chainForPrompt(chain: ProcessorModule[]) {
+  return chain.map((m) => {
+    let params: unknown = m.params;
+    if (m.type === 'match-eq' && params && typeof params === 'object') {
+      const { source, reference, ...rest } = params as unknown as Record<string, unknown>;
+      params = { ...rest, learned: Boolean(source && reference) };
+    }
+    return { type: m.type, name: m.name, intensity: m.intensity, wetDry: m.wetDry, params };
+  });
+}
+
 export function buildStrategyUserPrompt(input: StrategyPromptInput): string {
   const promptParts = [
     summarizeAnalysisForPrompt('SOURCE TRACK MEASUREMENTS', input.analysis),
@@ -109,6 +129,7 @@ export function buildStrategyUserPrompt(input: StrategyPromptInput): string {
     input.referenceAnalysis
       ? summarizeAnalysisForPrompt('REFERENCE TRACK MEASUREMENTS', input.referenceAnalysis)
       : '',
+    formatMatchEqAvailability(Boolean(input.referenceAnalysis)),
     'Design an optimal, explainable surgical mastering chain ending with a limiter or maximizer, explicitly stating supporting telemetry and potential tradeoffs in each processor reason.',
   ].filter(Boolean);
   return promptParts.join('\n\n');
@@ -127,7 +148,7 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
     summarizeAnalysisForPrompt('ORIGINAL SOURCE', input.preAnalysis),
     summarizeAnalysisForPrompt('CURRENT PROCESSED PASS', input.postAnalysis),
     `INDEPENDENT SYN-QC EVALUATION:\n${qcSummary}`,
-    `Current Chain JSON:\n${JSON.stringify(input.currentChain.map((m) => ({ type: m.type, name: m.name, intensity: m.intensity, wetDry: m.wetDry, params: m.params })))}`,
+    `Current Chain JSON:\n${JSON.stringify(chainForPrompt(input.currentChain))}`,
     `Objectives: Target LUFS=${input.targetLufs}, Max True Peak=${input.targetTruePeakDb} dBTP, Preserve Dynamics=${input.preserveDynamics}`,
     'Evaluate unintended degradation (excessive limiting, distortion/THD, phase loss, L/R imbalance, noise floor, LUFS miss) and output a refined chain resolving QC warnings/failures without degrading dynamics.',
   ].join('\n\n');
@@ -141,7 +162,7 @@ export const PROCESSOR_JSON_SCHEMA = {
     type: {
       type: 'string',
       description:
-        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither',
+        'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither, match-eq',
     },
     name: { type: 'string' },
     intensity: { type: 'number', description: '0 to 100' },

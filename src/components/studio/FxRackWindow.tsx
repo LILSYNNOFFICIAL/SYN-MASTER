@@ -37,6 +37,7 @@ const TYPE_BADGE: Record<ProcessorType, string> = {
   clipper: 'CLIP',
   'multiband-maximizer': 'MBMX',
   dither: 'DTHR',
+  'match-eq': 'MEQ',
   'external-vst3': 'VST3',
 };
 

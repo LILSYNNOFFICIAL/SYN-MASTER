@@ -49,6 +49,8 @@ import type {
   StemIntelligenceReport,
 } from '../types/mastering';
 import { validateChain } from '../dsp/chainValidation';
+import { directorMatchEqCommand, directorMatchEqPeakDb, hydrateMatchEqChain, type MatchEqProfile } from './matchEqDirector';
+import { learnMatchEqSpectrum } from '../dsp/matchEq';
 import type { StemInput, StemSetAnalysis } from '../dsp/stemAnalysis';
 import { renderStemBusMix } from '../dsp/stemBusRenderer';
 import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
@@ -298,6 +300,8 @@ export function buildExplainableMasterPlan(input: {
   externalPlugins?: ExternalPluginRecord[];
   hostConnected?: boolean;
   stemAnalysis?: StemSetAnalysis | null;
+  /** Learned source/reference spectra; enables one conservative Match EQ (reference only). */
+  matchEqProfile?: MatchEqProfile | null;
 }): ExplainableMasterPlan {
   const { analysis, objectiveId, customSpec, referenceAnalysis } = input;
   const objective = resolveObjectiveTarget(objectiveId, customSpec, referenceAnalysis);
@@ -448,6 +452,27 @@ export function buildExplainableMasterPlan(input: {
       expectedResult: 'Lower quiet-passage noise floor and reclaim symmetric headroom without dulling transients.',
       potentialTradeoffs: 'Excessive hiss reduction can soften ambient air tails; kept in conservative mode.',
       priority: analysis.dcOffset >= 0.006 || nf > -42 ? 'critical' : 'recommended',
+      statementType: 'hypothesis',
+    });
+  }
+
+  // Stage 1b: Match EQ toward the reference (only with a learned reference; conservative).
+  const matchEqCommand = referenceAnalysis ? directorMatchEqCommand(input.matchEqProfile) : null;
+  if (matchEqCommand) {
+    recommendations.push({
+      id: 'rec-match-eq',
+      characteristic: 'Long-term tonal balance differs from the loaded reference',
+      supportingMeasurements: [
+        `Learned spectra: source vs ${input.matchEqProfile?.referenceName ?? 'reference'} (1/24-octave LTAS)`,
+        `Peak correction at 40 % / ±2.5 dB: ${directorMatchEqPeakDb(input.matchEqProfile).toFixed(1)} dB`,
+      ],
+      proposedCorrection: 'Apply 40 % of the 1/3-octave-smoothed reference match curve, limited to ±2.5 dB between 40 Hz and 16 kHz.',
+      selectedProcessor: 'match-eq',
+      proposedParamsSummary: 'Amount 40 % · Smoothing 1/3 oct · Max ±2.5 dB · 40 Hz-16 kHz · Stereo · Linear phase',
+      commands: [matchEqCommand],
+      expectedResult: 'Tonal shape moves part of the way toward the reference without copying its loudness or mix decisions.',
+      potentialTradeoffs: 'A reference with a different arrangement can pull the wrong way; kept at 40 % with tight limits and re-measured every pass.',
+      priority: 'optional',
       statementType: 'hypothesis',
     });
   }
@@ -1810,6 +1835,11 @@ export interface RunAutonomousDirectorOptions {
   externalProcessor?: ExternalPluginProcessCallback;
   /** Timeline fades applied after the chain on every render the loop measures. */
   postFades?: FadeSettings | null;
+  /**
+   * Learned reference spectra (Match EQ). The loop learns the source side itself from the
+   * rendered source timeline. Without it, unlearned Match EQ stages are removed.
+   */
+  matchEqReference?: { spectra: MatchEqProfile['reference']; name?: string } | null;
   renderPassFn?: (
     channels: Float32Array[],
     sampleRate: number,
@@ -2144,11 +2174,21 @@ export async function runAutonomousDirectorLoop(
   const qcProfile: QCTargetProfile = alignQcProfileToObjective(opts.qcProfile ?? QC_TARGET_PROFILES[0], objective);
 
   emit('Planning', 0, undefined, undefined, undefined, 'Planning');
+  // Match EQ profile: reference spectra from the caller, source learned from this timeline.
+  let matchEqProfile: MatchEqProfile | null = null;
+  if (opts.matchEqReference && opts.referenceAnalysis) {
+    const learnedSource = learnMatchEqSpectrum(passSourceChannels, opts.sampleRate);
+    if (learnedSource) {
+      matchEqProfile = { source: learnedSource, reference: opts.matchEqReference.spectra, referenceName: opts.matchEqReference.name };
+    }
+  }
+
   const plan = buildExplainableMasterPlan({
     analysis: preAnalysis,
     objectiveId: opts.objectiveId,
     customSpec: opts.customSpec,
     referenceAnalysis: opts.referenceAnalysis,
+    matchEqProfile,
     stemAnalysis: resolvedStemAnalysis,
     externalPlugins: opts.externalPlugins,
     hostConnected: opts.hostConnected,
@@ -2246,9 +2286,13 @@ export async function runAutonomousDirectorLoop(
   }
 
   // Initial working chain: use validated Gemini or initialChain in Assisted if user wants refinement, else planned chain
+  // Match EQ stages proposed by the AI carry no spectra: hydrate them from the learned profile
+  // and hold them to the Director's conservative ceiling; without a reference, drop them.
+  const prepareChain = (c: ProcessorModule[], fromAi: boolean) =>
+    hydrateMatchEqChain(c, matchEqProfile, { dropUnlearned: true, conservative: fromAi });
   let workingChain: ProcessorModule[] =
     opts.initialChain && opts.initialChain.length > 0
-      ? validateChain(structuredClone(opts.initialChain))
+      ? prepareChain(validateChain(structuredClone(opts.initialChain)), true)
       : structuredClone(plan.chain);
 
   emit(
@@ -2587,7 +2631,7 @@ export async function runAutonomousDirectorLoop(
           if (candidateAiChain) {
             const invCheck = validateChainAgainstInventory(candidateAiChain);
             if (invCheck.valid) {
-              nextChainFromAi = invCheck.sanitizedChain;
+              nextChainFromAi = prepareChain(invCheck.sanitizedChain, true);
             } else {
               emit(
                 'Optimizing',
