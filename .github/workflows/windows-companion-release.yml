@@ -1,0 +1,109 @@
+name: Windows VST Companion Release
+
+# Builds the loopback VST3 companion (syn-plugin-host + scanner + worker) and,
+# for a pushed v* tag, attaches a zip to a GitHub Release. workflow_dispatch
+# builds and uploads the zip as a workflow artifact only (no release).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: companion-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Use the Ninja preset inside an MSVC developer shell so the build does
+      # not depend on which Visual Studio generator windows-latest ships.
+      - name: Set up MSVC developer environment (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Ensure Ninja is available
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja --no-progress -y }
+          ninja --version
+          cmake --version
+
+      - name: Configure CMake (Ninja x64 Release)
+        working-directory: native
+        run: cmake --preset windows-x64-ninja
+
+      - name: Build companion host, scanner, worker, and core tests
+        working-directory: native
+        run: >
+          cmake --build --preset windows-x64-ninja --parallel
+          --target syn-plugin-host syn-plugin-scanner syn-plugin-worker syn_core_tests
+
+      - name: Run native core tests
+        working-directory: native
+        run: ctest --test-dir build/windows-x64-ninja --output-on-failure
+
+      - name: Package companion zip
+        id: pkg
+        shell: pwsh
+        run: |
+          $ref = '${{ github.ref_name }}'
+          if ('${{ github.ref_type }}' -eq 'tag') { $version = $ref } else { $version = "dev-$('${{ github.sha }}'.Substring(0,7))" }
+          $name = "SYN-MASTER-VST-Companion-$version-win-x64"
+          $bin = 'native/build/windows-x64-ninja/Release'
+          $stage = "dist-companion/$name"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          foreach ($exe in 'syn-plugin-host.exe','syn-plugin-scanner.exe','syn-plugin-worker.exe') {
+            $src = Join-Path $bin $exe
+            if (-not (Test-Path $src)) { throw "Missing build output: $src" }
+            Copy-Item $src $stage
+          }
+          Copy-Item native/companion-release/README.txt "$stage/README.txt"
+          Copy-Item docs/THIRD_PARTY_NOTICES.md "$stage/THIRD_PARTY_NOTICES.md"
+          $zip = "dist-companion/$name.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "$zip.sha256"
+          Get-ChildItem dist-companion -File | Format-Table Name, Length
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          "name=$name" >> $env:GITHUB_OUTPUT
+
+      - name: Upload companion zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.name }}
+          if-no-files-found: error
+          path: |
+            ${{ steps.pkg.outputs.zip }}
+            ${{ steps.pkg.outputs.zip }}.sha256
+
+      - name: Create or update GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $zip = '${{ steps.pkg.outputs.zip }}'
+          $notes = @"
+          SYN-MASTER Windows VST3 companion $tag (unsigned, x64).
+
+          Unzip, run syn-plugin-host.exe, and pair from the SYN-MASTER web app with the SYN-XXXX-XXXX code it prints.
+          Loopback only: HTTP 127.0.0.1:47832, WebSocket 127.0.0.1:47833.
+          Windows SmartScreen will warn because the build is not code-signed: More info -> Run anyway. See README.txt in the zip.
+          "@
+          gh release view $tag --repo '${{ github.repository }}' *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo '${{ github.repository }}' --title "SYN-MASTER VST Companion $tag" --notes $notes --prerelease
+            if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+          }
+          gh release upload $tag $zip "$zip.sha256" --repo '${{ github.repository }}' --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
