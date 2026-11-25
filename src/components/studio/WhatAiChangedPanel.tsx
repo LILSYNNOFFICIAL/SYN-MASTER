@@ -41,7 +41,12 @@ function EntryRow({ entry, status, onUndo, onRedo, disabled }: {
     <li className={`syn-aichg-item is-${entry.kind} is-${status}`} data-testid="ai-change-entry" data-kind={entry.kind} data-status={status}>
       <div className="syn-aichg-head">
         <span className={`syn-aichg-badge is-${entry.kind}`}>{kindLabel}</span>
-        <span className="syn-aichg-name">{entry.name}</span>
+        <span className="syn-aichg-name">
+          {entry.name}
+          {entry.before && entry.after && entry.before.name !== entry.after.name && (
+            <small className="syn-aichg-was">was {entry.before.name}</small>
+          )}
+        </span>
         {entry.moved && <span className="syn-aichg-move">slot {entry.moved.from} → {entry.moved.to}</span>}
         {STATUS_LABEL[status] && <span className="syn-aichg-status">{STATUS_LABEL[status]}</span>}
         {status === 'reverted' ? (
@@ -59,7 +64,7 @@ function EntryRow({ entry, status, onUndo, onRedo, disabled }: {
       {rows.length > 0 && (
         <ul className="syn-aichg-params">
           {rows.map((c) => (
-            <li key={c.path}>
+            <li key={c.path} className={c.afterText !== undefined ? 'is-band' : undefined}>
               <span className="syn-aichg-plabel">{c.label}</span>
               <span className="syn-aichg-pvals">
                 {entry.kind === 'changed' ? (

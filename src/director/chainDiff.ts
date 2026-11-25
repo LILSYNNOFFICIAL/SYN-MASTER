@@ -43,9 +43,9 @@ export interface ChainDiffEntry {
 export type ChainDiffStatus = 'applied' | 'reverted' | 'diverged';
 
 /** UI / host-session state that is not a sound decision and must never count as a change. */
-const IGNORED_TOP_LEVEL = new Set(['id', 'expanded', 'type']);
+const IGNORED_TOP_LEVEL = new Set(['id', 'expanded', 'type', 'name', 'presetName', 'group']);
 const IGNORED_PARAM_KEYS = new Set(['instanceId', 'status', 'editorOpen', 'lastError', 'solo']);
-const TOP_LEVEL_ORDER = ['enabled', 'bypassed', 'intensity', 'wetDry', 'inputGainDb', 'outputGainDb', 'name', 'presetName', 'group'];
+const TOP_LEVEL_ORDER = ['enabled', 'bypassed', 'intensity', 'wetDry', 'inputGainDb', 'outputGainDb'];
 const FLOAT_EPS = 1e-9;
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -196,6 +196,15 @@ function diffBandLists(path: string, before: Array<Record<string, unknown>>, aft
   });
 }
 
+const UNIT_WORDS = new Set(['dB', 'Hz', 'kHz', 'ms', 'LUFS', 'dBTP']);
+
+/** Label for a leaf key whose value is displayed with its unit: `thresholdDb` → `Threshold`. */
+export function leafLabel(key: string): string {
+  const words = humanizeKey(key).split(' ');
+  if (words.length > 1 && UNIT_WORDS.has(words[words.length - 1])) words.pop();
+  return words.join(' ');
+}
+
 function walk(
   a: unknown,
   b: unknown,
@@ -208,7 +217,7 @@ function walk(
     const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])];
     for (const k of keys) {
       if (IGNORED_PARAM_KEYS.has(k)) continue;
-      walk(a[k], b[k], path ? `${path}.${k}` : k, [...labelParts, humanizeKey(k)], out);
+      walk(a[k], b[k], path ? `${path}.${k}` : k, [...labelParts, leafLabel(k)], out);
     }
     return;
   }
@@ -242,7 +251,7 @@ export function diffModuleFields(before: ProcessorModule, after: ProcessorModule
   });
   for (const k of keys) {
     if (k === 'params') walk(b[k], a[k], 'params', [], out);
-    else walk(b[k], a[k], k, [humanizeKey(k)], out);
+    else walk(b[k], a[k], k, [leafLabel(k)], out);
   }
   return out;
 }
@@ -255,7 +264,7 @@ export function summarizeModuleParams(mod: ProcessorModule, limit = 8): ChainPar
     if (isPlainObject(v)) {
       for (const [k, child] of Object.entries(v)) {
         if (IGNORED_PARAM_KEYS.has(k)) continue;
-        visit(child, `${path}.${k}`, [...labels, humanizeKey(k)]);
+        visit(child, `${path}.${k}`, [...labels, leafLabel(k)]);
       }
       return;
     }
@@ -276,8 +285,8 @@ export function summarizeModuleParams(mod: ProcessorModule, limit = 8): ChainPar
     }
   };
   visit(mod.params, 'params', []);
-  if (mod.outputGainDb && out.length < limit) out.push({ path: 'outputGainDb', label: 'Output gain dB', before: undefined, after: mod.outputGainDb });
-  if (mod.inputGainDb && out.length < limit) out.push({ path: 'inputGainDb', label: 'Input gain dB', before: undefined, after: mod.inputGainDb });
+  if (mod.outputGainDb && out.length < limit) out.push({ path: 'outputGainDb', label: 'Output gain', before: undefined, after: mod.outputGainDb });
+  if (mod.inputGainDb && out.length < limit) out.push({ path: 'inputGainDb', label: 'Input gain', before: undefined, after: mod.inputGainDb });
   return out;
 }
 
@@ -474,12 +483,11 @@ export function formatDiffValue(value: unknown, path = ''): string {
     const key = path.split(/[.[\]]/).filter(Boolean).pop() ?? '';
     const unit = UNIT_SUFFIXES.find(([re]) => re.test(key))?.[1] ?? '';
     const abs = Math.abs(value);
-    let s: string;
     if (unit === ' Hz' && abs >= 1000) return `${(value / 1000).toFixed(abs >= 10000 ? 1 : 2).replace(/\.?0+$/, '')} kHz`;
+    let s: string;
     if (Number.isInteger(value)) s = String(value);
-    else if (abs >= 100) s = value.toFixed(0);
-    else if (abs >= 10) s = value.toFixed(1);
-    else s = value.toFixed(2);
+    else s = String(Number(value.toFixed(abs >= 100 ? 0 : abs >= 10 ? 1 : 2)));
+    s = s.replace('-', '−');
     return `${s}${unit}`;
   }
   if (typeof value === 'string') return value.length > 28 ? `${value.slice(0, 27)}…` : value;

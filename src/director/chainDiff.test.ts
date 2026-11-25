@@ -8,6 +8,7 @@ import {
   diffEntryStatus,
   formatDiffValue,
   humanizeKey,
+  leafLabel,
   modulesEquivalent,
   reapplyDiffEntry,
   revertAllDiffEntries,
@@ -182,6 +183,13 @@ test('reordering is reported as a move and reverts to the original slot', () => 
   assert.deepEqual(all.map((m) => m.id), ['eq', 'comp', 'lim']);
 });
 
+test('a rename alone is not a sound change', () => {
+  const before = baseChain();
+  const after = clone(before);
+  after[1].name = 'Transient-Safe Bus Comp';
+  assert.deepEqual(diffChains(before, after), []);
+});
+
 test('external VST3 session state is not a change', () => {
   const vst = createProcessorModule('external-vst3', { id: 'v' });
   const a = clone(vst);
@@ -193,7 +201,9 @@ test('external VST3 session state is not a change', () => {
 test('formatting helpers', () => {
   assert.equal(humanizeKey('outputGainDb'), 'Output gain dB');
   assert.equal(humanizeKey('freqHz'), 'Freq Hz');
-  assert.equal(formatDiffValue(-1.234, 'params.ceilingDb'), '-1.23 dB');
+  assert.equal(formatDiffValue(-1.234, 'params.ceilingDb'), '−1.23 dB');
+  assert.equal(formatDiffValue(2.2, 'params.ratio'), '2.2');
+  assert.equal(leafLabel('thresholdDb'), 'Threshold');
   assert.equal(formatDiffValue(12000, 'params.freqHz'), '12 kHz');
   assert.equal(formatDiffValue(3150, 'params.freqHz'), '3.15 kHz');
   assert.equal(formatDiffValue(true, 'bypassed'), 'bypassed');

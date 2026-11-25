@@ -858,7 +858,14 @@ g.is-solo .syn-eqx-node{stroke-dasharray:3 2;}
 @media (max-width:480px){.syn-meq-controls,.syn-meq-presets{grid-template-columns:1fr 1fr;}}
 /* ── "What AI changed" list (FIX ALL diff with per-module undo) ── */
 .syn-aichg{width:100%;max-width:420px;box-sizing:border-box;margin-top:4px;padding:10px;border:1px solid var(--skin-gold-line);border-radius:12px;background:var(--skin-glass-2);color:var(--skin-text);font:500 11px/1.4 var(--syn-font-body, inherit);text-align:left;}
-.syn-ai-master-view .syn-aichg, section .syn-aichg{max-width:none;}
+.syn-aichg-host-wide .syn-aichg{max-width:none;}
+.syn-aichg{container-type:inline-size;}
+.syn-fixai-wrap > .syn-aichg{align-self:stretch;margin-inline:auto;}
+.syn-fixai-wrap:has(> .syn-aichg){align-self:stretch;}
+.syn-aichg-was{display:block;font-size:9.5px;font-weight:500;color:var(--skin-muted);}
+.syn-aichg-params li.is-band{display:block;}
+.syn-aichg-params li.is-band .syn-aichg-pvals{display:block;text-align:left;}
+@container (max-width:300px){.syn-aichg-params li{display:block;}.syn-aichg-pvals{display:block;text-align:left;}.syn-aichg-head .syn-aichg-btn{margin-left:auto;}}
 .syn-aichg-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;}
 .syn-aichg-title{margin:0;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--skin-gold);}
 .syn-aichg-count{display:inline-block;min-width:18px;margin-left:4px;padding:0 5px;border-radius:9px;background:rgba(245,184,46,.16);color:var(--skin-gold-bright);text-align:center;letter-spacing:0;}

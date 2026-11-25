@@ -667,7 +667,7 @@ export const AiMasterView: React.FC<Props> = ({
           </div>
         )}
 
-        {aiChanges}
+        {aiChanges && <div className="syn-aichg-host-wide">{aiChanges}</div>}
 
         {aiError && (
           <div className="p-2.5 rounded bg-[#EF4444]/10 border border-[#EF4444]/40 text-xs text-[#FCA5A5]">
