@@ -278,7 +278,20 @@ export default function App() {
     stereoPreference: 'preserve',
     preserveTransients: true,
   });
-  const [useGeminiCloud, setUseGeminiCloud] = useState(false);
+  // Cloud AI reasoning is on by default (owner decision 2026-11-25); the user's own choice in
+  // AI Director → Safeguards & Cloud is remembered. Failures fall back to the local DSP planner.
+  const [useGeminiCloud, setUseGeminiCloudState] = useState<boolean>(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('syn.useCloudAi') : null;
+      return saved === null ? true : saved === '1';
+    } catch {
+      return true;
+    }
+  });
+  const setUseGeminiCloud = useCallback((value: boolean) => {
+    setUseGeminiCloudState(value);
+    try { localStorage.setItem('syn.useCloudAi', value ? '1' : '0'); } catch { /* storage unavailable */ }
+  }, []);
   const [maxIterations, setMaxIterations] = useState(10);
   const [convergenceThreshold, setConvergenceThreshold] = useState(0.8);
   const [directorPlan, setDirectorPlan] = useState<ExplainableMasterPlan | null>(null);

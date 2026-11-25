@@ -95,7 +95,7 @@ try {
   await page.locator('input[type="file"][accept*="audio"]').first().setInputFiles({ name: 'fixall-e2e.wav', mimeType: 'audio/wav', buffer: toneWav() });
   await page.locator('.syn-fixai:not([disabled])').waitFor({ timeout: 30000 });
 
-  // Turn on cloud AI reasoning (off by default) in the AI workspace.
+  // Make sure cloud AI reasoning is on (default since 2026-11-25) in the AI workspace.
   await page.locator('.syn-primary-nav-more').click();
   await page.locator('.syn-workspace-menu-item').filter({ hasText: 'AI Director' }).click();
   await page.getByRole('button', { name: /Safeguards & Cloud/ }).click();
