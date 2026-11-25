@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeAudioBuffer } from '../dsp/analyzer';
 import { processChainOffline } from '../dsp/offlineDsp';
+import { createProcessorModule } from '../dsp/chainValidation';
 import { requestRefine, requestStrategy } from '../ai/masteringClient';
 import { formatModeLine, MODE_MEANINGS } from '../ai/masteringPrompt';
 import type { ProviderConfig } from '../ai/providerAdapters';
 import { generateGeminiMasterStrategy } from '../server/aiMastering';
 import type { AIMasteringStrategy, MasteringMode, ProcessorModule } from '../types/mastering';
-import { runAutonomousDirectorLoop } from './directorEngine';
+import { resolveObjectiveTarget, runAutonomousDirectorLoop } from './directorEngine';
 import { evaluateMasterTargets } from './masterTargets';
 import { validateChainAgainstInventory } from './processorInventory';
 
@@ -16,6 +17,21 @@ import { validateChainAgainstInventory } from './processorInventory';
 // the verification loop renders, re-measures, asks the AI to refine, and gates on measured audio.
 
 const SR = 44100;
+
+function subDominantMix(seconds = 1.2): Float32Array[] {
+  const n = Math.floor(SR * seconds);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    const sub = 0.46 * Math.sin(2 * Math.PI * 40 * t);
+    const bass = 0.045 * Math.sin(2 * Math.PI * 110 * t);
+    const mid = 0.07 * Math.sin(2 * Math.PI * 1000 * t);
+    left[i] = sub + bass + mid;
+    right[i] = sub + bass + mid * 0.98;
+  }
+  return [left, right];
+}
 
 function quietMix(seconds = 1.2, gain = 0.05): Float32Array[] {
   const n = Math.floor(SR * seconds);
@@ -189,4 +205,60 @@ test('Fix All with a mocked AI: AI only seeds the chain; the loop renders, re-me
     assert.ok(Math.abs(remeasured.integratedLufs - report.objective.targetLufs) <= report.objective.lufsTolerance + 1e-9);
     assert.ok(remeasured.truePeakDb <= report.objective.maxTruePeakDb + 0.1);
   }
+});
+
+
+test('sub-bass objective gate uses the same genre-aware tolerance as Director diagnosis', () => {
+  const measured = analyzeAudioBuffer(quietMix(), SR);
+  const source = {
+    ...measured,
+    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 6 },
+  };
+  const makePost = (excessDb: number) => ({
+    ...measured,
+    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + excessDb },
+  });
+
+  const streamingGate = evaluateMasterTargets(makePost(5), resolveObjectiveTarget('streaming'), { preAnalysis: source });
+  const streamingCheck = streamingGate.checks.find((check) => check.id === 'sub-excess');
+  assert.equal(streamingCheck?.status, 'fail', '5 dB exceeds the streaming +4.5 dB limit');
+  assert.match(streamingCheck?.target ?? '', /4\.5/);
+
+  const streamingWithinLimit = evaluateMasterTargets(makePost(4.4), resolveObjectiveTarget('streaming'), { preAnalysis: source });
+  assert.equal(streamingWithinLimit.checks.find((check) => check.id === 'sub-excess')?.status, 'pass');
+
+  const hipHopWithinLimit = evaluateMasterTargets(makePost(5.4), resolveObjectiveTarget('hip-hop'), { preAnalysis: source });
+  assert.equal(hipHopWithinLimit.checks.find((check) => check.id === 'sub-excess')?.status, 'pass');
+});
+
+test('Fix All applies deterministic gate repairs alongside a valid unchanged AI refinement', async () => {
+  const src = subDominantMix();
+  const sourceAnalysis = analyzeAudioBuffer(src, SR);
+  assert.ok(sourceAnalysis.zoneEnergyDb.sub - sourceAnalysis.zoneEnergyDb.bass > 4.5, 'fixture must exceed streaming sub-bass tolerance');
+
+  const initialEq = createProcessorModule('parametric-eq');
+  const refinePasses: number[] = [];
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: src,
+    sampleRate: SR,
+    operatingMode: 'autonomous',
+    objectiveId: 'streaming',
+    initialChain: [initialEq],
+    maxIterations: 2,
+    maxCpuBudgetMs: 60_000,
+    aiRefineCallback: async (ctx) => {
+      refinePasses.push(ctx.postAnalysis.zoneEnergyDb.sub - ctx.postAnalysis.zoneEnergyDb.bass);
+      return { chain: ctx.currentChain, producedBy: 'mock AI (unchanged chain)' };
+    },
+  });
+
+  assert.equal(refinePasses.length, 1, 'the failing first pass must request an AI refinement');
+  const secondPass = report.checkpoints.find((checkpoint) => checkpoint.passNumber === 2);
+  assert.ok(secondPass, 'the combined AI + deterministic candidate must be rendered on pass 2');
+  const eq = secondPass.chain.find((module) => module.type === 'parametric-eq');
+  const bands = (eq?.params as { bands?: Array<{ id?: string; freq?: number; gain?: number }> } | undefined)?.bands ?? [];
+  assert.ok(
+    bands.some((band) => band.id === 'syn-sub-excess' && (band.freq ?? 0) >= 20 && (band.freq ?? 0) <= 60 && (band.gain ?? 0) < 0),
+    'deterministic sub-bass gate repair must be merged into a valid AI refinement instead of being skipped',
+  );
 });
