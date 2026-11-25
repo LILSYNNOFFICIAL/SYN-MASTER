@@ -277,6 +277,19 @@ test('Fix All does not converge while blocking QC failures remain even if the ob
   });
   const channels = [Float32Array.from(src), Float32Array.from(src)];
   const sourceAnalysis = analyzeAudioBuffer(channels, SR);
+  const passingPost = {
+    ...sourceAnalysis,
+    clippedSamples: 0,
+    clickCount: 0,
+    clicksPerMinute: 0,
+    clickAtStart: false,
+    clickAtEnd: false,
+    dcOffset: 0,
+    phaseCorrelation: 1,
+    lowEndCorrelation: 1,
+    lrBalanceDb: 0,
+    zoneEnergyDb: { ...sourceAnalysis.zoneEnergyDb, sub: sourceAnalysis.zoneEnergyDb.bass - 1 },
+  };
   let refineCalls = 0;
   const report = await runAutonomousDirectorLoop({
     sourceChannels: channels,
@@ -284,7 +297,7 @@ test('Fix All does not converge while blocking QC failures remain even if the ob
     operatingMode: 'autonomous',
     objectiveId: 'custom',
     customSpec: {
-      targetLufs: sourceAnalysis.integratedLufs,
+      targetLufs: passingPost.integratedLufs,
       maxTruePeakDb: -1,
       minDynamicRangeDb: 100,
     },
@@ -294,7 +307,7 @@ test('Fix All does not converge while blocking QC failures remain even if the ob
     maxCpuBudgetMs: 60_000,
     renderPassFn: async (renderedChannels) => ({
       channels: renderedChannels,
-      analysis: sourceAnalysis,
+      analysis: passingPost,
     }),
     aiRefineCallback: async (ctx) => {
       refineCalls++;
