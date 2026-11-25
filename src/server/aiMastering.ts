@@ -1,3 +1,4 @@
+import type { MasterTargetGate } from '../director/masterTargets.ts';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import type { VocalBalanceContext } from '../ai/vocalBalancePrompt.ts';
 import type {
@@ -178,6 +179,7 @@ export async function refineGeminiIteration(input: {
   targetTruePeakDb: number;
   preserveDynamics: boolean;
   qcReport?: QCReport | null;
+  targetGate?: MasterTargetGate | null;
   vocalBalance?: VocalBalanceContext | null;
 }) {
   const ai = getAiClient();

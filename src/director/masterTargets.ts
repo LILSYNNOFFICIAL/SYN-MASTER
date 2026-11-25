@@ -1,4 +1,5 @@
 import type { AudioAnalysis, ResolvedObjectiveTarget, SpectralBandEnergy } from '../types/mastering';
+import { getDiagnosisThresholds } from './analyzeIntelligence';
 
 /**
  * Objective master target gate.
@@ -35,6 +36,8 @@ export interface MasterTargetCheck {
   status: MasterCheckStatus;
   /** Which tool fixes this when it fails, and the setting the engine will use. */
   fix?: string;
+  /** Numeric threshold for deterministic repairs; populated for objective-specific checks. */
+  targetValueDb?: number;
 }
 
 export interface MasterTargetGate {
@@ -158,22 +161,24 @@ export function evaluateMasterTargets(
     fix: 'Stereo imager: mono-maker below 120 Hz; bass enhancer mono focus',
   });
 
-  // The diagnostic log raises this finding when the source has > +2 dB Sub/Bass
-  // excess. Once raised, the delivered render must meet its displayed <= 0 dB target.
-  // Keep the check visible on every report, but do not penalize intentional bass-heavy
-  // sources whose measured ratio never crossed the diagnostic trigger.
+  // Keep the delivery gate aligned with the same objective/genre-aware threshold used by
+  // Director diagnosis. A fixed 0 dB ceiling over-penalized intentional 808/sub foundations
+  // and contradicted the diagnosis limits (4.5 dB standard, 5.5 dB bass-forward).
   const postSubBassExcessDb = post.zoneEnergyDb.sub - post.zoneEnergyDb.bass;
   const sourceSubBassExcessDb = pre
     ? pre.zoneEnergyDb.sub - pre.zoneEnergyDb.bass
     : postSubBassExcessDb;
-  const subBassFindingTriggered = sourceSubBassExcessDb > 2 || postSubBassExcessDb > 2;
+  const subBassLimitDb = getDiagnosisThresholds(objective).subExcessLimit;
+  const subBassFindingTriggered =
+    sourceSubBassExcessDb > subBassLimitDb || postSubBassExcessDb > subBassLimitDb;
   checks.push({
     id: 'sub-excess',
     label: 'Sub-bass excess / rumble',
     measured: `${postSubBassExcessDb >= 0 ? '+' : ''}${postSubBassExcessDb.toFixed(1)} dB over bass`,
-    target: '≤ 0.0 dB over bass when triggered (> +2.0 dB at source)',
-    status: st(!subBassFindingTriggered || postSubBassExcessDb <= 0),
-    fix: 'Parametric EQ: spectrum-centered bell cut at the dominant 20-60 Hz sub peak; disable Bass Enhancer sub boost; re-measure',
+    target: `≤ +${subBassLimitDb.toFixed(1)} dB over bass when triggered`,
+    status: st(!subBassFindingTriggered || postSubBassExcessDb <= subBassLimitDb),
+    fix: `Parametric EQ: spectrum-centered bell cut at the dominant 20-60 Hz sub peak until it is within +${subBassLimitDb.toFixed(1)} dB over bass; disable Bass Enhancer sub boost; re-measure`,
+    targetValueDb: subBassLimitDb,
   });
 
   // Dynamics: fail only when PROCESSING collapsed dynamics below the objective's

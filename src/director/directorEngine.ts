@@ -1859,6 +1859,7 @@ export interface RunAutonomousDirectorOptions {
     targetTruePeakDb: number;
     preserveDynamics: boolean;
     qcReport: QCReport;
+    targetGate: MasterTargetGate;
   }) => Promise<ProcessorModule[] | null | AiRefineSuggestion>;
   maxIterations?: number;
   maxCpuBudgetMs?: number;
@@ -2625,6 +2626,7 @@ export async function runAutonomousDirectorLoop(
             targetTruePeakDb: objective.maxTruePeakDb,
             preserveDynamics: objective.preserveTransients,
             qcReport,
+            targetGate,
           });
           const suggestion: AiRefineSuggestion = Array.isArray(rawSuggestion) || rawSuggestion === null
             ? { chain: rawSuggestion }
@@ -2674,6 +2676,30 @@ export async function runAutonomousDirectorLoop(
       }
 
       if (nextChainFromAi && nextChainFromAi.length > 0) {
+        // AI is allowed to propose the complete chain, but it cannot bypass deterministic
+        // repairs for measured blocking gates. Merge those repairs into the AI candidate,
+        // then let the next real render and measurement decide whether they worked.
+        const gateFix = deriveGateRepairCommands(targetGate, nextChainFromAi, post);
+        if (gateFix.commands.length > 0) {
+          const repaired = applyStructuredChainCommands(nextChainFromAi, gateFix.commands);
+          if (repaired.appliedCount > 0) {
+            nextChainFromAi = repaired.chain;
+            emit(
+              'Optimizing',
+              pass,
+              makeActivity(
+                pass,
+                'refine',
+                'command',
+                `Applied ${repaired.appliedCount} deterministic objective-gate repair(s) alongside the AI refinement.`,
+                gateFix.reasons.join(' · '),
+              ),
+              undefined,
+              nextChainFromAi,
+              'Optimizing',
+            );
+          }
+        }
         workingChain = nextChainFromAi;
         emit(
           'Optimizing',
@@ -2900,7 +2926,9 @@ export function deriveGateRepairCommands(
 
   if (wantsSubExcess) {
     const subBassExcessDb = post.zoneEnergyDb.sub - post.zoneEnergyDb.bass;
-    const reductionStepDb = Math.min(1.5, Math.max(0.15, subBassExcessDb * 0.5));
+    const subBassLimitDb = gate.failed.find((check) => check.id === 'sub-excess')?.targetValueDb ?? 0;
+    const excessAboveLimitDb = Math.max(0, subBassExcessDb - subBassLimitDb);
+    const reductionStepDb = Math.min(1.5, Math.max(0.15, excessAboveLimitDb * 0.5));
     const eqMod = chain.find((m) => m.type === 'parametric-eq' && m.enabled && !m.bypassed);
     const eqBands = eqMod ? ((eqMod.params as { bands?: EQBand[] }).bands ?? []) : [];
     const controlBandIndex = eqBands.findIndex((band) => band.id === 'syn-sub-excess');
@@ -2923,7 +2951,7 @@ export function deriveGateRepairCommands(
           enabled: true,
           shape: 'bell',
           freq: correctionFreqHz,
-          gain: -Math.min(8, Math.max(0.5, subBassExcessDb * 0.75)),
+          gain: -Math.min(8, Math.max(0.25, excessAboveLimitDb * 0.75)),
           q: 1.0,
         };
 
@@ -2936,9 +2964,9 @@ export function deriveGateRepairCommands(
         targetId: eqMod.id,
         processorType: 'parametric-eq',
         paramsPatch: { bands },
-        rationale: `Apply measured Sub/Bass correction with a ${nextBand.freq} Hz spectrum-centered bell at ${nextBand.gain.toFixed(1)} dB.`,
+        rationale: `Reduce measured Sub/Bass excess above the +${subBassLimitDb.toFixed(1)} dB objective limit with a ${nextBand.freq} Hz spectrum-centered bell at ${nextBand.gain.toFixed(1)} dB.`,
       });
-      reasons.push(`${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
+      reasons.push(`${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured +${subBassExcessDb.toFixed(1)} dB; objective limit +${subBassLimitDb.toFixed(1)} dB)`);
     } else {
       const dynamicsIndex = chain.findIndex((m) =>
         m.type === 'compressor' || m.type === 'multiband-comp' || m.type === 'limiter' ||
@@ -2950,9 +2978,9 @@ export function deriveGateRepairCommands(
         position: dynamicsIndex >= 0 ? dynamicsIndex : chain.length,
         name: 'Sub/Bass Excess Control',
         params: { phaseMode: 'minimum', msMode: 'stereo', tiltDb: 0, bands: [nextBand] },
-        rationale: `Reduce measured 20-60 Hz Sub/Bass excess with a spectrum-centered ${nextBand.freq} Hz bell, before dynamics.`,
+        rationale: `Reduce measured 20-60 Hz Sub/Bass excess above the +${subBassLimitDb.toFixed(1)} dB objective limit with a spectrum-centered ${nextBand.freq} Hz bell, before dynamics.`,
       });
-      reasons.push(`Add ${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
+      reasons.push(`Add ${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured +${subBassExcessDb.toFixed(1)} dB; objective limit +${subBassLimitDb.toFixed(1)} dB)`);
     }
 
     const bassEnhancer = chain.find((m) => m.type === 'bass-enhancer' && m.enabled && !m.bypassed);

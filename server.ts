@@ -395,6 +395,7 @@ app.post('/api/ai/refine', async (req, res) => {
       targetTruePeakDb,
       preserveDynamics,
       qcReport,
+      targetGate,
       vocalBalance,
     } = req.body ?? {};
     if (
@@ -431,6 +432,7 @@ app.post('/api/ai/refine', async (req, res) => {
       targetTruePeakDb: parsedTargetTp,
       preserveDynamics: preserveDynamics !== false,
       qcReport,
+      targetGate,
       vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
     res.json({ refined });

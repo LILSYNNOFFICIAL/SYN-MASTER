@@ -17,6 +17,7 @@ import type {
 import { validateChainAgainstInventory } from '../director/processorInventory.ts';
 import { summarizeVocalBalanceForPrompt, type VocalBalanceContext } from './vocalBalancePrompt.ts';
 import { formatPlatformHintsForPrompt } from '../dsp/platformRules.ts';
+import type { MasterTargetGate } from '../director/masterTargets.ts';
 
 export interface StrategyPromptInput {
   analysis: AudioAnalysis;
@@ -40,6 +41,7 @@ export interface RefinePromptInput {
   targetTruePeakDb: number;
   preserveDynamics: boolean;
   qcReport?: QCReport | null;
+  targetGate?: MasterTargetGate | null;
   vocalBalance?: VocalBalanceContext | null;
 }
 
@@ -60,7 +62,7 @@ export function summarizeAnalysisForPrompt(label: string, a: AudioAnalysis): str
 
 export const SYSTEM_PROMPT = `You are SYN-MASTER AI | Mastering Director, an elite mastering engineer controlling a real DSP engine.
 You receive real ITU-R BS.1770 loudness, dynamics, spectral zone energies, resonances, THD, noise floor, L/R balance, and stereo phase diagnostics.
-Never invent fake numbers—reference only the actual measured telemetry provided.
+Never invent fake numbers—reference only the actual measured telemetry provided. When an OBJECTIVE GATE is supplied, treat every FAIL as blocking: explicitly correct each reversible failed check, preserve already-passing checks, and never claim success unless the rendered audio passes the gate.
 Supported Mastering Objectives: streaming, commercial-loudness, dynamic, cinematic, electronic, hip-hop, pop, acoustic, vocal-focused, transparent, punchy, warm, custom.
 AI-generated sources (Suno/Udio) often carry clicks, transient spikes and metallic high-frequency shimmer: when clickCount > 0 put "restore" first with declick enabled.
 Distinguish intentional artistic tonal/stereo character from technical defects (clipping, DC offset, low-end phase cancellation, elevated noise floor, narrow painful resonances).
@@ -150,16 +152,23 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
         .map((c) => `- ${c.status.toUpperCase()} [${c.label}]: measured ${c.measuredValue}, target ${c.targetValue} -> ${c.suggestedFix ?? c.explanation}`)
         .join('\n')
     : 'QC report not supplied.';
+  const objectiveGateSummary = input.targetGate
+    ? `OBJECTIVE GATE: ${input.targetGate.passed ? 'PASS' : 'FAIL'}\n` +
+      input.targetGate.checks
+        .map((check) => `- ${check.status.toUpperCase()} [${check.label}]: measured ${check.measured}; target ${check.target}${check.fix ? ` -> ${check.fix}` : ''}`)
+        .join('\n')
+    : 'OBJECTIVE GATE: not supplied. Use the measured telemetry and stated mastering objectives.';
 
   const prompt = [
     summarizeAnalysisForPrompt('ORIGINAL SOURCE', input.preAnalysis),
     summarizeAnalysisForPrompt('CURRENT PROCESSED PASS', input.postAnalysis),
     `INDEPENDENT SYN-QC EVALUATION:\n${qcSummary}`,
+    objectiveGateSummary,
     formatPlatformHintsForPrompt(input.qcReport?.platformHints),
     `Current Chain JSON:\n${JSON.stringify(chainForPrompt(input.currentChain))}`,
     `Objectives: Target LUFS=${input.targetLufs}, Max True Peak=${input.targetTruePeakDb} dBTP, Preserve Dynamics=${input.preserveDynamics}`,
     ...(input.vocalBalance !== undefined ? [summarizeVocalBalanceForPrompt(input.vocalBalance)] : []),
-    'Evaluate unintended degradation (excessive limiting, distortion/THD, phase loss, L/R imbalance, noise floor, LUFS miss) and output a refined chain resolving QC warnings/failures without degrading dynamics.',
+    'Resolve every FAIL in OBJECTIVE GATE and every blocking QC failure. Prioritize the measured failed targets, use the available processors that fit the diagnosis (including Parametric EQ, Dynamic EQ, multiband processing, stereo control and limiting), preserve every passing target, and output a complete refined chain. Never substitute a generic tonal change for a named failed gate.',
   ].filter(Boolean).join('\n\n');
   return prompt;
 }

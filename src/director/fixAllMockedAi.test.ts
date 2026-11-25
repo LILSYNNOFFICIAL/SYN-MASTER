@@ -238,6 +238,7 @@ test('Fix All applies deterministic gate repairs alongside a valid unchanged AI 
 
   const initialEq = createProcessorModule('parametric-eq');
   const refinePasses: number[] = [];
+  const failedGateIds: string[][] = [];
   const report = await runAutonomousDirectorLoop({
     sourceChannels: src,
     sampleRate: SR,
@@ -248,11 +249,13 @@ test('Fix All applies deterministic gate repairs alongside a valid unchanged AI 
     maxCpuBudgetMs: 60_000,
     aiRefineCallback: async (ctx) => {
       refinePasses.push(ctx.postAnalysis.zoneEnergyDb.sub - ctx.postAnalysis.zoneEnergyDb.bass);
+      failedGateIds.push(ctx.targetGate.failed.map((check) => check.id));
       return { chain: ctx.currentChain, producedBy: 'mock AI (unchanged chain)' };
     },
   });
 
   assert.equal(refinePasses.length, 1, 'the failing first pass must request an AI refinement');
+  assert.ok(failedGateIds[0]?.includes('sub-excess'), 'AI refinement receives the actual failed sub-bass gate');
   const secondPass = report.checkpoints.find((checkpoint) => checkpoint.passNumber === 2);
   assert.ok(secondPass, 'the combined AI + deterministic candidate must be rendered on pass 2');
   const eq = secondPass.chain.find((module) => module.type === 'parametric-eq');
