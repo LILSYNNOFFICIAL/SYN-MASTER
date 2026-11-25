@@ -2586,24 +2586,23 @@ export async function runAutonomousDirectorLoop(
     // while the chain actually delivered was an older pass that never met the targets.
     // Convergence is now judged only on the retained best pass, using the objective gate
     // measured on its rendered audio.
-    // STOP-ON-PASS: the loop stops on the first retained pass whose re-measured render
-    // meets every objective target. Advisory findings (e.g. open low-mid "mud") and the
-    // heuristic QC no longer keep it refining after the gate passes; continuing used to
-    // add passes that were then rejected, ending in "rolled back to best pass N".
+    // STOP-ON-PASS: a retained render is complete only when every blocking objective
+    // target AND every blocking QC check passes. Warnings remain non-blocking advisories;
+    // QC failures must never be relabelled as a clean master merely because LUFS/peak pass.
     const bestIsThisPass = bestCheckpoint === cp;
     const mudStillOpen = postDiagnosis.findings.some((f) => f.id === 'diag-mud');
-    if (bestIsThisPass && targetGate.passed) {
+    if (bestIsThisPass && targetGate.passed && qcReport.failCount === 0) {
       if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
       finalStatus = 'converged';
-      stopReason = `Converged on Pass ${pass}: re-measured render meets every objective target (LUFS ${post.integratedLufs.toFixed(1)}, True Peak ${post.truePeakDb.toFixed(2)} dBTP, clips ${post.clippedSamples}, clicks ${post.clickCount ?? 0}).${mudStillOpen ? ' Low-mid density remains as an advisory note.' : ''}${qcReport.overallStatus === 'fail' ? ' QC heuristics still list advisory items.' : ''}`;
+      stopReason = `Converged on Pass ${pass}: all objective targets and blocking QC checks pass (LUFS ${post.integratedLufs.toFixed(1)}, True Peak ${post.truePeakDb.toFixed(2)} dBTP, clips ${post.clippedSamples}, clicks ${post.clickCount ?? 0}).${mudStillOpen ? ' Low-mid density remains as an advisory note.' : ''}${qcReport.warningCount > 0 ? ` ${qcReport.warningCount} non-blocking QC warning(s) remain.` : ''}`;
       emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
       break;
     }
 
     // A plateau is only a reason to stop once the retained pass already meets the gate;
     // otherwise keep iterating until the pass cap, the budget, or no safe command remains.
-    const bestGateNow = Boolean(bestCheckpoint.targetGate?.passed) && bestCheckpoint.passNumber > 0;
-    if (pass > 1 && bestGateNow && !mudStillOpen && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold && bestCheckpoint.qcReport.failCount === 0) {
+    const bestGateNow = Boolean(bestCheckpoint.targetGate?.passed) && bestCheckpoint.passNumber > 0 && bestCheckpoint.qcReport.failCount === 0;
+    if (pass > 1 && bestGateNow && !mudStillOpen && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold) {
       finalStatus = 'completed';
       stopReason = `Stopped safely after Pass ${pass}: retained Pass ${bestCheckpoint.passNumber} meets the objective gate and further refinement reached a plateau (ΔFit ${(multiObjective.engineeringFitIndex - lastFit).toFixed(2)} < ${convergenceThreshold}).`;
       emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
@@ -2699,6 +2698,16 @@ export async function runAutonomousDirectorLoop(
               'Optimizing',
             );
           }
+        }
+        if (renderedChainKeys.has(chainRenderKey(nextChainFromAi))) {
+          finalStatus = 'completed';
+          const remainingQcFailures = qcReport.checks.filter((check) => check.status === 'fail');
+          const qcDetail = remainingQcFailures.length > 0
+            ? ` ${remainingQcFailures.length} blocking QC failure(s) remain: ${remainingQcFailures.map((check) => check.label).join(', ')}. The master is NOT fully verified.`
+            : ' No blocking QC failures remain.';
+          stopReason = `Stopped after Pass ${pass}: AI refinement plus deterministic gate repairs produced no new measurable chain.${targetGate.passed ? ' Objective targets pass.' : ` Objective targets still fail: ${targetGate.failed.map((check) => check.label).join(', ')}.`}${qcDetail}`;
+          emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
+          break;
         }
         workingChain = nextChainFromAi;
         emit(
@@ -2830,11 +2839,16 @@ export async function runAutonomousDirectorLoop(
   const finalGate =
     bestCheckpoint.targetGate ??
     evaluateMasterTargets(bestCheckpoint.analysis, objective, { preAnalysis, referenceAnalysis: opts.referenceAnalysis });
-  if (finalStatus === 'converged' && !finalGate.passed) finalStatus = 'completed';
+  const finalQcFailures = bestCheckpoint.qcReport.checks.filter((check) => check.status === 'fail');
+  if (finalStatus === 'converged' && (!finalGate.passed || finalQcFailures.length > 0)) finalStatus = 'completed';
   if (finalStatus !== 'stopped-by-user') {
-    stopReason = finalGate.passed
-      ? `${stopReason} Final verification: all objective targets met on the delivered render.`
-      : `${stopReason} Final verification: NOT all targets met. ${finalGate.summary}`;
+    const objectiveSummary = finalGate.passed
+      ? 'all objective targets met on the delivered render'
+      : `NOT all objective targets met. ${finalGate.summary}`;
+    const qcSummary = finalQcFailures.length > 0
+      ? `NOT fully verified: ${finalQcFailures.length} blocking QC failure(s) remain (${finalQcFailures.map((check) => check.label).join(', ')}).`
+      : `no blocking QC failures remain.${bestCheckpoint.qcReport.warningCount > 0 ? ` ${bestCheckpoint.qcReport.warningCount} non-blocking QC warning(s) remain.` : ''}`;
+    stopReason = `${stopReason} Final verification: ${objectiveSummary}; ${qcSummary}`;
   }
 
   emit(

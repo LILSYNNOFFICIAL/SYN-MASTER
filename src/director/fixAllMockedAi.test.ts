@@ -185,6 +185,7 @@ test('Fix All with a mocked AI: AI only seeds the chain; the loop renders, re-me
   assert.ok(report.iterationsExecuted >= 2, `expected >= 2 passes, got ${report.iterationsExecuted}: ${report.stopReason}`);
   assert.ok(refineContexts.length >= 1, 'verification loop must request an AI refinement after a failing pass');
   assert.deepEqual(calls.slice(0, 2), ['strategy', 'refine']);
+  assert.ok(prompts.some((prompt) => prompt.includes('OBJECTIVE GATE: FAIL')), 'AI refinement prompt includes the measured failed objective gate');
   assert.ok(lifecycles.includes('Validating'), 'loop reports a Validating stage');
 
   // Pass 1 (the weak AI chain) was re-measured and failed the objective gate.
