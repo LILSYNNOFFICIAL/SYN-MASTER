@@ -104,6 +104,20 @@ async function inspectLayout(page, width, workspace) {
   console.log(`PASS ${workspace} @ ${width}px: no page/workspace/footer overflow`);
 }
 
+async function assertEqViewFits(page, width, state) {
+  const group = page.locator('.syn-eq-head > [aria-label="EQ view"]');
+  const box = await group.boundingBox();
+  assert.ok(box && box.x >= -1 && box.x + box.width <= width + 1, `${state}: EQ view selector must fit at ${width}px: ${JSON.stringify(box)}`);
+  const buttons = group.locator(':scope > button');
+  assert.equal(await buttons.count(), 6, 'EQ view selector must retain all six views');
+  for (const button of await buttons.all()) {
+    const buttonBox = await button.boundingBox();
+    const label = await button.innerText();
+    assert.ok(buttonBox && buttonBox.x >= box.x - 1 && buttonBox.x + buttonBox.width <= box.x + box.width + 1, `${state}: ${label} must stay inside the selector`);
+    assert.equal(await button.isVisible(), true, `${state}: ${label} must remain visible`);
+  }
+}
+
 async function runViewport(browser, width, height, mobile) {
   const context = await browser.newContext({
     viewport: { width, height },
@@ -195,12 +209,14 @@ async function runViewport(browser, width, height, mobile) {
       assert.equal(await menu.locator(':scope > .syn-menubar').isVisible(), true, 'Mobile command drawer must open');
       await menu.locator('.syn-menu-group > summary').first().click();
       assert.equal(await menu.locator('.syn-menu-panel').first().isVisible(), true, 'Mobile command groups must expand');
+      await assertEqViewFits(page, width, 'mobile command menu open');
       await inspectLayout(page, width, 'mobile-command-menu-open');
       await menu.locator(':scope > label').click();
       assert.equal(await menuToggle.isChecked(), false, 'Mobile Menu checkbox must close');
     }
 
     await inspectLayout(page, width, 'studio');
+    if (mobile) await assertEqViewFits(page, width, 'normal studio workspace');
     const spectrumCanvas = page.locator('[data-testid="spectrum-canvas"]');
     if (await spectrumCanvas.count()) {
       const canvasBox = await spectrumCanvas.boundingBox();
