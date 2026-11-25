@@ -48,7 +48,8 @@ import {
   renderMixedChain,
   type ExternalPluginProcessCallback,
 } from './dsp/mixedChainRenderer';
-import { type ProcessorMeterTelemetry } from './dsp/offlineDsp';
+import { type DynamicEqTrace, type ProcessorMeterTelemetry } from './dsp/offlineDsp';
+import { chainHasSoloedBand } from './dsp/eqDesign';
 import { renderAndAnalyzeOffThread } from './dsp/workerClient';
 import { filterSourceTransientClickAnalysis } from './dsp/clickDetect';
 import { MASTERING_PRESETS } from './dsp/presets';
@@ -92,7 +93,10 @@ import {
   saveProject,
 } from './storage/projectDb';
 import { LeftLibraryPanel } from './components/LeftLibraryPanel';
-import { MasteringRack } from './components/MasteringRack';
+// Rack UIs are split out of the initial bundle (budget); the in-page rack is prefetched on mount
+// so it is ready by the time a track is loaded, and the floating window loads when first opened.
+const loadMasteringRack = () => import('./components/MasteringRack');
+const MasteringRack = React.lazy(() => loadMasteringRack().then(({ MasteringRack }) => ({ default: MasteringRack })));
 import { MeterBridge } from './components/MeterBridge';
 import { SpectrumAndEQCanvas, WaveformTimelineCanvas } from './components/CanvasVisualizers';
 const SynLabView = React.lazy(() =>
@@ -124,7 +128,7 @@ import { ImportScreen } from './components/studio/ImportScreen';
 import { MasterConsole } from './components/console/MasterConsole';
 import { Portal } from './ui/Portal';
 import { FixItStage } from './components/studio/FixItStage';
-import { FxRackWindow } from './components/studio/FxRackWindow';
+const FxRackWindow = React.lazy(() => import('./components/studio/FxRackWindow').then(({ FxRackWindow }) => ({ default: FxRackWindow })));
 import { TimelinePlayer } from './components/studio/TimelinePlayer';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
@@ -248,6 +252,7 @@ export default function App() {
   const [appliedCorrections, setAppliedCorrections] = useState<AppliedCorrectionRecord[]>([]);
   const [postPeaks, setPostPeaks] = useState<number[] | null>(null);
   const [stageTelemetry, setStageTelemetry] = useState<ProcessorMeterTelemetry[]>([]);
+  const [dynamicEqTraces, setDynamicEqTraces] = useState<DynamicEqTrace[]>([]);
 
   // Chain & Undo/Redo history
   const [chain, setChain] = useState<ProcessorModule[]>(createStarterChain);
@@ -422,6 +427,12 @@ export default function App() {
     [activeTrack],
   );
 
+  // Prefetch the split-out rack UI right after first paint.
+  useEffect(() => {
+    const t = window.setTimeout(() => { void loadMasteringRack(); }, 0);
+    return () => window.clearTimeout(t);
+  }, []);
+
   // Recompute offline DSP analysis off the main UI thread (debounced 60ms; the EQ blanket holds the prior completed render meanwhile)
   useEffect(() => {
     const src = getRenderSource();
@@ -449,6 +460,9 @@ export default function App() {
             peakBins: 400,
             externalProcessor: processExternalStage,
             postFades: getPostFades(),
+            // Preview only: band solo (listen) and Dynamic EQ traces. Export / Fix All never set these.
+            audition: chainHasSoloedBand(effectiveChain),
+            collectDynamicEqTraces: effectiveChain.some((m) => m.type === 'dynamic-eq' && m.enabled && !m.bypassed),
           });
           if (cancelled || offlineRenderSeqRef.current !== seq) return;
           const displayedAnalysis = filterSourceTransientClickAnalysis(
@@ -461,6 +475,7 @@ export default function App() {
           postChannelsRef.current = result.channels;
           setPostPeaksHi(extractWaveformPeaks(result.channels, 1600));
           setStageTelemetry(result.telemetry);
+          setDynamicEqTraces(result.dynamicEqTraces ?? []);
           setPostPeaks(result.peaks ?? null);
           setPostAnalysis(displayedAnalysis);
           setPostAnalysisState({
@@ -2361,6 +2376,7 @@ export default function App() {
     <MasterConsole
       chain={chain}
       stageTelemetry={stageTelemetry}
+      dynamicEqTraces={dynamicEqTraces}
       chainBypassed={chainBypassed}
       onChangeChain={(next) => {
         updateChainWithHistory(next);
@@ -3036,6 +3052,7 @@ export default function App() {
                 <h2 className="text-[11px] font-black uppercase tracking-[.16em] text-[#F2CA52]">Effects Rack / Processing Chain</h2>
                 <span className="text-[9px] font-mono-tabular uppercase tracking-wider text-[#A99A74]">Visible rack · Offline DSP / VST3</span>
               </div>
+              <React.Suspense fallback={<div className="p-3 text-[11px] text-[#A99A74]" role="status">Loading rack…</div>}>
               <MasteringRack
                 chain={chain}
                 chainBypassed={chainBypassed}
@@ -3060,6 +3077,7 @@ export default function App() {
                 onToggleExternalEditor={handleToggleExternalEditor}
                 onToggleExternalBypass={handleToggleExternalBypass}
               />
+              </React.Suspense>
             </section>
           )}
 
@@ -3290,6 +3308,8 @@ export default function App() {
       />
 
       {/* Export & Settings Modals */}
+      {rackWindowOpen && Boolean(activeTrack) && (
+      <React.Suspense fallback={null}>
       <FxRackWindow
         open={rackWindowOpen && Boolean(activeTrack)}
         onClose={() => setRackWindowOpen(false)}
@@ -3306,6 +3326,8 @@ export default function App() {
         sampleRate={activeTrack?.sampleRate ?? 48000}
         spectrum={postAnalysisState.status === 'ready' ? postAnalysis : activeTrack?.analysis ?? null}
       />
+      </React.Suspense>
+      )}
       {exportModalOpen && (
         <React.Suspense fallback={null}>
           <ExportModal

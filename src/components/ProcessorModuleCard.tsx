@@ -403,6 +403,8 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                           <option value="lowshelf">Low Shelf</option>
                           <option value="bell">Bell</option>
                           <option value="highshelf">High Shelf</option>
+                          <option value="bandpass">Band-Pass</option>
+                          <option value="tilt">Tilt</option>
                           <option value="notch">Notch</option>
                           <option value="lowpass">LPF</option>
                         </select>

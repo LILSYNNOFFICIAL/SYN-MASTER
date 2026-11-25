@@ -159,6 +159,8 @@ async function runViewport(browser, width, height, mobile) {
     }
     await page.locator('.syn2-stage').waitFor({ state: 'visible', timeout: 30000 });
     await page.locator('.syn-meter-bridge').waitFor({ state: 'visible', timeout: 10000 });
+    // The rack UI is code-split (prefetched on mount); wait for it rather than sampling once.
+    await page.locator('[data-syn-skin="instrument"][data-workspace="rack"]').waitFor({ state: 'visible', timeout: 10000 });
     assert.equal(await page.locator('[data-syn-skin="instrument"][data-workspace="rack"]').isVisible(), true, 'Mastering Rack must use the shared instrument surface');
     assert.equal(await page.locator('#syn-library-drawer [data-syn-skin="instrument"][data-workspace="library"]').count(), 1, 'Audio Library must use the shared instrument surface inside the library drawer');
 
@@ -395,9 +397,11 @@ async function runWavExportE2E(browser) {
 
     step('dynamic eq tab');
     await page.locator('.syn-eq-head .syn-seg button').filter({ hasText: 'Dynamic EQ' }).click();
+    // The Dynamic EQ editor is code-split: wait for it (empty state or editor) before deciding to add it.
+    await page.locator('.syn-deq').waitFor({ state: 'visible', timeout: 10000 });
     const addDynamicEq = page.getByRole('button', { name: /Add Dynamic EQ/i });
     if (await addDynamicEq.isVisible()) await addDynamicEq.click();
-    await page.locator('.syn-deq').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('.syn-deq-power').waitFor({ state: 'visible', timeout: 10000 });
     step('telemetry');
     await page.locator('[data-testid="render-peak-telemetry"]').waitFor({ state: 'visible', timeout: 30000 });
 

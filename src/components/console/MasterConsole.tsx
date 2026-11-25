@@ -15,11 +15,13 @@ import type {
   SaturationParams,
   TransientShaperParams,
 } from '../../types/mastering';
-import type { ProcessorMeterTelemetry } from '../../dsp/offlineDsp';
+import type { DynamicEqTrace, ProcessorMeterTelemetry } from '../../dsp/offlineDsp';
 import { LOUDNESS_TARGET_PRESETS } from '../../dsp/loudnessTargets';
 import { MODULE_CATALOG } from '../studio/moduleCatalog';
 import { ParametricEQ2 } from '../studio/ParametricEQ2';
-import { DynamicEQPanel } from '../studio/DynamicEQPanel';
+// Loaded when the Dynamic EQ tab is first opened (keeps the initial bundle in budget).
+const loadDynamicEQPanel = () => import('../studio/DynamicEQPanel');
+const DynamicEQPanel = React.lazy(() => loadDynamicEQPanel().then(({ DynamicEQPanel }) => ({ default: DynamicEQPanel })));
 import { SpectrumAndEQCanvas } from '../CanvasVisualizers';
 import { ArcKnob } from './ArcKnob';
 import { GlowFader } from './GlowFader';
@@ -80,6 +82,8 @@ export interface MasterConsoleProps {
   mode?: string;
   /** Drag the target marker on the loudness meter: sets a custom integrated-loudness target. */
   onTargetLufs?: (lufs: number) => void;
+  /** Dynamic EQ detector / gain traces from the last preview render (threshold meter, live curve). */
+  dynamicEqTraces?: DynamicEqTrace[];
 }
 
 /**
@@ -239,6 +243,11 @@ const StepLabel: React.FC<{ n: number; text: string; hint?: string; className?: 
 
 export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
   const [eqView, setEqView] = useState<'eq' | 'dyneq' | 'spectrum' | 'spectrogram'>('eq');
+  // Prefetch the code-split Dynamic EQ editor after first paint so the tab opens instantly.
+  useEffect(() => {
+    const t = window.setTimeout(() => { void loadDynamicEQPanel(); }, 300);
+    return () => window.clearTimeout(t);
+  }, []);
   const [presetId, setPresetId] = useState<string>(p.presets[0]?.id ?? '');
   const modeInfo = p.mode ? MODE_INFO[p.mode] : undefined;
   const suggestedPreset = modeInfo?.preset && p.presets.some((x) => x.id === modeInfo.preset) ? modeInfo.preset : null;
@@ -424,12 +433,14 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
             </div>
           </div>
           {eqView === 'dyneq' ? (
+            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Dynamic EQ…</p></div>}>
             <DynamicEQPanel
               module={dynEq}
               onAdd={() => add('dynamic-eq')}
               onChange={(next) => { if (dynEq) setParams<DynamicEQParams>(dynEq, next); }}
               onToggle={(on) => { if (dynEq) patch(dynEq.id, { enabled: true, bypassed: !on }); }}
             />
+            </React.Suspense>
           ) : eqView === 'eq' ? (
             eq ? (
               <ParametricEQ2
@@ -439,6 +450,10 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
                 spectrum={p.master ?? p.source}
                 waveformPeaks={p.blanketPeaks ?? p.waveformPeaks}
                 durationSec={p.durationSec}
+                preSpectrum={p.source}
+                postSpectrum={p.master}
+                outputGainDb={eq.outputGainDb}
+                onOutputGainDb={(db) => patch(eq.id, { outputGainDb: db })}
                 onChange={(next) => setParams<ParametricEQParams>(eq, next)}
               />
             ) : (
