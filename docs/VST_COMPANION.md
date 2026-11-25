@@ -64,7 +64,10 @@ All three executables must stay in the same folder; the host finds the scanner a
 
 Done:
 - Loopback host, scanner, worker, catalog, pairing, graceful shutdown (`POST /v1/host/shutdown`), CI build and VST3 validation.
-- Release workflow, end-user README, native third-party notices.
+- Release workflow, end-user README, native third-party notices. First pre-release:
+  https://github.com/LILSYNNOFFICIAL/SYN-MASTER/releases/tag/v0.1.0
+  (zip: https://github.com/LILSYNNOFFICIAL/SYN-MASTER/releases/download/v0.1.0/SYN-MASTER-VST-Companion-v0.1.0-win-x64.zip,
+  SHA-256 `34325cc642eadc5625c9cdece9ff5e973bfbf5dc4b088cd435700a4a7a3aec6c`).
 - Assets for a future companion window: `native/syn_companion_ui/assets/syn-master.ico` (multi-size icon) and `syn_master_logo.png` (320 px header logo).
 - `LocalIpcServer` status hooks for a window: `startScan(mode)`, `isScanInProgress()`, `scanCompleted()/scanTotal()`, `hasPairedOnce()`, `authenticatedClientCount()`.
 
