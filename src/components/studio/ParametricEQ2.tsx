@@ -32,10 +32,10 @@ const F_MIN = 20;
 const F_MAX = 20000;
 const G_MAX = 18;
 const CONSOLE_COLORS = ['#2EA8FF', '#3FE0FF', '#8B5CF6', '#C04CFF', '#E040FB', '#5EC8FF', '#2EA8FF', '#8B5CF6'];
-const SHAPE_SHORT: Record<EQBandShape, string> = { bell: 'Peak', lowshelf: 'Low shelf', highshelf: 'High shelf', highpass: 'High pass', lowpass: 'Low pass', notch: 'Notch' };
+const SHAPE_SHORT: Record<EQBandShape, string> = { bell: 'Peak', lowshelf: 'Low shelf', highshelf: 'High shelf', highpass: 'High pass', lowpass: 'Low pass', notch: 'Notch', bandpass: 'Band pass', tilt: 'Tilt' };
 const COLORS = ['#F2CA52', '#FF8A5B', '#7BE0A0', '#6CC4FF', '#C792EA', '#FF6B9A', '#E8E36A', '#5EEAD4'];
 const SHAPES: EQBandShape[] = ['bell', 'lowshelf', 'highshelf', 'highpass', 'lowpass', 'notch'];
-const SHAPE_LABEL: Record<EQBandShape, string> = { bell: 'Peaking', lowshelf: 'Low shelf', highshelf: 'High shelf', highpass: 'High pass', lowpass: 'Low pass', notch: 'Notch' };
+const SHAPE_LABEL: Record<EQBandShape, string> = { bell: 'Peaking', lowshelf: 'Low shelf', highshelf: 'High shelf', highpass: 'High pass', lowpass: 'Low pass', notch: 'Notch', bandpass: 'Band pass', tilt: 'Tilt' };
 
 const fToX = (f: number) => (Math.log10(f / F_MIN) / Math.log10(F_MAX / F_MIN)) * W;
 const xToF = (x: number) => F_MIN * Math.pow(F_MAX / F_MIN, Math.max(0, Math.min(1, x / W)));

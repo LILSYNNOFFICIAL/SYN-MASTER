@@ -39,7 +39,39 @@ export type WorkspaceTab =
 
 export type LabSubTab = 'frequency' | 'dynamics' | 'stereo' | 'distortion';
 
-export type EQBandShape = 'highpass' | 'lowshelf' | 'bell' | 'highshelf' | 'lowpass' | 'notch';
+export type EQBandShape =
+  | 'highpass'
+  | 'lowshelf'
+  | 'bell'
+  | 'highshelf'
+  | 'lowpass'
+  | 'notch'
+  | 'bandpass'
+  | 'tilt';
+
+/**
+ * Curve flavour within a band family (Ozone-style cascading Type menu).
+ *  - bell: 'proportional' (Q narrows as |gain| rises), 'bell' (RBJ constant-Q, legacy), 'band-shelf' (flat-top)
+ *  - lowshelf/highshelf: 'analog' (RBJ, legacy), 'baxandall' (gentle wide 1st-order), 'vintage' (Pultec bump/dip), 'resonant' (overshoot)
+ *  - lowpass/highpass: 'flat' (Butterworth; legacy 12 dB/oct uses Q), 'resonant' (peak at cutoff), 'brickwall' (12th-order Chebyshev)
+ * Omitted = the family's legacy default, which renders bit-identically to chains saved before subtypes existed.
+ */
+export type EQBandSubtype =
+  | 'proportional'
+  | 'bell'
+  | 'band-shelf'
+  | 'analog'
+  | 'baxandall'
+  | 'vintage'
+  | 'resonant'
+  | 'flat'
+  | 'brickwall';
+
+/** Filter slope in dB/octave for pass and shelf filters. Omitted = 12 (legacy). */
+export type EQSlope = 6 | 12 | 18 | 24 | 36 | 48 | 72 | 96;
+
+/** Which part of the stereo signal a band processes. Omitted = follows ParametricEQParams.msMode. */
+export type EQChannel = 'stereo' | 'mid' | 'side' | 'left' | 'right';
 
 export interface EQBand {
   id: string;
@@ -48,6 +80,11 @@ export interface EQBand {
   freq: number;
   gain: number;
   q: number;
+  subtype?: EQBandSubtype;
+  slope?: EQSlope;
+  channel?: EQChannel;
+  /** Listen to this band's region only. Honoured by preview renders (audition) only; export and Fix All ignore it. */
+  solo?: boolean;
   dynamicThresholdDb?: number;
   dynamicRangeDb?: number;
 }
@@ -57,21 +94,52 @@ export interface ParametricEQParams {
   msMode: 'stereo' | 'mid-side';
   tiltDb: number;
   bands: EQBand[];
+  /** Output trim that cancels the curve's average (pink-weighted) level change. Omitted = off. */
+  autoGain?: boolean;
+}
+
+/** Dynamic EQ band curve. Omitted = 'bell' (legacy RBJ peaking). */
+export type DynamicEQBandType =
+  | 'proportional'
+  | 'bell'
+  | 'band-shelf'
+  | 'baxandall-bass'
+  | 'baxandall-treble'
+  | 'low-shelf'
+  | 'high-shelf';
+
+export interface DynamicEQSidechain {
+  /** 'band' = detector band-pass follows the band's freq/Q (legacy); 'custom' = its own freq/Q. */
+  mode: 'band' | 'custom';
+  freq: number;
+  q: number;
+}
+
+export interface DynamicEQBand {
+  id: string;
+  enabled: boolean;
+  freq: number;
+  q: number;
+  thresholdDb: number;
+  /** Range: max cut (negative, cut mode) or max boost (positive, boost mode) in dB. */
+  maxCutDb: number;
+  ratio?: number;
+  mode?: 'cut' | 'boost';
+  attackMs: number;
+  releaseMs: number;
+  type?: DynamicEQBandType;
+  /** Soft knee width in dB. Omitted = hard knee (legacy). */
+  kneeDb?: number;
+  channel?: EQChannel;
+  sidechain?: DynamicEQSidechain;
+  /** Detector lookahead in ms (0-10). Omitted = 0. */
+  lookaheadMs?: number;
+  /** Preview-only audition of the band region; export ignores it. */
+  solo?: boolean;
 }
 
 export interface DynamicEQParams {
-  bands: Array<{
-    id: string;
-    enabled: boolean;
-    freq: number;
-    q: number;
-    thresholdDb: number;
-    maxCutDb: number;
-    ratio?: number;
-    mode?: 'cut' | 'boost';
-    attackMs: number;
-    releaseMs: number;
-  }>;
+  bands: DynamicEQBand[];
 }
 
 export interface CompressorParams {

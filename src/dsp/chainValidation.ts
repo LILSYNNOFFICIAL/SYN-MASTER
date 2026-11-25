@@ -1,8 +1,14 @@
 import type {
   BassEnhancerParams,
   CompressorParams,
+  DynamicEQBand,
+  DynamicEQBandType,
   DynamicEQParams,
   EQBand,
+  EQBandShape,
+  EQBandSubtype,
+  EQChannel,
+  EQSlope,
   ExternalPluginParamValue,
   ExternalVST3Params,
   LimiterParams,
@@ -21,6 +27,12 @@ import type {
   SaturationParams,
   StereoImagerParams,
 } from '../types/mastering';
+import { EQ_CHANNELS, EQ_SUBTYPES, DYNAMIC_EQ_TYPES, allowedSlopes, resolveSubtype } from './eqDesign';
+
+/** Band limits shared by the editors and AI validation. */
+export const MAX_EQ_BANDS = 8;
+export const MAX_DYNAMIC_EQ_BANDS = 8;
+const EQ_SHAPES: EQBandShape[] = ['highpass', 'lowshelf', 'bell', 'highshelf', 'lowpass', 'notch', 'bandpass', 'tilt'];
 
 function clamp(v: number, min: number, max: number, fallback: number): number {
   if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
@@ -213,14 +225,12 @@ export function validateProcessorParams(
     case 'parametric-eq': {
       const def = defaults as ParametricEQParams;
       const rawBands = Array.isArray(src.bands) ? src.bands : def.bands;
-      const bands: EQBand[] = rawBands.slice(0, 8).map((b, idx) => {
+      const bands: EQBand[] = rawBands.slice(0, MAX_EQ_BANDS).map((b, idx) => {
         const bo = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
-        const shape = ['highpass', 'lowshelf', 'bell', 'highshelf', 'lowpass', 'notch'].includes(
-          String(bo.shape),
-        )
+        const shape = (EQ_SHAPES as string[]).includes(String(bo.shape))
           ? (bo.shape as EQBand['shape'])
           : 'bell';
-        return {
+        const band: EQBand = {
           id: typeof bo.id === 'string' && bo.id ? bo.id : `b${idx + 1}`,
           enabled: bo.enabled !== false,
           shape,
@@ -228,22 +238,37 @@ export function validateProcessorParams(
           gain: clamp(Number(bo.gain), -12, 12, 0),
           q: clamp(Number(bo.q), 0.25, 12, 1.0),
         };
+        // New fields are only written when present and valid, so legacy bands keep their exact shape.
+        if (typeof bo.subtype === 'string' && EQ_SUBTYPES[shape].includes(bo.subtype as EQBandSubtype)) {
+          band.subtype = bo.subtype as EQBandSubtype;
+        }
+        const slope = Number(bo.slope);
+        if (bo.slope !== undefined && allowedSlopes(shape, resolveSubtype(band)).includes(slope as EQSlope)) {
+          band.slope = slope as EQSlope;
+        }
+        if (typeof bo.channel === 'string' && (EQ_CHANNELS as string[]).includes(bo.channel)) {
+          band.channel = bo.channel as EQChannel;
+        }
+        if (bo.solo === true) band.solo = true;
+        return band;
       });
-      return {
+      const out: ParametricEQParams = {
         phaseMode: src.phaseMode === 'linear' ? 'linear' : 'minimum',
         msMode: src.msMode === 'mid-side' ? 'mid-side' : 'stereo',
         tiltDb: clamp(Number(src.tiltDb), -6, 6, 0),
         bands: bands.length > 0 ? bands : def.bands,
       };
+      if (src.autoGain === true) out.autoGain = true;
+      return out;
     }
     case 'dynamic-eq': {
       const def = defaults as DynamicEQParams;
       const rawBands = Array.isArray(src.bands) ? src.bands : def.bands;
       return {
-        bands: rawBands.slice(0, 4).map((b, idx): DynamicEQParams['bands'][number] => {
+        bands: rawBands.slice(0, MAX_DYNAMIC_EQ_BANDS).map((b, idx): DynamicEQBand => {
           const bo = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
           const mode: 'cut' | 'boost' = bo.mode === 'boost' ? 'boost' : 'cut';
-          return {
+          const band: DynamicEQBand = {
             id: typeof bo.id === 'string' && bo.id ? bo.id : `d${idx + 1}`,
             enabled: bo.enabled !== false,
             freq: clamp(Number(bo.freq), 30, 16000, 500),
@@ -257,6 +282,26 @@ export function validateProcessorParams(
             attackMs: clamp(Number(bo.attackMs), 1, 100, 10),
             releaseMs: clamp(Number(bo.releaseMs), 20, 600, 110),
           };
+          if (typeof bo.type === 'string' && (DYNAMIC_EQ_TYPES as string[]).includes(bo.type)) {
+            band.type = bo.type as DynamicEQBandType;
+          }
+          if (bo.kneeDb !== undefined && Number.isFinite(Number(bo.kneeDb))) band.kneeDb = clamp(Number(bo.kneeDb), 0, 24, 0);
+          if (typeof bo.channel === 'string' && (EQ_CHANNELS as string[]).includes(bo.channel)) {
+            band.channel = bo.channel as EQChannel;
+          }
+          if (bo.sidechain && typeof bo.sidechain === 'object') {
+            const sc = bo.sidechain as Record<string, unknown>;
+            band.sidechain = {
+              mode: sc.mode === 'custom' ? 'custom' : 'band',
+              freq: clamp(Number(sc.freq), 20, 20000, band.freq),
+              q: clamp(Number(sc.q), 0.3, 12, band.q),
+            };
+          }
+          if (bo.lookaheadMs !== undefined && Number.isFinite(Number(bo.lookaheadMs))) {
+            band.lookaheadMs = clamp(Number(bo.lookaheadMs), 0, 10, 0);
+          }
+          if (bo.solo === true) band.solo = true;
+          return band;
         }),
       };
     }
