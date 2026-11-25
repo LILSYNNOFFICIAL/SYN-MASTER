@@ -14,6 +14,8 @@ import type {
   TransientShaperParams,
 } from '../types/mastering';
 import { dbToLinear, linearToDb } from '../dsp/analyzer';
+import { isLegacyEq } from '../dsp/eqDesign';
+import { buildExtendedEqGraph } from './eqGraph';
 
 export type AudioLatencyMode = 'interactive' | 'balanced' | 'playback';
 
@@ -419,7 +421,10 @@ export class SynAudioEngine {
         this.activeChainNodes.push(...nodes);
       };
 
-      if (mod.type === 'parametric-eq') {
+      if (mod.type === 'parametric-eq' && !isLegacyEq(mod.params as ParametricEQParams)) {
+        // Subtypes, slopes, per-band channels and auto-gain: exact IIR sections.
+        trackNodes(buildExtendedEqGraph(this.ctx, mod.params as ParametricEQParams, intensity, stageIn, wetGain));
+      } else if (mod.type === 'parametric-eq') {
         const p = mod.params as ParametricEQParams;
         const eqNodes: BiquadFilterNode[] = [];
         for (const band of p.bands) {

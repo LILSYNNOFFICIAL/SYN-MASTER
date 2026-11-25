@@ -1,7 +1,7 @@
 import type { AudioAnalysis, ProcessorModule } from '../types/mastering';
 import { analyzeAudioBuffer, extractWaveformPeaks } from './analyzer';
 import type { FadeSettings } from './fades';
-import { processChainOffline, type ProcessorMeterTelemetry } from './offlineDsp';
+import { processChainOffline, type DynamicEqTrace, type ProcessorMeterTelemetry } from './offlineDsp';
 
 export interface DspWorkerRequest {
   id: number;
@@ -11,6 +11,10 @@ export interface DspWorkerRequest {
   chain: ProcessorModule[];
   peakBins?: number;
   postFades?: FadeSettings | null;
+  /** Preview-only: honour band solo. */
+  audition?: boolean;
+  /** Preview-only: record Dynamic EQ traces. */
+  collectDynamicEqTraces?: boolean;
 }
 
 export interface DspWorkerSuccessResponse {
@@ -20,6 +24,7 @@ export interface DspWorkerSuccessResponse {
   telemetry: ProcessorMeterTelemetry[];
   peaks?: number[];
   analysis: AudioAnalysis;
+  dynamicEqTraces?: DynamicEqTrace[];
 }
 
 export interface DspWorkerErrorResponse {
@@ -31,7 +36,11 @@ export interface DspWorkerErrorResponse {
 self.onmessage = (ev: MessageEvent<DspWorkerRequest>) => {
   const req = ev.data;
   try {
-    const processed = processChainOffline(req.channels, req.sampleRate, req.chain, req.postFades, { takeOwnership: true });
+    const processed = processChainOffline(req.channels, req.sampleRate, req.chain, req.postFades, {
+      takeOwnership: true,
+      audition: req.audition === true,
+      collectDynamicEqTraces: req.collectDynamicEqTraces === true,
+    });
     const analysis = analyzeAudioBuffer(processed.channels, req.sampleRate);
     const peaks =
       req.kind === 'render-and-analyze'
@@ -45,6 +54,7 @@ self.onmessage = (ev: MessageEvent<DspWorkerRequest>) => {
       telemetry: processed.telemetry,
       peaks,
       analysis,
+      dynamicEqTraces: processed.dynamicEqTraces,
     };
 
     const transferList = processed.channels.map((ch) => ch.buffer);

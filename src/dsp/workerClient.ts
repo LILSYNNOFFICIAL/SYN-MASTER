@@ -6,7 +6,7 @@ import {
   renderMixedChain,
   type ExternalPluginProcessCallback,
 } from './mixedChainRenderer.ts';
-import { processChainOffline, type ProcessorMeterTelemetry } from './offlineDsp.ts';
+import { processChainOffline, type DynamicEqTrace, type ProcessorMeterTelemetry } from './offlineDsp.ts';
 import type {
   DspWorkerErrorResponse,
   DspWorkerRequest,
@@ -20,6 +20,16 @@ export interface OffThreadRenderResult {
   peaks?: number[];
   usedWorker: boolean;
   usedExternalHost: boolean;
+  /** Dynamic EQ detector / gain history (preview renders that asked for it). */
+  dynamicEqTraces?: DynamicEqTrace[];
+}
+
+/** Preview-only render options; export, Fix All and verification leave both off. */
+export interface PreviewRenderOptions {
+  /** Honour EQ / Dynamic EQ band solo (listen). */
+  audition?: boolean;
+  /** Record Dynamic EQ detector / gain traces for the meters and live curve. */
+  collectDynamicEqTraces?: boolean;
 }
 
 type DspWorkerResponse = DspWorkerSuccessResponse | DspWorkerErrorResponse;
@@ -127,9 +137,10 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
     includePeaks: boolean,
     peakBins: number,
     postFades: FadeSettings | null = null,
+    preview: PreviewRenderOptions = {},
   ): Promise<OffThreadRenderResult> => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const processed = processChainOffline(sourceChannels, sampleRate, chain, postFades);
+    const processed = processChainOffline(sourceChannels, sampleRate, chain, postFades, preview);
     const analysis = analyzeAudioBuffer(processed.channels, sampleRate);
     const peaks = includePeaks ? extractWaveformPeaks(processed.channels, peakBins) : undefined;
     return {
@@ -139,6 +150,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       peaks,
       usedWorker: false,
       usedExternalHost: false,
+      dynamicEqTraces: processed.dynamicEqTraces,
     };
   };
 
@@ -151,7 +163,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
     externalProcessor?: ExternalPluginProcessCallback;
     /** Timeline fades applied after the chain (post-limiter). */
     postFades?: FadeSettings | null;
-  }): Promise<OffThreadRenderResult> => {
+  } & PreviewRenderOptions): Promise<OffThreadRenderResult> => {
     const {
       sourceChannels,
       sampleRate,
@@ -161,6 +173,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       externalProcessor,
       postFades = null,
     } = opts;
+    const preview: PreviewRenderOptions = { audition: opts.audition === true, collectDynamicEqTraces: opts.collectDynamicEqTraces === true };
     const safePeakBins = Math.max(1, Math.min(8192, Math.floor(peakBins)));
     const durationSec = (sourceChannels[0]?.length ?? 0) / sampleRate;
     // Headless runs (scripts/headless-master.ts sets globalThis.__SYN_HEADLESS__) have no
@@ -178,7 +191,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
           `Off-thread DSP rendering failed for ${durationSec.toFixed(1)}s audio. Main-thread fallback was skipped to prevent the interface from freezing. ${detail}`,
         );
       }
-      return renderFallback(sourceChannels, sampleRate, chain, includePeaks, safePeakBins, postFades);
+      return renderFallback(sourceChannels, sampleRate, chain, includePeaks, safePeakBins, postFades, preview);
     };
 
     if (chainHasActiveExternalPlugins(chain)) {
@@ -215,6 +228,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       chain,
       peakBins: safePeakBins,
       postFades,
+      ...preview,
     };
 
     try {
@@ -238,6 +252,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
         peaks: response.peaks,
         usedWorker: true,
         usedExternalHost: false,
+        dynamicEqTraces: response.dynamicEqTraces,
       };
     } catch (error) {
       return fallbackOrThrow(error);
@@ -261,7 +276,7 @@ export function renderAndAnalyzeOffThread(opts: {
   peakBins?: number;
   externalProcessor?: ExternalPluginProcessCallback;
   postFades?: FadeSettings | null;
-}): Promise<OffThreadRenderResult> {
+} & PreviewRenderOptions): Promise<OffThreadRenderResult> {
   return defaultClient.renderAndAnalyzeOffThread(opts);
 }
 

@@ -54,8 +54,9 @@ const OBJECTIVE_LIMITS: Record<
 
 function normalizeStageParamsForFingerprint(mod: ProcessorModule): unknown {
   if (mod.type === 'parametric-eq') {
-    const p = mod.params as { phaseMode?: string; msMode?: string; tiltDb?: number; bands?: Array<{ enabled?: boolean; shape?: string; freq?: number; gain?: number; q?: number }> };
-    const enabledBands = (p.bands ?? []).filter((b) => b.enabled !== false && (b.shape === 'highpass' || b.shape === 'lowpass' || Math.abs(b.gain ?? 0) > 1e-4));
+    const p = mod.params as { phaseMode?: string; msMode?: string; tiltDb?: number; autoGain?: boolean; bands?: Array<{ enabled?: boolean; shape?: string; freq?: number; gain?: number; q?: number; subtype?: string; slope?: number; channel?: string; solo?: boolean }> };
+    const gainless = (s?: string) => s === 'highpass' || s === 'lowpass' || s === 'notch' || s === 'bandpass';
+    const enabledBands = (p.bands ?? []).filter((b) => b.enabled !== false && (gainless(b.shape) || Math.abs(b.gain ?? 0) > 1e-4));
     if (enabledBands.length === 0 && Math.abs(p.tiltDb ?? 0) <= 1e-4) {
       return { noop: true };
     }
@@ -63,14 +64,34 @@ function normalizeStageParamsForFingerprint(mod: ProcessorModule): unknown {
       phaseMode: p.phaseMode,
       msMode: p.msMode,
       tiltDb: p.tiltDb ?? 0,
-      bands: enabledBands.map((b) => ({ shape: b.shape, freq: b.freq, gain: b.gain, q: b.q })),
+      // Newer fields only appear when set, so pre-subtype chains keep their fingerprints.
+      ...(p.autoGain ? { autoGain: true } : {}),
+      bands: enabledBands.map((b) => ({
+        shape: b.shape, freq: b.freq, gain: b.gain, q: b.q,
+        ...(b.subtype !== undefined ? { subtype: b.subtype } : {}),
+        ...(b.slope !== undefined ? { slope: b.slope } : {}),
+        ...(b.channel !== undefined ? { channel: b.channel } : {}),
+      })),
     };
   }
   if (mod.type === 'dynamic-eq') {
-    const p = mod.params as { bands?: Array<{ enabled?: boolean; freq?: number; q?: number; thresholdDb?: number; maxCutDb?: number; attackMs?: number; releaseMs?: number }> };
+    const p = mod.params as { bands?: Array<Record<string, unknown> & { enabled?: boolean; freq?: number; q?: number; thresholdDb?: number; maxCutDb?: number; attackMs?: number; releaseMs?: number }> };
     const enabledBands = (p.bands ?? []).filter((b) => b.enabled !== false && Math.abs(b.maxCutDb ?? 0) > 1e-4);
     if (enabledBands.length === 0) return { noop: true };
-    return { bands: enabledBands.map((b) => ({ freq: b.freq, q: b.q, thresholdDb: b.thresholdDb, maxCutDb: b.maxCutDb, attackMs: b.attackMs, releaseMs: b.releaseMs })) };
+    const extra = ['ratio', 'mode', 'type', 'kneeDb', 'channel', 'sidechain', 'lookaheadMs'] as const;
+    return { bands: enabledBands.map((b) => {
+      const out: Record<string, unknown> = { freq: b.freq, q: b.q, thresholdDb: b.thresholdDb, maxCutDb: b.maxCutDb, attackMs: b.attackMs, releaseMs: b.releaseMs };
+      // Ratio / mode joined the fingerprint with the curve types; the legacy defaults are omitted
+      // so pre-existing chains keep their fingerprints.
+      for (const k of extra) {
+        const v = b[k];
+        if (v === undefined) continue;
+        if (k === 'ratio' && v === 20 / 7) continue;
+        if (k === 'mode' && v === 'cut') continue;
+        out[k] = v;
+      }
+      return out;
+    }) };
   }
   if (mod.type === 'external-vst3') {
     const p = mod.params as { uid?: string; bundlePath?: string; instanceId?: string | null; stateBase64?: string; parameters?: Array<{ id: number; valueNormalized: number }> };
