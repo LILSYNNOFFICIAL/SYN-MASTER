@@ -41,6 +41,7 @@ import type {
   MultiObjectiveDimension,
   MultiObjectiveEvaluation,
   PluginIntelligenceSummary,
+  PostFixVerificationReport,
   ProcessorModule,
   QCReport,
   QCTargetProfile,
@@ -1888,6 +1889,22 @@ export interface AiRefineSuggestion {
   notices?: string[];
 }
 
+const SOURCE_LIMITATION_FINDING_IDS = new Set(['diag-clipping', 'diag-overcompressed', 'diag-thd']);
+
+function hasActionablePostFixFindings(report: PostFixVerificationReport): boolean {
+  return report.activeFindings.some((finding) => !SOURCE_LIMITATION_FINDING_IDS.has(finding.findingId)) ||
+    report.newlyIntroducedFindings.length > 0;
+}
+
+function summarizeActionablePostFixFindings(report: PostFixVerificationReport): string {
+  const active = report.activeFindings.filter((finding) => !SOURCE_LIMITATION_FINDING_IDS.has(finding.findingId));
+  const labels = [
+    ...active.map((finding) => `${finding.originalFinding.title} [${finding.status}]`),
+    ...report.newlyIntroducedFindings.map((finding) => `${finding.title} [NEW]`),
+  ];
+  return labels.length > 0 ? `${labels.length} actionable technical finding(s) remain: ${labels.join(', ')}.` : 'No actionable technical findings remain.';
+}
+
 function makeActivity(
   passNumber: number,
   phase: DirectorActivityEntry['phase'],
@@ -2380,6 +2397,21 @@ export async function runAutonomousDirectorLoop(
     );
 
     const postDiagnosis = analyzeTrackIntelligence(post, objective, opts.referenceAnalysis);
+    // Independent post-fix verification is part of the convergence gate, not just a UI report.
+    // Source-integrity limits (pre-clipped, pre-compressed, or pre-distorted material) remain
+    // disclosed but are not mistaken for a correctable mastering-stage failure.
+    const passVerification = verifyPostFixAnalysis({
+      baselineAnalysis: preAnalysis,
+      baselineDiagnosis: plan.diagnosis,
+      postAnalysis: post,
+      objective,
+      referenceAnalysis: opts.referenceAnalysis,
+      baselineAnalysisId: 'baseline',
+      postAnalysisId: `pass-${pass}`,
+      currentChainFingerprint: computeChainFingerprint(workingChain),
+      postChainFingerprint: computeChainFingerprint(workingChain),
+      postProcessingStatus: 'ready',
+    });
     const baselineTechnicalFindings = plan.diagnosis.findings.filter(
       (finding) => finding.kind === 'technical-problem',
     );
@@ -2591,17 +2623,32 @@ export async function runAutonomousDirectorLoop(
     // QC failures must never be relabelled as a clean master merely because LUFS/peak pass.
     const bestIsThisPass = bestCheckpoint === cp;
     const mudStillOpen = postDiagnosis.findings.some((f) => f.id === 'diag-mud');
-    if (bestIsThisPass && targetGate.passed && qcReport.failCount === 0) {
+    if (bestIsThisPass && targetGate.passed && qcReport.failCount === 0 && !hasActionablePostFixFindings(passVerification)) {
       if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
       finalStatus = 'converged';
-      stopReason = `Converged on Pass ${pass}: all objective targets and blocking QC checks pass (LUFS ${post.integratedLufs.toFixed(1)}, True Peak ${post.truePeakDb.toFixed(2)} dBTP, clips ${post.clippedSamples}, clicks ${post.clickCount ?? 0}).${mudStillOpen ? ' Low-mid density remains as an advisory note.' : ''}${qcReport.warningCount > 0 ? ` ${qcReport.warningCount} non-blocking QC warning(s) remain.` : ''}`;
+      stopReason = `Converged on Pass ${pass}: all objective targets, blocking QC checks, and actionable post-fix findings pass (LUFS ${post.integratedLufs.toFixed(1)}, True Peak ${post.truePeakDb.toFixed(2)} dBTP, clips ${post.clippedSamples}, clicks ${post.clickCount ?? 0}).${mudStillOpen ? ' Low-mid density remains as an advisory note.' : ''}${qcReport.warningCount > 0 ? ` ${qcReport.warningCount} non-blocking QC warning(s) remain.` : ''}`;
       emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
       break;
     }
 
     // A plateau is only a reason to stop once the retained pass already meets the gate;
     // otherwise keep iterating until the pass cap, the budget, or no safe command remains.
-    const bestGateNow = Boolean(bestCheckpoint.targetGate?.passed) && bestCheckpoint.passNumber > 0 && bestCheckpoint.qcReport.failCount === 0;
+    const bestVerification = verifyPostFixAnalysis({
+      baselineAnalysis: preAnalysis,
+      baselineDiagnosis: plan.diagnosis,
+      postAnalysis: bestCheckpoint.analysis,
+      objective,
+      referenceAnalysis: opts.referenceAnalysis,
+      baselineAnalysisId: 'baseline',
+      postAnalysisId: `best-pass-${bestCheckpoint.passNumber}`,
+      currentChainFingerprint: computeChainFingerprint(bestCheckpoint.chain),
+      postChainFingerprint: computeChainFingerprint(bestCheckpoint.chain),
+      postProcessingStatus: 'ready',
+    });
+    const bestGateNow = Boolean(bestCheckpoint.targetGate?.passed) &&
+      bestCheckpoint.passNumber > 0 &&
+      bestCheckpoint.qcReport.failCount === 0 &&
+      !hasActionablePostFixFindings(bestVerification);
     if (pass > 1 && bestGateNow && !mudStillOpen && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold) {
       finalStatus = 'completed';
       stopReason = `Stopped safely after Pass ${pass}: retained Pass ${bestCheckpoint.passNumber} meets the objective gate and further refinement reached a plateau (ΔFit ${(multiObjective.engineeringFitIndex - lastFit).toFixed(2)} < ${convergenceThreshold}).`;
@@ -2840,7 +2887,23 @@ export async function runAutonomousDirectorLoop(
     bestCheckpoint.targetGate ??
     evaluateMasterTargets(bestCheckpoint.analysis, objective, { preAnalysis, referenceAnalysis: opts.referenceAnalysis });
   const finalQcFailures = bestCheckpoint.qcReport.checks.filter((check) => check.status === 'fail');
-  if (finalStatus === 'converged' && (!finalGate.passed || finalQcFailures.length > 0)) finalStatus = 'completed';
+  const finalPostFixVerification = verifyPostFixAnalysis({
+    baselineAnalysis: preAnalysis,
+    baselineDiagnosis: plan.diagnosis,
+    postAnalysis: bestCheckpoint.passNumber > 0 ? bestCheckpoint.analysis : null,
+    objective,
+    referenceAnalysis: opts.referenceAnalysis,
+    baselineAnalysisId: 'baseline',
+    postAnalysisId: bestCheckpoint.passNumber > 0 ? `best-pass-${bestCheckpoint.passNumber}` : 'baseline',
+    currentChainFingerprint: computeChainFingerprint(bestCheckpoint.chain),
+    postChainFingerprint: bestCheckpoint.passNumber > 0 ? computeChainFingerprint(bestCheckpoint.chain) : undefined,
+    postProcessingStatus: bestCheckpoint.passNumber > 0 ? 'ready' : 'idle',
+  });
+  if (finalStatus === 'converged' && (
+    !finalGate.passed ||
+    finalQcFailures.length > 0 ||
+    hasActionablePostFixFindings(finalPostFixVerification)
+  )) finalStatus = 'completed';
   if (finalStatus !== 'stopped-by-user') {
     const objectiveSummary = finalGate.passed
       ? 'all objective targets met on the delivered render'
@@ -2848,7 +2911,14 @@ export async function runAutonomousDirectorLoop(
     const qcSummary = finalQcFailures.length > 0
       ? `NOT fully verified: ${finalQcFailures.length} blocking QC failure(s) remain (${finalQcFailures.map((check) => check.label).join(', ')}).`
       : `no blocking QC failures remain.${bestCheckpoint.qcReport.warningCount > 0 ? ` ${bestCheckpoint.qcReport.warningCount} non-blocking QC warning(s) remain.` : ''}`;
-    stopReason = `${stopReason} Final verification: ${objectiveSummary}; ${qcSummary}`;
+    const technicalSummary = summarizeActionablePostFixFindings(finalPostFixVerification);
+    const sourceLimitations = finalPostFixVerification.activeFindings.filter((finding) =>
+      SOURCE_LIMITATION_FINDING_IDS.has(finding.findingId),
+    );
+    const sourceSummary = sourceLimitations.length > 0
+      ? ` ${sourceLimitations.length} pre-existing source limitation(s) remain visible; they cannot be reconstructed by this mastering chain.`
+      : '';
+    stopReason = `${stopReason} Final verification: ${objectiveSummary}; ${qcSummary}; ${technicalSummary}${sourceSummary}`;
   }
 
   emit(
