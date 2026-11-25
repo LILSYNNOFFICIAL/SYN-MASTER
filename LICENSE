@@ -1,0 +1,27 @@
+SYN-MASTER licensing
+====================
+
+Native VST companion (native/)
+------------------------------
+Everything under the native/ directory of this repository (the Windows VST3
+companion: syn-plugin-host, syn-plugin-scanner, syn-plugin-worker, the QA test
+VST3, their tests, scripts and build files) is licensed under the
+
+    GNU Affero General Public License, version 3 only (SPDX: AGPL-3.0-only)
+
+Copyright (C) 2026 LIL SYNN / SYN-MASTER (contact@lilsynn.com).
+
+The full licence text is in native/LICENSE. The companion links JUCE under
+JUCE's AGPLv3 licence option; third-party components and their licences are
+listed in native/companion-release/THIRD_PARTY_NOTICES.txt.
+
+The complete corresponding source for any released companion binary is this
+repository at the release tag named in the zip file name:
+https://github.com/LILSYNNOFFICIAL/SYN-MASTER (tags: v*).
+
+Everything else in this repository
+----------------------------------
+This LICENSE file does not grant a licence to anything outside native/,
+including the SYN-MASTER web app (src/, server.ts, public/, desktop/ and the
+other top-level files). Their licensing is unchanged and is not declared here.
+Third-party code used by the web app is listed in docs/THIRD_PARTY_NOTICES.md.

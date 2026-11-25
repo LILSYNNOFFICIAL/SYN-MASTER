@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 <#
 .SYNOPSIS
   SYN-PLUGIN HOST Milestone 2.5 Windows 11 x64 Real VST3 Validation Script.

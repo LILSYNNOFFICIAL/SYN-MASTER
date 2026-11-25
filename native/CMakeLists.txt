@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 cmake_minimum_required(VERSION 3.25)
 
 project(SynPluginHost

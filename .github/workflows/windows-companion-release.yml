@@ -1,5 +1,6 @@
 name: Windows VST Companion Release
 
+# SPDX-License-Identifier: AGPL-3.0-only
 # Builds the loopback VST3 companion (syn-plugin-host + scanner + worker) and,
 # for a pushed v* tag, attaches a zip to a GitHub Release. workflow_dispatch
 # builds and uploads the zip as a workflow artifact only (no release).
@@ -68,6 +69,22 @@ jobs:
           }
           Copy-Item native/companion-release/README.txt "$stage/README.txt"
           Copy-Item native/companion-release/THIRD_PARTY_NOTICES.txt "$stage/THIRD_PARTY_NOTICES.txt"
+          # AGPL-3.0-only: ship the licence text and point at the exact corresponding source.
+          Copy-Item native/LICENSE "$stage/LICENSE.txt"
+          $repoUrl = 'https://github.com/${{ github.repository }}'
+          $sha = '${{ github.sha }}'
+          $srcRef = if ('${{ github.ref_type }}' -eq 'tag') { $ref } else { $sha }
+          @(
+            "SYN-MASTER VST Companion ${version} - corresponding source (AGPL-3.0-only)",
+            '',
+            "Repository : $repoUrl  (companion source in native/)",
+            "Tag/ref    : $srcRef",
+            "Commit     : $sha",
+            "Browse     : $repoUrl/tree/$srcRef",
+            "Download   : $repoUrl/archive/$sha.zip",
+            '',
+            'Build: see native/WINDOWS_BUILD.md and .github/workflows/windows-companion-release.yml at that commit.'
+          ) | Out-File -Encoding ascii "$stage/SOURCE.txt"
           $zip = "dist-companion/$name.zip"
           Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
@@ -99,6 +116,9 @@ jobs:
           Unzip, run syn-plugin-host.exe, and pair from the SYN-MASTER web app with the SYN-XXXX-XXXX code it prints.
           Loopback only: HTTP 127.0.0.1:47832, WebSocket 127.0.0.1:47833.
           Windows SmartScreen will warn because the build is not code-signed: More info -> Run anyway. See README.txt in the zip.
+
+          Licence: AGPL-3.0-only (LICENSE.txt in the zip; built with JUCE under its AGPLv3 option and the MIT VST3 SDK 3.8.0).
+          Corresponding source: https://github.com/${{ github.repository }}/tree/$tag (native/), commit ${{ github.sha }}.
           "@
           gh release view $tag --repo '${{ github.repository }}' *> $null
           if ($LASTEXITCODE -ne 0) {

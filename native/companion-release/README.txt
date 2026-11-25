@@ -11,6 +11,8 @@ What is in this zip
   syn-plugin-scanner.exe  Scans VST3 bundles in a separate process (started by the host).
   syn-plugin-worker.exe   Hosts each plugin in its own process so a crashing
                           plugin cannot take down the host (started by the host).
+  LICENSE.txt             GNU AGPLv3 licence of the companion.
+  SOURCE.txt              Exact source tag and commit this build was made from.
   THIRD_PARTY_NOTICES.txt Licences of bundled components.
 
 Keep all three .exe files in the same folder.
@@ -57,6 +59,21 @@ Options (advanced):
 Plugin catalog and the pairing file live in %LOCALAPPDATA%\SYN MASTER.
 Standard VST3 folders are scanned: C:\Program Files\Common Files\VST3 and
 %LOCALAPPDATA%\Programs\Common\VST3.
+
+Licence and source code
+-----------------------
+The companion is free software, licensed under the GNU Affero General Public
+License version 3 only (AGPL-3.0-only); see LICENSE.txt. It comes with NO
+WARRANTY. It is built with JUCE under JUCE's AGPLv3 option and the MIT-licensed
+Steinberg VST3 SDK 3.8.0; see THIRD_PARTY_NOTICES.txt.
+
+Complete corresponding source code for this build:
+  https://github.com/LILSYNNOFFICIAL/SYN-MASTER  (directory native/)
+  at the release tag in this zip's file name, e.g. for
+  SYN-MASTER-VST-Companion-v0.1.1-win-x64.zip:
+  https://github.com/LILSYNNOFFICIAL/SYN-MASTER/tree/v0.1.1
+SOURCE.txt in this zip names the exact tag and commit, with a direct
+source-archive download link.
 
 Uninstall
 ---------

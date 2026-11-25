@@ -1,25 +1,49 @@
-SYN-MASTER VST Companion: third-party components
-=================================================
+SYN-MASTER VST Companion: licence and third-party components
+=============================================================
 
-The companion executables are built from https://github.com/LILSYNNOFFICIAL/SYN-MASTER
-(native/) and statically include the components below. Versions are the ones pinned in
-native/CMakeLists.txt at build time.
+The companion (syn-plugin-host.exe, syn-plugin-scanner.exe, syn-plugin-worker.exe)
+Copyright (C) 2026 LIL SYNN / SYN-MASTER.
+Licensed under the GNU Affero General Public License, version 3 only
+(AGPL-3.0-only). The full text is in LICENSE.txt in this zip. This program comes
+with ABSOLUTELY NO WARRANTY; see sections 15 and 16 of the licence.
 
-JUCE 8.0.6 (https://juce.com, https://github.com/juce-framework/JUCE)
-  Dual licensed: GNU Affero General Public License v3 (AGPLv3) OR a commercial JUCE licence.
-  This build is distributed under the AGPLv3 option unless the SYN-MASTER owner holds a
-  commercial JUCE licence. Under AGPLv3 the complete corresponding source of this program is
-  available at https://github.com/LILSYNNOFFICIAL/SYN-MASTER.
+Corresponding source: https://github.com/LILSYNNOFFICIAL/SYN-MASTER (native/), at
+the tag and commit listed in SOURCE.txt in this zip.
 
-Steinberg VST3 SDK 3.7.x, as bundled inside JUCE 8.0.6
-  (modules/juce_audio_processors/format_types/VST3_SDK)
-  Licensed under the proprietary Steinberg VST3 License OR GPLv3 (see the LICENSE.txt in that
-  folder and https://www.steinberg.net/sdklicenses_vst3). VST is a registered trademark of
-  Steinberg Media Technologies GmbH. Newer VST3 SDK releases (3.8.0 and later) are MIT
-  licensed; this build does not yet use one.
+The executables are built from that source and statically include the components
+below. Versions are the ones pinned in native/CMakeLists.txt at build time.
+
+JUCE 8.0.17-security (https://juce.com, https://github.com/juce-framework/JUCE)
+  Dual licensed: GNU Affero General Public License v3 (AGPLv3) OR a commercial JUCE
+  licence. This build uses JUCE under the AGPLv3 option.
+
+Steinberg VST3 SDK 3.8.0, as bundled inside JUCE 8.0.17-security
+  (modules/juce_audio_processors_headless/format_types/VST3_SDK)
+  MIT License. Copyright (c) 2025, Steinberg Media Technologies GmbH.
+  JUCE modified two files of the SDK to silence clang-tidy warnings (marked
+  "// JUCE MODIFICATION"). VST is a registered trademark of Steinberg Media
+  Technologies GmbH.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
 
 IXWebSocket 11.4.5 (https://github.com/machinezone/IXWebSocket)
-  BSD 3-Clause License.
+  BSD 3-Clause License. Copyright (c) 2018 Machine Zone, Inc.
 
 nlohmann/json 3.11.3 (https://github.com/nlohmann/json)
   MIT License. Copyright (c) 2013-2023 Niels Lohmann.
@@ -27,4 +51,5 @@ nlohmann/json 3.11.3 (https://github.com/nlohmann/json)
 SQLite 3.47.2 amalgamation (https://www.sqlite.org)
   Public domain.
 
-Full licence texts are in each project's repository at the pinned version.
+Full licence texts for IXWebSocket and nlohmann/json are in each project's
+repository at the pinned version.

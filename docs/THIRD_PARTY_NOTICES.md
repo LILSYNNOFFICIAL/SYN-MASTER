@@ -1,5 +1,20 @@
 # Third-Party Notices
 
+## Native VST companion (`native/`)
+
+The Windows VST companion is licensed AGPL-3.0-only (`native/LICENSE`; see the repo-root `LICENSE`
+for scope). Its third-party components are listed, with licences, in
+[`native/companion-release/THIRD_PARTY_NOTICES.txt`](../native/companion-release/THIRD_PARTY_NOTICES.txt),
+which ships in every release zip:
+
+- JUCE 8.0.17-security: AGPLv3 (used under that option) or commercial.
+- Steinberg VST3 SDK 3.8.0 (bundled in JUCE 8.0.17-security): MIT.
+- IXWebSocket 11.4.5: BSD-3-Clause.
+- nlohmann/json 3.11.3: MIT.
+- SQLite 3.47.2: public domain.
+
+## Web app
+
 ## ONNX float64 graph compatibility helper
 
 The ONNX protobuf float64-to-float32 rewrite in `src/dsp/onnxFloat64Fix.ts` is adapted from:
