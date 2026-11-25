@@ -389,6 +389,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
       {p.aiNotice && (
         <p className="syn-fixai-notice" role="status" data-testid="console-ai-limit-notice">{p.aiNotice}</p>
       )}
+      {p.aiChanges}
     </div>
   );
 

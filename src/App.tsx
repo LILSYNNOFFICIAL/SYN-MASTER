@@ -131,6 +131,7 @@ import { ImportScreen } from './components/studio/ImportScreen';
 import { MasterConsole } from './components/console/MasterConsole';
 import { Portal } from './ui/Portal';
 import { FixItStage } from './components/studio/FixItStage';
+const WhatAiChangedPanel = React.lazy(() => import('./components/studio/WhatAiChangedPanel').then(({ WhatAiChangedPanel }) => ({ default: WhatAiChangedPanel })));
 const FxRackWindow = React.lazy(() => import('./components/studio/FxRackWindow').then(({ FxRackWindow }) => ({ default: FxRackWindow })));
 import { TimelinePlayer } from './components/studio/TimelinePlayer';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
@@ -308,6 +309,8 @@ export default function App() {
   const [directorPass, setDirectorPass] = useState(0);
   const [aiLifecycleState, setAiLifecycleState] = useState<AiChainLifecycleState>('Ready');
   const [preAiChainSnapshot, setPreAiChainSnapshot] = useState<ProcessorModule[] | null>(null);
+  /** Before/after chains of the last AI run that delivered a chain: drives the "What AI changed" list. */
+  const [aiChangeBase, setAiChangeBase] = useState<{ before: ProcessorModule[]; after: ProcessorModule[] } | null>(null);
   const [aiChainAccepted, setAiChainAccepted] = useState<boolean | null>(null);
   const directorPauseRef = useRef(false);
   const directorStopRef = useRef(false);
@@ -1065,6 +1068,7 @@ export default function App() {
       setAiStrategy(null);
       setAiLifecycleState('Ready');
       setPreAiChainSnapshot(null);
+      setAiChangeBase(null);
       setAiChainAccepted(null);
 
       const engine = engineRef.current!;
@@ -1450,7 +1454,8 @@ export default function App() {
     setAiError(null);
     setAiNotice(null);
     setAiChainAccepted(null);
-    setPreAiChainSnapshot(structuredClone(chain));
+    const preRunChain = structuredClone(chain);
+    setPreAiChainSnapshot(preRunChain);
     setDirectorRunning(true);
     setDiagnosticArchiveStatus('saving');
     setDirectorPaused(false);
@@ -1791,6 +1796,7 @@ export default function App() {
         // The delivered chain must be audible and re-measured exactly as the loop verified it.
         setChainBypassed(false);
         updateChainWithHistory(structuredClone(report.finalChain));
+        setAiChangeBase({ before: preRunChain, after: structuredClone(report.finalChain) });
         recordCorrection(
           `CHAIN WITH AI (${report.objective.label} · Pass #${report.bestPassNumber})`,
           report.finalChain,
@@ -2462,6 +2468,24 @@ export default function App() {
     }
   };
 
+  const renderAiChanges = (idPrefix: string) =>
+    aiChangeBase && !directorRunning ? (
+      <React.Suspense fallback={null}>
+        <WhatAiChangedPanel
+          idPrefix={idPrefix}
+          before={aiChangeBase.before}
+          after={aiChangeBase.after}
+          current={chain}
+          disabled={directorRunning}
+          onApplyChain={(next, label) => {
+            updateChainWithHistory(next, label);
+            recordCorrection(label, next);
+            setStatusNotice(`${label}. Reanalyzing resulting audio...`);
+          }}
+        />
+      </React.Suspense>
+    ) : null;
+
   const masterConsole = (
     <MasterConsole
       chain={chain}
@@ -2500,6 +2524,7 @@ export default function App() {
       onOpenStereoLab={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
       notice={statusNotice}
       aiNotice={aiNotice}
+      aiChanges={renderAiChanges('console')}
       onAskAi={() => setActiveTab('ai')}
       onExport={() => setExportModalOpen(true)}
       onSeek={seekTo}
@@ -3226,6 +3251,7 @@ export default function App() {
               aiLoading={aiLoading}
               aiError={aiError}
               aiNotice={aiNotice}
+              aiChanges={renderAiChanges('assistant')}
               onChangeOperatingMode={setOperatingMode}
               onChangeObjectiveId={setObjectiveId}
               onChangeCustomObjective={setCustomObjective}

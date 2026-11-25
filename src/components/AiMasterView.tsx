@@ -79,6 +79,8 @@ interface Props {
   aiError: string | null;
   /** Friendly notice (e.g. cloud AI limit reached; FIX ALL used the local DSP planner). */
   aiNotice?: string | null;
+  /** "What AI changed" list shown after a FIX ALL / CHAIN WITH AI run. */
+  aiChanges?: React.ReactNode;
   onChangeOperatingMode: (mode: DirectorOperatingMode) => void;
   onChangeObjectiveId: (id: MasteringObjectiveId) => void;
   onChangeCustomObjective: (spec: CustomObjectiveSpec) => void;
@@ -174,6 +176,7 @@ export const AiMasterView: React.FC<Props> = ({
   aiLoading,
   aiError,
   aiNotice,
+  aiChanges,
   onChangeOperatingMode,
   onChangeObjectiveId,
   onChangeCustomObjective,
@@ -663,6 +666,8 @@ export const AiMasterView: React.FC<Props> = ({
             {aiNotice}
           </div>
         )}
+
+        {aiChanges}
 
         {aiError && (
           <div className="p-2.5 rounded bg-[#EF4444]/10 border border-[#EF4444]/40 text-xs text-[#FCA5A5]">
