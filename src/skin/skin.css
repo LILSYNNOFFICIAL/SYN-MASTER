@@ -588,3 +588,63 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-deq-field-label{color:#8FB7D6;text-transform:uppercase;letter-spacing:.08em;}
 .syn-deq-field input[type="range"]{width:100%;accent-color:var(--band-color);min-height:24px;}
 .syn-deq-field-value{text-align:right;color:#E8F6FF;font:600 10px var(--syn-font-mono,monospace);font-variant-numeric:tabular-nums;}
+
+/* ==========================================================================
+   Nov 25 · Plugins & Host tab: console glass cards, gold primary actions,
+   electric-blue lines, cyan/purple status glow. Presentation only: every control
+   is the existing host-bridge action; the parameter bar shows each VST3 parameter's
+   real reported default (defaultValueNormalized).
+   ========================================================================== */
+.syn-plugin-workspace{--plug-line:rgba(46,168,255,.38);--plug-well:rgba(3,8,16,.72);}
+.syn-plugin-workspace .syn-plug-card{background:radial-gradient(ellipse at 0% 0%,rgba(46,168,255,.12),transparent 55%),radial-gradient(ellipse at 100% 100%,rgba(139,92,246,.10),transparent 55%),var(--skin-glass) !important;
+  border:1px solid var(--plug-line) !important;border-radius:var(--skin-radius) !important;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  box-shadow:0 0 0 1px rgba(0,0,0,.4) inset,0 0 22px var(--glow-blue-soft),0 10px 30px rgba(0,0,0,.5);}
+.syn-plugin-workspace .syn-plug-card h1{color:#F7F1E2 !important;letter-spacing:.04em;}
+.syn-plugin-workspace .syn-plug-card h1 + .syn-plug-milestone,.syn-plugin-workspace .syn-plug-milestone{background:rgba(245,184,46,.10) !important;border-color:var(--skin-gold-line) !important;color:var(--skin-gold) !important;box-shadow:0 0 10px var(--skin-gold-glow);border-radius:999px !important;}
+.syn-plugin-workspace .syn-plug-card svg.lucide-plug{color:var(--skin-gold) !important;filter:drop-shadow(0 0 6px var(--skin-gold-glow));}
+/* recessed wells (inputs, metadata, folders, history) */
+.syn-plugin-workspace [class*="bg-[#090A0E]"]{background:var(--plug-well) !important;border-color:rgba(46,168,255,.22) !important;border-radius:12px !important;box-shadow:inset 0 0 14px rgba(46,168,255,.06);}
+.syn-plugin-workspace :is(input,select)[class*="bg-["]{background:var(--skin-glass-2) !important;border-color:var(--plug-line) !important;border-radius:10px !important;color:var(--skin-text) !important;}
+.syn-plugin-workspace :is(input,select):focus,.syn-plugin-workspace :is(input,select):focus-visible{outline:none;border-color:var(--skin-cyan) !important;box-shadow:0 0 0 1px var(--skin-cyan),0 0 14px var(--glow-cyan);}
+/* section titles + accents */
+.syn-plugin-workspace h2[class*="text-[#F2CA52]"],.syn-plugin-workspace h3[class*="text-[#D4AF37]"],.syn-plugin-workspace .syn-plug-list-head{color:var(--skin-gold) !important;letter-spacing:.14em;text-shadow:0 0 10px var(--skin-gold-glow);}
+.syn-plugin-workspace .syn-plug-list-head{background:linear-gradient(90deg,rgba(46,168,255,.14),rgba(139,92,246,.08)) !important;border-color:var(--plug-line) !important;}
+.syn-plugin-workspace [class*="text-[#9CA3AF]"],.syn-plugin-workspace [class*="text-[#6B7280]"]{color:#8FB7D6 !important;}
+.syn-plugin-workspace [class*="text-[#C5CDD8]"]{color:#CFE9FF !important;}
+.syn-plugin-workspace svg[class*="text-[#D4AF37]"]{color:var(--skin-cyan) !important;filter:drop-shadow(0 0 4px var(--glow-cyan));}
+/* actions: gold primary, blue-glass secondary */
+.syn-plugin-workspace .syn-plug-primary{background:linear-gradient(180deg,#FFD36B,var(--skin-gold) 55%,#C88A12) !important;color:#120c00 !important;border:1px solid var(--skin-gold-bright) !important;border-radius:10px !important;box-shadow:0 0 14px var(--skin-gold-glow),inset 0 1px 0 rgba(255,255,255,.45);}
+.syn-plugin-workspace .syn-plug-primary:hover:not(:disabled){box-shadow:0 0 0 1px var(--skin-gold-bright),0 0 22px rgba(245,184,46,.55) !important;}
+.syn-plugin-workspace button[class*="bg-[#181A22]"]{background:rgba(46,168,255,.08) !important;border-color:var(--plug-line) !important;border-radius:10px !important;color:#CFE9FF !important;}
+.syn-plugin-workspace button[class*="bg-[#181A22]"][class*="text-[#F87171]"]{color:#FCA5A5 !important;border-color:rgba(239,68,68,.5) !important;background:rgba(239,68,68,.08) !important;}
+/* connection status: cyan when connected, gold while pairing, muted blue otherwise */
+.syn-plugin-workspace .syn-plug-status{border-radius:999px !important;background:rgba(46,168,255,.08) !important;border-color:var(--plug-line) !important;color:#9CC6E6 !important;}
+.syn-plugin-workspace .syn-plug-status[data-status="connected"]{background:linear-gradient(180deg,rgba(63,224,255,.22),rgba(46,168,255,.08)) !important;border-color:var(--line-blue-strong) !important;color:#E8FBFF !important;box-shadow:0 0 16px var(--glow-cyan);text-shadow:0 0 8px var(--glow-cyan);}
+.syn-plugin-workspace .syn-plug-status:is([data-status="pairing-required"],[data-status="connecting"]){background:rgba(245,184,46,.12) !important;border-color:var(--skin-gold-line) !important;color:var(--skin-gold) !important;box-shadow:0 0 14px var(--skin-gold-glow);}
+.syn-plugin-workspace .syn-plug-status:is([data-status="unavailable"],[data-status="disconnected"]){background:rgba(224,64,251,.10) !important;border-color:rgba(224,64,251,.45) !important;color:#F0ABFC !important;}
+.syn-plugin-workspace .syn-plug-connect{background:linear-gradient(90deg,rgba(46,168,255,.10),rgba(139,92,246,.08)) !important;border:1px solid var(--plug-line) !important;border-radius:14px !important;}
+/* plugin list */
+.syn-plugin-workspace .syn-plug-list > div.divide-y > *{border-color:rgba(46,168,255,.14) !important;}
+.syn-plugin-workspace .syn-plug-row{border-left:2px solid transparent;}
+.syn-plugin-workspace .syn-plug-row:hover{background:rgba(46,168,255,.08) !important;}
+.syn-plugin-workspace .syn-plug-row[data-selected="true"]{background:linear-gradient(90deg,rgba(63,224,255,.16),rgba(139,92,246,.06) 70%,transparent) !important;border-left-color:var(--skin-cyan) !important;box-shadow:inset 0 0 18px rgba(46,168,255,.10);}
+.syn-plugin-workspace .syn-plug-row:focus-visible{outline:2px solid var(--skin-cyan);outline-offset:-2px;}
+.syn-plugin-workspace .syn-plug-format{color:var(--skin-cyan) !important;border-color:rgba(63,224,255,.4) !important;background:rgba(63,224,255,.08) !important;}
+.syn-plugin-workspace .syn-plug-badge{border-radius:999px !important;}
+.syn-plugin-workspace .syn-plug-badge[data-plugin-status="available"]{color:#BFF3FF !important;border-color:rgba(63,224,255,.55) !important;background:rgba(63,224,255,.12) !important;box-shadow:0 0 8px rgba(63,224,255,.3);}
+.syn-plugin-workspace .syn-plug-badge[data-plugin-status="quarantined"]{color:#FCA5A5 !important;border-color:rgba(239,68,68,.55) !important;background:rgba(239,68,68,.12) !important;}
+.syn-plugin-workspace .syn-plug-badge:is([data-plugin-status="scan_failed"],[data-plugin-status="incompatible"]){color:#F0ABFC !important;border-color:rgba(224,64,251,.5) !important;background:rgba(224,64,251,.10) !important;}
+.syn-plugin-workspace svg.lucide-star[class*="fill-"]{color:var(--skin-gold) !important;filter:drop-shadow(0 0 5px var(--skin-gold-glow));}
+/* parameter inspector: bar = the parameter's reported default (0..1) */
+.syn-plugin-workspace .syn-plug-params{background:var(--plug-well) !important;}
+.syn-plugin-workspace .syn-plug-param{position:relative;}
+.syn-plugin-workspace .syn-plug-param::after{content:"";position:absolute;left:10px;right:10px;bottom:2px;height:2px;border-radius:2px;
+  background:linear-gradient(90deg,var(--skin-blue),var(--skin-cyan)) 0 0/var(--param-default,0%) 100% no-repeat,rgba(255,255,255,.06);box-shadow:0 0 6px rgba(46,168,255,.35);}
+.syn-plugin-workspace .syn-plug-param [class*="text-[#D4AF37]"]{color:var(--skin-magenta) !important;}
+/* progress + scan bar */
+.syn-plugin-workspace [class*="h-1.5"] > [class*="bg-[#D4AF37]"]{background:linear-gradient(90deg,var(--skin-blue),var(--skin-cyan),var(--skin-purple)) !important;box-shadow:0 0 10px var(--glow-blue);}
+/* empty state copy */
+.syn-plugin-workspace .syn-workspace-empty-plugins [class*="text-[#D4AF37]"]{color:var(--skin-cyan) !important;}
+.syn-plugin-workspace .syn-workspace-empty-plugins svg[class*="text-[#34D399]"]{color:var(--skin-cyan) !important;filter:drop-shadow(0 0 4px var(--glow-cyan));}
+.syn-plugin-workspace [class*="bg-[#EF4444]/10"]{border-radius:12px !important;}
+@media (max-width:767px){.syn-plugin-workspace .syn-plug-card{border-radius:16px !important;}.syn-plugin-workspace .syn-plug-primary{min-height:44px;}}
