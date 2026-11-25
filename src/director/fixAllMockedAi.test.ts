@@ -316,8 +316,9 @@ test('Fix All does not converge while blocking QC failures remain even if the ob
     },
   });
 
-  assert.equal(report.checkpoints[0]?.targetGate?.passed, true, `first rendered pass must meet every blocking objective target; failures: ${JSON.stringify(report.checkpoints[0]?.targetGate?.failed)}`);
-  assert.ok(report.checkpoints[0]?.qcReport.failCount > 0, 'first rendered pass deliberately retains a blocking QC failure');
+  const firstPass = report.checkpoints.find((checkpoint) => checkpoint.passNumber === 1);
+  assert.equal(firstPass?.targetGate?.passed, true, `first rendered pass must meet every blocking objective target; failures: ${JSON.stringify(firstPass?.targetGate?.failed)}`);
+  assert.ok((firstPass?.qcReport.failCount ?? 0) > 0, 'first rendered pass deliberately retains a blocking QC failure');
   assert.equal(refineCalls, 1, 'QC failures must prevent early convergence and trigger an AI refinement');
   assert.notEqual(report.status, 'converged', 'a master with blocking QC failures cannot be marked converged');
   assert.match(report.stopReason, /QC|not fully verified/i, 'the final reason must disclose the remaining QC failure');
