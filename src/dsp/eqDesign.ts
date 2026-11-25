@@ -17,6 +17,7 @@ import type {
   EQChannel,
   EQSlope,
   ParametricEQParams,
+  ProcessorModule,
 } from '../types/mastering';
 import {
   type BiquadCoeffs,
@@ -28,7 +29,7 @@ import {
   designNotch,
   designPeakingEQ,
   evaluateBiquadMagnitudeDb,
-} from './biquad';
+} from './biquad.ts';
 
 export const IDENTITY: BiquadCoeffs = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 };
 const SQRT1_2 = Math.SQRT1_2;
@@ -604,4 +605,14 @@ export function qEdgeRatio(q: number): number {
 export function qFromEdgeRatio(ratio: number): number {
   const bwOct = 2 * Math.log2(Math.max(1.0001, ratio));
   return 1 / (2 * Math.sinh((Math.LN2 / 2) * bwOct));
+}
+
+/** True when an active EQ / Dynamic EQ band is soloed: preview renders then audition it. */
+export function chainHasSoloedBand(chain: ProcessorModule[]): boolean {
+  return chain.some((m) => {
+    if (!m.enabled || m.bypassed) return false;
+    if (m.type !== 'parametric-eq' && m.type !== 'dynamic-eq') return false;
+    const bands = (m.params as { bands?: Array<{ enabled?: boolean; solo?: boolean }> }).bands ?? [];
+    return bands.some((b) => b.enabled !== false && b.solo === true);
+  });
 }

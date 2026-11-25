@@ -27,7 +27,7 @@ import type {
   SaturationParams,
   StereoImagerParams,
 } from '../types/mastering';
-import { EQ_CHANNELS, EQ_SUBTYPES, DYNAMIC_EQ_TYPES, allowedSlopes, resolveSubtype } from './eqDesign';
+import { EQ_CHANNELS, EQ_SUBTYPES, DYNAMIC_EQ_TYPES, allowedSlopes, resolveSubtype } from './eqDesign.ts';
 
 /** Band limits shared by the editors and AI validation. */
 export const MAX_EQ_BANDS = 8;
