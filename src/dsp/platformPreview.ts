@@ -10,6 +10,19 @@ import type { CodecId, PlatformId, PlatformPlayback } from './platformRules.ts';
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
+/** Plain-language rule behind each prediction, keyed by rule label (cited in README). */
+export const PLATFORM_RULE_NOTES: Record<string, string> = {
+  'Spotify (Loud)': 'Loud: -11 LUFS regardless of true peak; playback limiter at -1 dB (sample), 5 ms attack, 100 ms decay.',
+  'Spotify (Quiet)': 'Quiet: -19 LUFS. Positive gain keeps 1 dB of true-peak headroom.',
+  'Spotify (Normal)': 'Normal: -14 LUFS (ITU 1770). Positive gain only up to 1 dB below 0 dBTP; no limiter.',
+  'Apple Music (Sound Check)': 'Sound Check raises or lowers playback (Apple); about -16 LUFS by measurement. Positive gain is modelled peak-limited at -1 dBTP (Apple publishes no number).',
+  'YouTube': 'Turns loud uploads down to about -14 LUFS; never turns quiet ones up (measured, not published).',
+  'TIDAL': 'About -14 LUFS, turn-down only (reported; album mode aligns the loudest track). Track mode modelled.',
+  'Amazon Music': 'Loudness Normalization is a listener setting; about -14 LUFS, turn-down only by measurement.',
+  'SoundCloud': 'SoundCloud applies loudness normalisation and advises -14 LUFS / -1 dBTP (-2 dBTP when louder). Whether it turns quiet tracks up is not published: modelled turn-down only.',
+  'Off': 'Plays the master as mastered.',
+};
+
 /** What each platform streams (cited in README "Platform Preview"). */
 export const PLATFORM_CODEC_NOTES: Record<PlatformId, string> = {
   off: 'No platform model.',

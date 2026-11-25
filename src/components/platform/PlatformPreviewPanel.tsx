@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Headphones, Loader2, Square } from 'lucide
 import {
   CODEC_OPTIONS,
   PLATFORM_CODEC_NOTES,
+  PLATFORM_RULE_NOTES,
   PLATFORM_PROFILES,
   buildCodecEncodeParams,
   codecMatchTrimDb,
@@ -22,7 +23,7 @@ import {
 import { platformPreviewStore } from '../../engine/platformPreviewStore';
 import { telemetryStore } from '../../engine/telemetryStore';
 import type { SynAudioEngine } from '../../engine/audioEngine';
-import { usePlatformPreviewSelection } from './PlatformPreviewSelector';
+import { usePlatformPreviewSelection } from './usePlatformPreviewSelection';
 import { SnippetPlayer } from './snippetPlayer';
 import './platformPreview.css';
 
@@ -213,7 +214,7 @@ export const PlatformPreviewPanel: React.FC<Props> = ({ levels, getMasterAudio, 
                 </dl>
               )}
               {selected.deliveryAdvice && <p className="syn-pp-advice"><AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" /> {selected.deliveryAdvice}</p>}
-              {sel.platformId !== 'off' && <p className="syn-pp-note">{selected.note}{selected.confidence === 'reported' ? ' (reported, not published by the platform)' : ''}</p>}
+              {sel.platformId !== 'off' && <p className="syn-pp-note">{PLATFORM_RULE_NOTES[selected.label]}{selected.confidence === 'reported' ? ' (reported, not published by the platform)' : ''}</p>}
             </div>
           )}
 

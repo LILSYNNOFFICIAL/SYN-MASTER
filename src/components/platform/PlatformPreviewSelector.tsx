@@ -1,12 +1,10 @@
-import React, { useSyncExternalStore } from 'react';
+import React from 'react';
 import { Radio } from 'lucide-react';
 import { PLATFORM_PROFILES, predictForPlatform, type MasterLevels, type PlatformId, type SpotifyLevel } from '../../dsp/platformRules';
 import { platformPreviewStore } from '../../engine/platformPreviewStore';
 import './platformPreview.css';
 
-export function usePlatformPreviewSelection() {
-  return useSyncExternalStore(platformPreviewStore.subscribe, platformPreviewStore.getSnapshot, platformPreviewStore.getSnapshot);
-}
+import { usePlatformPreviewSelection } from './usePlatformPreviewSelection';
 
 const fmtDb = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v).toFixed(1)}`;
 
@@ -47,7 +45,7 @@ export const PlatformPreviewSelector: React.FC<{ levels: MasterLevels | null; on
         </label>
       )}
       {active && p && (
-        <span className={`syn-pp-readout risk-${p.risk}`} aria-live="polite" title={p.note}>
+        <span className={`syn-pp-readout risk-${p.risk}`} aria-live="polite">
           <b>{fmtDb(p.gainDb)} dB</b>
           <span className="syn-pp-tp">TP {p.predictedTruePeakDb.toFixed(1)}</span>
           {p.limiterEngaged && <span className="syn-pp-tag">limiter</span>}
@@ -59,3 +57,5 @@ export const PlatformPreviewSelector: React.FC<{ levels: MasterLevels | null; on
     </div>
   );
 };
+
+export default PlatformPreviewSelector;

@@ -135,7 +135,8 @@ import { FixItStage } from './components/studio/FixItStage';
 const WhatAiChangedPanel = React.lazy(() => import('./components/studio/WhatAiChangedPanel').then(({ WhatAiChangedPanel }) => ({ default: WhatAiChangedPanel })));
 const FxRackWindow = React.lazy(() => import('./components/studio/FxRackWindow').then(({ FxRackWindow }) => ({ default: FxRackWindow })));
 import { TimelinePlayer } from './components/studio/TimelinePlayer';
-import { PlatformPreviewSelector, usePlatformPreviewSelection } from './components/platform/PlatformPreviewSelector';
+import { usePlatformPreviewSelection } from './components/platform/usePlatformPreviewSelection';
+const PlatformPreviewSelector = React.lazy(() => import('./components/platform/PlatformPreviewSelector'));
 import { compressorMakeupDb, getPlatformRule, predictForPlatform, type MasterLevels } from './dsp/platformRules';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
@@ -2580,7 +2581,7 @@ export default function App() {
           onSeek={seekTo}
           onTogglePlay={togglePlay}
           onImport={handleUploadSourceFile}
-          extra={<PlatformPreviewSelector levels={platformLevels} onOpenPanel={() => setActiveTab('qc')} />}
+          extra={<React.Suspense fallback={null}><PlatformPreviewSelector levels={platformLevels} onOpenPanel={() => setActiveTab('qc')} /></React.Suspense>}
         />
       }
     />

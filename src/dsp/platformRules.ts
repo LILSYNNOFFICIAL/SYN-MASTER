@@ -42,7 +42,6 @@ export interface PlatformRule {
   limiter?: PlaybackLimiterSpec;
   /** 'official' = published by the platform; 'reported' = independent measurement / trade reports. */
   confidence: 'official' | 'reported';
-  note: string;
 }
 
 export interface PlatformProfile {
@@ -79,46 +78,46 @@ export function getPlatformRule(id: PlatformId, spotifyLevel: SpotifyLevel = 'no
       if (spotifyLevel === 'loud') {
         return {
           platformId: id, label: 'Spotify (Loud)', referenceLufs: -11, policy: 'limiter', limiter: SPOTIFY_LIMITER,
-          confidence: 'official', note: 'Loud: -11 LUFS regardless of true peak; playback limiter at -1 dB (sample), 5 ms attack, 100 ms decay.',
+          confidence: 'official'
         };
       }
       if (spotifyLevel === 'quiet') {
         return {
           platformId: id, label: 'Spotify (Quiet)', referenceLufs: -19, policy: 'peak-limited', headroomCeilingDbtp: -1,
-          confidence: 'official', note: 'Quiet: -19 LUFS. Positive gain keeps 1 dB of true-peak headroom.',
+          confidence: 'official'
         };
       }
       return {
         platformId: id, label: 'Spotify (Normal)', referenceLufs: -14, policy: 'peak-limited', headroomCeilingDbtp: -1,
-        confidence: 'official', note: 'Normal: -14 LUFS (ITU 1770). Positive gain only up to 1 dB below 0 dBTP; no limiter.',
+        confidence: 'official'
       };
     case 'apple':
       return {
         platformId: id, label: 'Apple Music (Sound Check)', referenceLufs: -16, policy: 'peak-limited', headroomCeilingDbtp: -1,
-        confidence: 'reported', note: 'Sound Check raises or lowers playback (Apple); about -16 LUFS by measurement. Positive gain is modelled peak-limited at -1 dBTP (Apple publishes no number).',
+        confidence: 'reported'
       };
     case 'youtube':
       return {
         platformId: id, label: 'YouTube', referenceLufs: -14, policy: 'down-only',
-        confidence: 'reported', note: 'Turns loud uploads down to about -14 LUFS; never turns quiet ones up (measured, not published).',
+        confidence: 'reported'
       };
     case 'tidal':
       return {
         platformId: id, label: 'TIDAL', referenceLufs: -14, policy: 'down-only',
-        confidence: 'reported', note: 'About -14 LUFS, turn-down only (reported; album mode aligns the loudest track). Track mode modelled.',
+        confidence: 'reported'
       };
     case 'amazon':
       return {
         platformId: id, label: 'Amazon Music', referenceLufs: -14, policy: 'down-only',
-        confidence: 'reported', note: 'Loudness Normalization is a listener setting; about -14 LUFS, turn-down only by measurement.',
+        confidence: 'reported'
       };
     case 'soundcloud':
       return {
         platformId: id, label: 'SoundCloud', referenceLufs: -14, policy: 'down-only',
-        confidence: 'official', note: 'SoundCloud applies loudness normalisation and advises -14 LUFS / -1 dBTP (-2 dBTP when louder). Whether it turns quiet tracks up is not published: modelled turn-down only.',
+        confidence: 'official'
       };
     default:
-      return { platformId: 'off', label: 'Off', referenceLufs: null, policy: 'none', confidence: 'official', note: 'Plays the master as mastered.' };
+      return { platformId: 'off', label: 'Off', referenceLufs: null, policy: 'none', confidence: 'official' };
   }
 }
 
@@ -151,7 +150,6 @@ export interface PlatformPlayback {
   /** Platform delivery advice the master breaks (e.g. Spotify/SoundCloud: louder than -14 LUFS needs TP below -2 dBTP). */
   deliveryAdvice: string | null;
   confidence: PlatformRule['confidence'];
-  note: string;
 }
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
@@ -168,7 +166,6 @@ export function predictPlatformPlayback(levels: MasterLevels, rule: PlatformRule
     platformId: rule.platformId,
     label: rule.label,
     confidence: rule.confidence,
-    note: rule.note,
   };
   const valid = Number.isFinite(lufs) && Number.isFinite(tp) && lufs > -70;
   if (rule.policy === 'none' || rule.referenceLufs === null || !valid) {
