@@ -63,7 +63,7 @@ Use ONLY needed processors; keep EQ moves surgical (+/- 4 dB max unless correcti
 
 Valid paramsJson schemas by processor type:
 1. "parametric-eq": {"phaseMode":"minimum"|"linear","msMode":"stereo"|"mid-side","tiltDb":number,"bands":[{"id":"b1","enabled":true,"shape":"highpass"|"lowshelf"|"bell"|"highshelf"|"lowpass"|"notch","freq":number,"gain":number,"q":number}]}
-2. "dynamic-eq": {"bands":[{"id":"d1","enabled":true,"freq":number,"q":number,"thresholdDb":number,"maxCutDb":number,"attackMs":number,"releaseMs":number}]}
+2. "dynamic-eq": {"bands":[{"id":"d1","enabled":true,"freq":number,"q":number,"thresholdDb":number,"maxCutDb":number,"ratio":number,"mode":"cut"|"boost","attackMs":number,"releaseMs":number}]}
 3. "compressor": {"mode":"downward"|"upward"|"parallel","thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"kneeDb":number,"makeupDb":number,"scHpfHz":number}
 4. "multiband-comp": {"lowCrossHz":number,"highCrossHz":number,"low":{"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"gainDb":number,"bypass":false},"mid":{"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"gainDb":number,"bypass":false},"high":{"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"gainDb":number,"bypass":false}}
 5. "saturation": {"flavor":"tube"|"tape"|"soft-clip"|"hard-clip"|"exciter","drive":number,"tone":number,"harmonics":"even"|"odd"|"balanced","oversampling":2}

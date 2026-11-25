@@ -30,7 +30,7 @@ export const LiveSpectrum: React.FC<{ bars?: number; height?: number; className?
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
       const n = bins?.length ?? 0;
-      const nyq = sampleRate / 2;
+      const nyq = ((bins && bins.length ? telemetryStore.getSnapshot().live?.sampleRate : null) ?? sampleRate) / 2;
       const grad = ctx.createLinearGradient(0, 0, w, 0);
       grad.addColorStop(0, '#2EA8FF');
       grad.addColorStop(0.5, '#3FE0FF');

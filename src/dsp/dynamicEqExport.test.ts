@@ -30,6 +30,26 @@ test('Dynamic EQ module cuts a loud band in the export render', async () => {
   assert.ok(cut > 2, `expected a cut of a few dB at 1 kHz, got ${cut.toFixed(2)} dB`);
 });
 
+test('Dynamic EQ ratio 2.9:1 preserves legacy cut behavior and boost is available', async () => {
+  const sr = 48000;
+  const src = tone(sr, 1, 1000, 0.5);
+  const legacy = createProcessorModule('dynamic-eq', {
+    params: { bands: [{ id: 'd1', enabled: true, freq: 1000, q: 2, thresholdDb: -30, maxCutDb: -6, attackMs: 5, releaseMs: 100 }] } satisfies DynamicEQParams,
+  });
+  const explicit = createProcessorModule('dynamic-eq', {
+    params: { bands: [{ id: 'd1', enabled: true, freq: 1000, q: 2, thresholdDb: -30, maxCutDb: -6, ratio: 20 / 7, mode: 'cut', attackMs: 5, releaseMs: 100 }] } satisfies DynamicEQParams,
+  });
+  const legacyOut = await renderMixedChain(src, sr, [legacy], undefined);
+  const explicitOut = await renderMixedChain(src, sr, [explicit], undefined);
+  assert.deepEqual(Array.from(explicitOut.channels[0]), Array.from(legacyOut.channels[0]), 'explicit default ratio must match legacy cut output');
+
+  const boost = createProcessorModule('dynamic-eq', {
+    params: { bands: [{ id: 'd1', enabled: true, freq: 1000, q: 2, thresholdDb: -30, maxCutDb: 6, ratio: 4, mode: 'boost', attackMs: 5, releaseMs: 100 }] } satisfies DynamicEQParams,
+  });
+  const boosted = await renderMixedChain(src, sr, [boost], undefined);
+  assert.ok(rmsDb(boosted.channels[0]) > rmsDb(src[0]), 'boost mode must increase the loud band');
+});
+
 test('Default chain without Dynamic EQ is bit-identical (feature is default-off)', async () => {
   const sr = 48000;
   const src = tone(sr, 0.5, 440, 0.3);

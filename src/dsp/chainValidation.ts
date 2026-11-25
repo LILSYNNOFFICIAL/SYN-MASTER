@@ -63,8 +63,8 @@ export function createDefaultParams(type: ProcessorType): ProcessorModule['param
     case 'dynamic-eq':
       return {
         bands: [
-          { id: 'd1', enabled: true, freq: 260, q: 2.2, thresholdDb: -22, maxCutDb: -3.5, attackMs: 12, releaseMs: 120 },
-          { id: 'd2', enabled: true, freq: 3800, q: 2.5, thresholdDb: -20, maxCutDb: -3.0, attackMs: 8, releaseMs: 90 },
+          { id: 'd1', enabled: true, freq: 260, q: 2.2, thresholdDb: -22, maxCutDb: -3.5, ratio: 20 / 7, mode: 'cut', attackMs: 12, releaseMs: 120 },
+          { id: 'd2', enabled: true, freq: 3800, q: 2.5, thresholdDb: -20, maxCutDb: -3.0, ratio: 20 / 7, mode: 'cut', attackMs: 8, releaseMs: 90 },
         ],
       } satisfies DynamicEQParams;
     case 'compressor':
@@ -240,15 +240,20 @@ export function validateProcessorParams(
       const def = defaults as DynamicEQParams;
       const rawBands = Array.isArray(src.bands) ? src.bands : def.bands;
       return {
-        bands: rawBands.slice(0, 4).map((b, idx) => {
+        bands: rawBands.slice(0, 4).map((b, idx): DynamicEQParams['bands'][number] => {
           const bo = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
+          const mode: 'cut' | 'boost' = bo.mode === 'boost' ? 'boost' : 'cut';
           return {
             id: typeof bo.id === 'string' && bo.id ? bo.id : `d${idx + 1}`,
             enabled: bo.enabled !== false,
             freq: clamp(Number(bo.freq), 30, 16000, 500),
             q: clamp(Number(bo.q), 0.5, 10, 2.0),
             thresholdDb: clamp(Number(bo.thresholdDb), -45, 0, -20),
-            maxCutDb: clamp(Number(bo.maxCutDb), -12, 0, -3),
+            maxCutDb: mode === 'boost'
+              ? clamp(Number(bo.maxCutDb), 0.5, 12, 3)
+              : clamp(Number(bo.maxCutDb), -12, -0.05, -3),
+            ratio: clamp(Number(bo.ratio), 1.0, 20.0, 20 / 7),
+            mode,
             attackMs: clamp(Number(bo.attackMs), 1, 100, 10),
             releaseMs: clamp(Number(bo.releaseMs), 20, 600, 110),
           };

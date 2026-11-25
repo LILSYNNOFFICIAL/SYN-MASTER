@@ -67,6 +67,8 @@ export interface DynamicEQParams {
     q: number;
     thresholdDb: number;
     maxCutDb: number;
+    ratio?: number;
+    mode?: 'cut' | 'boost';
     attackMs: number;
     releaseMs: number;
   }>;

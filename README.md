@@ -512,7 +512,7 @@ Current state: GUI redesign rounds 1–3 are on `main` (skin in `src/skin/skin.c
 
 Open items, in priority order:
 1. **Verify in a real browser:** a full WAV export contains the timeline fades and the Dynamic EQ (unit tests cover the render path, but no download has been clicked through). Run Fix All end to end with the new Mode line.
-2. **Dynamic EQ ratio knob:** the engine ratio is fixed at about 2.9:1 and the band only cuts. Add a ratio param (and optional boost) in the DSP behind defaults that keep the current output bit-identical, then expose it in the Dynamic EQ tab.
+2. [x] **Dynamic EQ ratio knob:** ratio and cut/boost mode are implemented in the offline and realtime preview paths, with legacy chains defaulting to the original ≈2.9:1 cut slope. The console and rack expose ratio and mode controls.
 3. **EQ live preview jump:** the drag-time estimate ignores the limiter/maximizer, so the waveform jumps and then settles. Estimate post-limiter level, or hold the previous size while dragging.
 4. **Mobile checks:** drag-seek on a real phone, mobile menubar dropdown positions, glow performance on slow devices, prefers-reduced-motion.
 5. **Live spectrum sample rate:** it assumes a 48 kHz context, so read `audioContext.sampleRate`.

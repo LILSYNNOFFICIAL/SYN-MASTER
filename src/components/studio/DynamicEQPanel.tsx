@@ -3,15 +3,14 @@ import type { DynamicEQParams, ProcessorModule } from '../../types/mastering';
 
 /**
  * Skinned editor for the engine's existing Dynamic EQ ('dynamic-eq' processor: per-band
- * band-pass detector driving a peaking cut). It edits the module's params only; the DSP is
+ * band-pass detector driving a peaking cut or boost). It edits the module's params only; the DSP is
  * the same one used by the realtime preview graph, the offline preview render and export.
- * The engine's cut slope is fixed (0.65 dB of cut per dB over threshold, ≈2.9:1) and the
- * cut is limited by "Range" (maxCutDb), so ratio is shown as a fixed value, not a control.
+ * Legacy cut-only bands omit ratio/mode and preserve the original ≈2.9:1 slope.
  */
 type Band = DynamicEQParams['bands'][number];
 
 const COLORS = ['#2EA8FF', '#8B5CF6', '#3FE0FF', '#E040FB'];
-const ENGINE_RATIO = 1 / (1 - 0.65);
+const LEGACY_RATIO = 20 / 7;
 
 interface Props {
   module: ProcessorModule | undefined;
@@ -69,7 +68,7 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, onAdd, onChange, onTog
     const used = new Set(params.bands.map((b) => b.id));
     let n = params.bands.length + 1;
     while (used.has(`d${n}`)) n++;
-    onChange({ ...params, bands: [...params.bands, { id: `d${n}`, enabled: true, freq: 1200, q: 2, thresholdDb: -20, maxCutDb: -3, attackMs: 10, releaseMs: 110 }] });
+    onChange({ ...params, bands: [...params.bands, { id: `d${n}`, enabled: true, freq: 1200, q: 2, thresholdDb: -20, maxCutDb: -3, ratio: LEGACY_RATIO, mode: 'cut', attackMs: 10, releaseMs: 110 }] });
   };
   const removeBand = (id: string) => onChange({ ...params, bands: params.bands.filter((b) => b.id !== id) });
 
@@ -79,7 +78,7 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, onAdd, onChange, onTog
         <button type="button" className="syn-deq-power" aria-pressed={on} onClick={() => onToggle(!on)}>
           {on ? 'ON' : 'BYPASSED'}
         </button>
-        <span className="syn-deq-note">Cut-only · ratio ≈{ENGINE_RATIO.toFixed(1)}:1 (engine) · applied in preview and export</span>
+        <span className="syn-deq-note">Cut / boost · ratio 1–20:1 · applied in preview and export</span>
         {params.bands.length < 4 && <button type="button" className="syn-deq-addband" onClick={addBand}>+ Band</button>}
       </div>
       <div className="syn-deq-bands">
@@ -96,9 +95,27 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, onAdd, onChange, onTog
               )}
             </div>
             <Field label="Freq" value={b.freq} min={30} max={16000} step={1} unit="Hz" log display={fmtHz(b.freq)} onChange={(v) => setBand(b.id, { freq: v })} disabled={!b.enabled} />
-            <Field label="Range" value={b.maxCutDb} min={-12} max={0} step={0.1} unit="dB" display={`${b.maxCutDb.toFixed(1)} dB`} onChange={(v) => setBand(b.id, { maxCutDb: v })} disabled={!b.enabled} />
+            <label className="syn-deq-field">
+              <span className="syn-deq-field-label">Mode</span>
+              <select value={b.mode ?? 'cut'} onChange={(e) => setBand(b.id, { mode: e.target.value as 'cut' | 'boost', maxCutDb: e.target.value === 'boost' ? Math.max(0.5, b.maxCutDb) : Math.min(-0.5, b.maxCutDb) })} disabled={!b.enabled} aria-label={`Band ${i + 1} mode`}>
+                <option value="cut">Cut</option>
+                <option value="boost">Boost</option>
+              </select>
+            </label>
+            <Field
+              label="Range"
+              value={b.mode === 'boost' ? Math.max(0.5, b.maxCutDb) : Math.min(-0.5, b.maxCutDb)}
+              min={b.mode === 'boost' ? 0.5 : -12}
+              max={b.mode === 'boost' ? 12 : -0.5}
+              step={0.1}
+              unit="dB"
+              display={`${(b.mode === 'boost' ? Math.max(0.5, b.maxCutDb) : Math.min(-0.5, b.maxCutDb)).toFixed(1)} dB`}
+              onChange={(v) => setBand(b.id, { maxCutDb: v })}
+              disabled={!b.enabled}
+            />
             <Field label="Q" value={b.q} min={0.5} max={10} step={0.05} unit="" log display={b.q.toFixed(2)} onChange={(v) => setBand(b.id, { q: v })} disabled={!b.enabled} />
             <Field label="Threshold" value={b.thresholdDb} min={-45} max={0} step={0.5} unit="dB" display={`${b.thresholdDb.toFixed(1)} dB`} onChange={(v) => setBand(b.id, { thresholdDb: v })} disabled={!b.enabled} />
+            <Field label="Ratio" value={b.ratio ?? LEGACY_RATIO} min={1} max={20} step={0.1} unit=":1" log display={`${(b.ratio ?? LEGACY_RATIO).toFixed(1)}:1`} onChange={(v) => setBand(b.id, { ratio: v })} disabled={!b.enabled} />
             <Field label="Attack" value={b.attackMs} min={1} max={100} step={1} unit="ms" log display={`${Math.round(b.attackMs)} ms`} onChange={(v) => setBand(b.id, { attackMs: v })} disabled={!b.enabled} />
             <Field label="Release" value={b.releaseMs} min={20} max={600} step={1} unit="ms" log display={`${Math.round(b.releaseMs)} ms`} onChange={(v) => setBand(b.id, { releaseMs: v })} disabled={!b.enabled} />
           </div>

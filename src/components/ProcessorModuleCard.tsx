@@ -530,9 +530,9 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                       />
                       <RotaryKnob
                         label="Max Cut"
-                        value={band.maxCutDb}
-                        min={-12}
-                        max={0}
+                        value={band.mode === 'boost' ? Math.max(0.5, band.maxCutDb) : Math.min(-0.5, band.maxCutDb)}
+                        min={band.mode === 'boost' ? 0.5 : -12}
+                        max={band.mode === 'boost' ? 12 : -0.5}
                         step={0.1}
                         defaultValue={-3}
                         unit="dB"
@@ -541,6 +541,34 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                         onChange={(v) => {
                           const next = [...p.bands];
                           next[bIdx] = { ...band, maxCutDb: v };
+                          setParam<DynamicEQParams>({ bands: next });
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="rounded border border-[#2B2E3A] px-2 py-1 text-[10px] text-[#E2E8F0]"
+                        disabled={!band.enabled}
+                        onClick={() => {
+                          const next = [...p.bands];
+                          next[bIdx] = { ...band, mode: band.mode === 'boost' ? 'cut' : 'boost', maxCutDb: band.mode === 'boost' ? -3 : 3 };
+                          setParam<DynamicEQParams>({ bands: next });
+                        }}
+                      >
+                        {band.mode === 'boost' ? 'BOOST' : 'CUT'}
+                      </button>
+                      <RotaryKnob
+                        label="Ratio"
+                        value={band.ratio ?? 20 / 7}
+                        min={1}
+                        max={20}
+                        step={0.1}
+                        defaultValue={20 / 7}
+                        unit=":1"
+                        size="xs"
+                        disabled={!band.enabled}
+                        onChange={(v) => {
+                          const next = [...p.bands];
+                          next[bIdx] = { ...band, ratio: v };
                           setParam<DynamicEQParams>({ bands: next });
                         }}
                       />

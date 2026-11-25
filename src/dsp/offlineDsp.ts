@@ -259,7 +259,10 @@ function applyDynamicEQ(
   let maxGr = 0;
 
   for (const band of params.bands) {
-    if (!band.enabled || band.maxCutDb >= -0.05) continue;
+    if (!band.enabled) continue;
+    const mode = band.mode ?? 'cut';
+    const limitDb = band.maxCutDb;
+    if ((mode === 'cut' && limitDb >= -0.05) || (mode === 'boost' && limitDb <= 0.05)) continue;
     const bpCoeffs = designBandPass(band.freq, band.q, sampleRate);
     const bpStateL = createBiquadState();
     const bpStateR = createBiquadState();
@@ -285,13 +288,19 @@ function applyDynamicEQ(
         : detectorReleaseCoeff * env + (1 - detectorReleaseCoeff) * det;
 
       const envDb = linearToDb(env);
-      let targetCut = 0;
+      let targetGainDb = 0;
       if (envDb > band.thresholdDb) {
         const over = envDb - band.thresholdDb;
-        targetCut = Math.max(band.maxCutDb * intensityScale, -over * 0.65 * intensityScale);
+        const ratio = band.ratio !== undefined && Number.isFinite(band.ratio) ? Math.max(1, band.ratio) : 20 / 7;
+        const slope = ratio === 20 / 7 ? 0.65 : 1 - 1 / ratio;
+        if (mode === 'boost') {
+          targetGainDb = Math.min(limitDb * intensityScale, over * slope * intensityScale);
+        } else {
+          targetGainDb = Math.max(limitDb * intensityScale, -over * slope * intensityScale);
+        }
       }
-      const gainCoeff = targetCut < currentGainDb ? gainAttackCoeff : gainReleaseCoeff;
-      currentGainDb = gainCoeff * currentGainDb + (1 - gainCoeff) * targetCut;
+      const gainCoeff = targetGainDb < currentGainDb ? gainAttackCoeff : gainReleaseCoeff;
+      currentGainDb = gainCoeff * currentGainDb + (1 - gainCoeff) * targetGainDb;
       if (Math.abs(currentGainDb) > maxGr) maxGr = Math.abs(currentGainDb);
 
       // Update filter coeffs periodically (every 32 samples) for CPU efficiency

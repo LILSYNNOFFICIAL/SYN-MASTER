@@ -49,6 +49,7 @@ export interface LiveMeterSnapshot {
   rmsR: number;
   correlation: number;
   gainReductionDb: number;
+  sampleRate: number;
   fftBins: Uint8Array;
   timeDomainL: Float32Array;
   timeDomainR: Float32Array;
@@ -643,7 +644,9 @@ export class SynAudioEngine {
         trackNodes(restoreNodes);
       } else if (mod.type === 'dynamic-eq') {
         const p = mod.params as DynamicEQParams;
-        const enabledBands = p.bands.filter((b) => b.enabled && b.maxCutDb < -0.05);
+        const enabledBands = p.bands.filter((b) => b.enabled && (
+          (b.mode === 'boost' ? b.maxCutDb > 0.05 : b.maxCutDb < -0.05)
+        ));
         const audioCtx = this.ctx;
         if (enabledBands.length > 0 && audioCtx) {
           const dynNodes = enabledBands.map((b) => {
@@ -651,7 +654,11 @@ export class SynAudioEngine {
             bq.type = 'peaking';
             bq.frequency.value = b.freq;
             bq.Q.value = b.q;
-            bq.gain.value = b.maxCutDb * 0.45 * intensity;
+            const ratio = Number.isFinite(b.ratio) ? Math.max(1, b.ratio ?? 20 / 7) : 20 / 7;
+            const slope = 1 - 1 / ratio;
+            bq.gain.value = b.mode === 'boost'
+              ? b.maxCutDb * 0.45 * intensity
+              : b.maxCutDb * 0.45 * (slope / 0.65) * intensity;
             return bq;
           });
           stageIn.connect(dynNodes[0]);
@@ -931,6 +938,7 @@ export class SynAudioEngine {
       rmsR: linearToDb(Math.sqrt(sumSqR / n)),
       correlation,
       gainReductionDb: Number(totalGr.toFixed(2)),
+      sampleRate: this.ctx?.sampleRate ?? 48000,
       fftBins: this.fftBuf,
       timeDomainL: this.tdBufL,
       timeDomainR: this.tdBufR,
