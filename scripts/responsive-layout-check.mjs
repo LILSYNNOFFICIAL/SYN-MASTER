@@ -206,7 +206,7 @@ async function runViewport(browser, width, height, mobile) {
 
     assert.equal(await page.locator('.syn2-fix-centerpiece').isVisible(), true, 'FIX ALL AI must appear as a separate centerpiece below the EQ workspace');
     assert.equal(await page.locator('.syn-fixai').isEnabled(), true, 'FIX ALL AI must be enabled once a track is loaded');
-    const knobs = page.locator('.syn-console [role="slider"]:visible');
+    const knobs = page.locator('.syn-console .syn-arcknob-dial[role="slider"]:visible');
     assert.ok((await knobs.count()) >= 2, 'Console must expose labelled, keyboard-focusable knobs/faders');
     const firstKnob = knobs.first();
     const before = await firstKnob.getAttribute('aria-valuenow');
