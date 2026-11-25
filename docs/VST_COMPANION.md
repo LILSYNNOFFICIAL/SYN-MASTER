@@ -70,6 +70,14 @@ Done:
   https://github.com/LILSYNNOFFICIAL/SYN-MASTER/releases/tag/v0.1.0
   (zip: https://github.com/LILSYNNOFFICIAL/SYN-MASTER/releases/download/v0.1.0/SYN-MASTER-VST-Companion-v0.1.0-win-x64.zip,
   SHA-256 `34325cc642eadc5625c9cdece9ff5e973bfbf5dc4b088cd435700a4a7a3aec6c`).
+- v0.1.1 pre-release (AGPL-3.0-only, JUCE 8.0.17-security, MIT VST3 SDK 3.8.0; zip adds
+  `LICENSE.txt` + `SOURCE.txt`), tag `v0.1.1` = commit `8b4196c`:
+  https://github.com/LILSYNNOFFICIAL/SYN-MASTER/releases/tag/v0.1.1
+  (zip: https://github.com/LILSYNNOFFICIAL/SYN-MASTER/releases/download/v0.1.1/SYN-MASTER-VST-Companion-v0.1.1-win-x64.zip,
+  SHA-256 `70c179da174fbd88f6a2351961a3f66bbd415a49d365bb8d3bd5498fbba9b507`).
+- `validate_windows_vst3.ps1` retries `plugin.load` up to 3 times only when the fresh worker exits
+  with an access violation (seen intermittently in CI, root cause not found yet); each retry is a
+  `::warning::` in the CI log.
 - Assets for a future companion window: `native/syn_companion_ui/assets/syn-master.ico` (multi-size icon) and `syn_master_logo.png` (320 px header logo).
 - `LocalIpcServer` status hooks for a window: `startScan(mode)`, `isScanInProgress()`, `scanCompleted()/scanTotal()`, `hasPairedOnce()`, `authenticatedClientCount()`.
 
