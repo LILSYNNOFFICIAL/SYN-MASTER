@@ -23,9 +23,9 @@ const MetricCard: React.FC<{ label: string; value: string; delta?: string }> = (
   delta,
 }) => (
   <div className="syn-lab-metric p-3 rounded bg-[#111217] border border-[#232632]">
-    <div className="text-[11px] uppercase tracking-wider text-[#9CA3AF]">{label}</div>
+    <div className="syn-lab-metric-label text-[11px] uppercase tracking-wider text-[#9CA3AF]">{label}</div>
     <div className="mt-1 text-lg font-bold font-mono-tabular text-[#F7F8FA]">{value}</div>
-    {delta && <div className="text-[11px] font-mono-tabular text-[#D4AF37]">{delta}</div>}
+    {delta && <div className="syn-lab-metric-delta text-[11px] font-mono-tabular text-[#D4AF37]">{delta}</div>}
   </div>
 );
 
@@ -108,9 +108,11 @@ export const SynLabView: React.FC<Props> = React.memo(({
               <h3 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37] mb-2.5">
                 Spectral Zone Balance (Pre vs Master)
               </h3>
+              <div className="syn-lab-zone-key" aria-hidden="true"><i className="syn-lab-zone-key-post" />Master <i className="syn-lab-zone-key-pre" />Pre</div>
               <div className="flex flex-col gap-2">
                 {zoneEntries.map((z) => {
                   const pct = Math.max(5, Math.min(100, ((z.post + 60) / 55) * 100));
+                  const prePct = Math.max(0, Math.min(100, ((z.pre + 60) / 55) * 100));
                   const delta = z.post - z.pre;
                   return (
                     <div key={z.label} className="flex flex-col gap-1">
@@ -120,8 +122,9 @@ export const SynLabView: React.FC<Props> = React.memo(({
                           {z.post.toFixed(1)} dB ({delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1)})
                         </span>
                       </div>
-                      <div className="h-1.5 rounded bg-[#1B1D26] overflow-hidden">
-                        <div className="h-full bg-[#D4AF37]" style={{ width: `${pct}%` }} />
+                      <div className="syn-lab-zone-bar h-1.5 rounded bg-[#1B1D26]" title={`Pre ${z.pre.toFixed(1)} dB · Master ${z.post.toFixed(1)} dB`}>
+                        <div className="syn-lab-zone-fill h-full bg-[#D4AF37]" style={{ width: `${pct}%` }} />
+                        <i className="syn-lab-zone-pre" style={{ left: `${prePct}%` }} aria-hidden="true" />
                       </div>
                     </div>
                   );
@@ -147,7 +150,7 @@ export const SynLabView: React.FC<Props> = React.memo(({
                       className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 text-xs font-mono-tabular py-1 border-b border-[#1D202A]"
                     >
                       <span className="min-w-0 whitespace-nowrap text-[#F7F8FA]">{r.freqHz} Hz</span>
-                      <span className="whitespace-nowrap text-right text-[#F59E0B]">+{r.excessDb} dB peak</span>
+                      <span className="syn-lab-res-peak whitespace-nowrap text-right text-[#F59E0B]">+{r.excessDb} dB peak</span>
                       <span className="col-span-2 sm:col-span-1 text-right uppercase text-[10px] text-[#9CA3AF]">{r.severity}</span>
                     </div>
                   ))}
@@ -188,7 +191,7 @@ export const SynLabView: React.FC<Props> = React.memo(({
                 Loudness History (Short-Term LUFS Timeline)
               </h3>
               <span className="text-[11px] font-mono-tabular text-[#9CA3AF]">
-                Dashed: Pre-Master · Gold: Mastered
+                <span className="syn-lab-legend-pre">Dashed: Pre-Master</span> · <span className="syn-lab-legend-post">Solid: Mastered</span>
               </span>
             </div>
             <LoudnessHistoryCanvas
