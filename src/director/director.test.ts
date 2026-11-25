@@ -1039,8 +1039,10 @@ test('Fix All does not converge while a baseline technical finding remains unres
   assert.equal(firstPass?.targetGate?.passed, true, 'Objective gate must pass for this regression fixture');
   assert.equal(firstPass?.qcReport.failCount, 0, 'Blocking QC must pass for this regression fixture');
   assert.notEqual(report.status, 'converged', 'An unresolved technical finding must prevent clean convergence');
+  const verification = report.postFixVerification;
+  assert.ok(verification, 'Final report must include independent post-fix verification');
   assert.ok(
-    report.postFixVerification.activeFindings.some((finding) => finding.findingId === 'diag-harsh'),
+    verification.activeFindings.some((finding) => finding.findingId === 'diag-harsh'),
     'The remaining resonance must stay visible as an active finding',
   );
   assert.match(report.stopReason, /actionable technical finding/i);
