@@ -533,7 +533,7 @@ Owner feedback round 2 ("more blue glow everywhere"). Skin lives in `src/skin/sk
 - [ ] Re-run `scripts/responsive-layout-check.mjs` in CI (updated for the new layout; passed locally at 360–1440 px, the run did not exit cleanly afterwards) and final screenshots.
 - **Re-import into AI Studio:** pull `main`, import the GitHub repo into Google AI Studio, then build and republish. No new build steps: same entry files, assets live in `public/`.
 
-## ChatGPT handoff — next steps (Nov 24, 2026, after commit 9e58e66)
+## Prior handoff — Nov 24, 2026 (after commit 9e58e66)
 
 Current state: GUI redesign rounds 1–3 are on `main` (skin in `src/skin/skin.css`, guided 1–4 console flow, TimelinePlayer with seek + S-curve fades, real EQ waveform blanket, Ask AI under FIX ALL, Ozone-style imager, live QC loudness, Dynamic EQ tab, Mode sent to the AI as its own line). The current accuracy follow-up passes lint/build and 219 of 220 tests; one FFmpeg-dependent test is skipped when FFmpeg is unavailable. See the "GUI redesign status" sections above.
 
@@ -584,11 +584,22 @@ Band design lives in `src/dsp/eqDesign.ts` and is shared by the offline renderer
 - [x] **Browser checks:** `scripts/eq-overhaul-check.mjs` (Playwright, 1440 and 412 px, parametric EQ only): popover and menus on screen, Type submenus, subtype/slope/channel changes, note readout, solo notice, keyboard nudge, double-click add, no page overflow, no runtime errors. `scripts/responsive-layout-check.mjs` waits for the code-split rack / Dynamic EQ before asserting (same assertions).
 - Tests: `src/dsp/eqDesign.test.ts` (every subtype's response, slopes, channels, auto-gain loudness, solo, rendered impulse response vs drawn curve in minimum and linear phase), `src/dsp/dynamicEqTypes.test.ts` (ratio, range, threshold, boost, knee, channel, sidechain, lookahead, curve types, traces, solo).
 
+## ChatGPT handoff — next steps (Nov 25, 2026, after commit bf82300)
 
-### Dynamic EQ editor completion — Nov 25, 2026
+Current state:
+- `main` is at `bf82300be96a376d114412952a3adf1b54c1dad0` (`feat(ui): rebuild Dynamic EQ with shared Ozone editor`).
+- Dynamic EQ now uses the shared Ozone-style graph, band popover and type menu. It has draggable frequency nodes, Q handles, all seven supported curve types, eight-band capacity, threshold/detector display, cut/boost range, ratio, attack/release, knee, channel, custom sidechain and lookahead controls.
+- The panel receives the real preview-render trace, source/master spectra and sample rate. Its live curve and detector meter follow the preview playhead. Stronger cyan/gold/purple glow and reduced-motion handling are in `src/skin/skin.css`.
+- Web CI run [#45636832856](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/runs/45636832856) passed: 293/293 unit tests, TypeScript, production build, 762.5 KiB initial JS chunk budget, production startup smoke test, responsive Chromium checks at 360/375/412/1024/1440 px, and production-browser WAV export containing both timeline fades and Dynamic EQ processing.
+- The Windows x64 native/plugin workflow was also triggered by the push and was still running when this handoff was written: [#45636832807](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/runs/45636832807).
+- The deployed Google AI Studio page was not re-imported or visually inspected here. No owner-supplied music track, physical Android device, or live external AI provider was available for listening/device/provider acceptance.
 
-- [x] Replaced the legacy slider-card UI with the shared Ozone-style graph, draggable band nodes, Q handles, type menu, band popover, per-band power/solo/delete and analyser controls.
-- [x] Connected the existing preview-render Dynamic EQ detector/gain traces to the editor. The maximum-range curve and live applied curve are drawn from the same `designDynamicSections` response used by the DSP; detector level and gain readouts follow the shared playback playhead.
-- [x] Exposed all supported curve types and DSP controls, including cut/boost range, ratio, attack, release, knee, channel, custom sidechain frequency/Q and lookahead. UI band limit now matches the DSP's eight-band limit.
-- [x] Added stronger cyan/gold/purple graph, node, popover and live-curve glow; reduced-motion preference disables editor animation.
-- [x] Extended the production Chromium responsive/export test to cover Dynamic EQ graph rendering, type menu, threshold meter, advanced controls, adding and deleting a band before export verification.
+Next work, in priority order:
+1. Listen to the Dynamic EQ on a real LIL SYNN source track and compare preview/export playback. Run a real-provider FIX ALL session separately; the mocked end-to-end and export tests do not replace owner acceptance.
+2. Check the glow, drag/Q gestures, popover placement and reduced-motion behavior on a physical Android phone and a lower-powered device. Chromium viewport checks are not a physical-device test.
+3. Rebuild the AI Assistant page layout to match the console, beyond its completed skin restyle.
+4. Finish the Plugins & Host tab redesign and give the Windows companion a JUCE LookAndFeel; the companion release workflow/docs already exist.
+5. Calibrate BYO-AI shimmer on representative real audio and perform live calls with real provider keys.
+6. Remove dead old-dashboard CSS and the duplicate `:root` in `src/index.css`; replace native `assert`-based tests with always-on checks where needed.
+
+Rules: continue with small commits directly to `main`; preserve existing work; keep Google AI Studio compatibility (same entry files, assets under `public/`, no new backend/build steps, Gemini key server-only); do not change DSP defaults, the default Gemini provider or the FIX ALL verification loop unless explicitly requested. Update this README as work is verified.
