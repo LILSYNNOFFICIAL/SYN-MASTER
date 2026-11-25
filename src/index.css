@@ -1005,8 +1005,8 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   .syn-workstation [role="toolbar"] { align-items: stretch; gap: 8px; padding: 8px 10px; }
   .syn-workstation [role="toolbar"] > * { min-width: 0; max-width: 100%; }
   .syn-control-desk { padding: 12px !important; }
-  .syn-meter-bridge { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; padding: 8px 10px; }
-  .syn-meter-stereo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(104px, .42fr); gap: 10px; align-items: center; }
+  .syn-workstation .syn-meter-bridge { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; padding: 8px 10px; }
+  .syn-meter-stereo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(132px, .5fr); gap: 10px; align-items: center; }
   .syn-meter-stereo-head { justify-content: flex-start; column-gap: 8px; }
   .syn-meter-kicker { font-size: 9px; }
   .syn-meter-live-readout { font-size: 9px; }

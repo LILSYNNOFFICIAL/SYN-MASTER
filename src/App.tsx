@@ -212,6 +212,13 @@ export default function App() {
   const [postPeaksHi, setPostPeaksHi] = useState<number[] | null>(null);
   const [rackWindowOpen, setRackWindowOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  // Esc closes the drawer wherever focus is (the toggle keeps focus after opening it).
+  useEffect(() => {
+    if (!libraryOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLibraryOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [libraryOpen]);
 
   const [projectId, setProjectId] = useState(() => `proj-${Date.now()}`);
   const [projectName, setProjectName] = useState('Untitled Mastering Session');
