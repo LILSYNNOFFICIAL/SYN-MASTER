@@ -1,0 +1,30 @@
+SYN-MASTER VST Companion: third-party components
+=================================================
+
+The companion executables are built from https://github.com/LILSYNNOFFICIAL/SYN-MASTER
+(native/) and statically include the components below. Versions are the ones pinned in
+native/CMakeLists.txt at build time.
+
+JUCE 8.0.6 (https://juce.com, https://github.com/juce-framework/JUCE)
+  Dual licensed: GNU Affero General Public License v3 (AGPLv3) OR a commercial JUCE licence.
+  This build is distributed under the AGPLv3 option unless the SYN-MASTER owner holds a
+  commercial JUCE licence. Under AGPLv3 the complete corresponding source of this program is
+  available at https://github.com/LILSYNNOFFICIAL/SYN-MASTER.
+
+Steinberg VST3 SDK 3.7.x, as bundled inside JUCE 8.0.6
+  (modules/juce_audio_processors/format_types/VST3_SDK)
+  Licensed under the proprietary Steinberg VST3 License OR GPLv3 (see the LICENSE.txt in that
+  folder and https://www.steinberg.net/sdklicenses_vst3). VST is a registered trademark of
+  Steinberg Media Technologies GmbH. Newer VST3 SDK releases (3.8.0 and later) are MIT
+  licensed; this build does not yet use one.
+
+IXWebSocket 11.4.5 (https://github.com/machinezone/IXWebSocket)
+  BSD 3-Clause License.
+
+nlohmann/json 3.11.3 (https://github.com/nlohmann/json)
+  MIT License. Copyright (c) 2013-2023 Niels Lohmann.
+
+SQLite 3.47.2 amalgamation (https://www.sqlite.org)
+  Public domain.
+
+Full licence texts are in each project's repository at the pinned version.

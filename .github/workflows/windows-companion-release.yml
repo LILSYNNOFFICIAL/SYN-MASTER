@@ -67,7 +67,7 @@ jobs:
             Copy-Item $src $stage
           }
           Copy-Item native/companion-release/README.txt "$stage/README.txt"
-          Copy-Item docs/THIRD_PARTY_NOTICES.md "$stage/THIRD_PARTY_NOTICES.md"
+          Copy-Item native/companion-release/THIRD_PARTY_NOTICES.txt "$stage/THIRD_PARTY_NOTICES.txt"
           $zip = "dist-companion/$name.zip"
           Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()

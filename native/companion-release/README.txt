@@ -11,7 +11,7 @@ What is in this zip
   syn-plugin-scanner.exe  Scans VST3 bundles in a separate process (started by the host).
   syn-plugin-worker.exe   Hosts each plugin in its own process so a crashing
                           plugin cannot take down the host (started by the host).
-  THIRD_PARTY_NOTICES.md  Licences of bundled components.
+  THIRD_PARTY_NOTICES.txt Licences of bundled components.
 
 Keep all three .exe files in the same folder.
 

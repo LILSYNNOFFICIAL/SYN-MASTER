@@ -80,7 +80,8 @@ if(SYN_FETCH_DEPS)
 
   if(SYN_USE_JUCE)
     # JUCE 8 (Dual-licensed: AGPLv3 OR Commercial JUCE EULA)
-    # VST3 SDK >=3.8.0 bundled / selectable under Steinberg MIT License terms.
+    # JUCE 8.0.6 bundles VST3 SDK 3.7.x (Steinberg VST3 License OR GPLv3). VST3 SDK 3.8.0+ is
+    # MIT licensed but needs a newer JUCE pin; see docs/VST_COMPANION.md (Licensing).
     FetchContent_Declare(
       JUCE
       GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
