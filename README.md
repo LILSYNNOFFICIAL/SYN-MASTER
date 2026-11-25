@@ -531,3 +531,13 @@ Rules: commit small working changes straight to `main`. Stay AI Studio compatibl
 - [x] Add regression coverage for legacy ratio/mode migration, bounds, boost, and a WAV-byte render containing both Dynamic EQ attenuation and post-chain fades.
 - [x] The live output readout exposes current sample peak and live gain reduction; the console also exposes last-render peak-stage input/output and gain reduction, alongside measured final true peak.
 - [ ] Browser download/Fix-All e2e, phone/Android Chrome and low-end device checks, listening parity, and calibration on representative real music remain manual acceptance tasks. This environment has no supplied owner source track or physical device.
+
+### Verification, mobile emulation and skin pass — Nov 25, 2026
+
+Presentation and verification only: no DSP defaults, AI prompts, provider behaviour, default Gemini, or Fix-All loop changes.
+
+- [x] **Export ↔ preview parity test** (`src/dsp/exportPreviewParity.test.ts`): a stereo source through an enabled Dynamic EQ (one cut band, one boost band) and a working limiter, with S-curve/linear timeline fades. The export path (`renderMixedChain` → 32-bit `encodeWavBlob`) is bit-identical to the preview path (the real `dspWorker` module driven through `createDspWorkerClient`), including per-module telemetry. Fades are proven post-chain (chain telemetry unchanged by fades; output = fades(chain(source)); pre-chain fading would differ). Dynamic EQ cuts 1 kHz and lifts 5 kHz; bypass is bit-identical. 16/24/32-bit files parse as valid RIFF/WAVE (RIFF size, fmt fields, data alignment) within half an LSB, and `ffprobe` accepts them (skipped when ffprobe is absent).
+- [ ] Fix All end-to-end with a mocked AI response.
+- [ ] Mobile emulation (412×915, 390×844, touch, reduced motion).
+- [ ] Skin restyle: Plugins & Host, AI Assistant, Analysis Lab canvases.
+- [ ] Remove dead old-dashboard CSS and the duplicate `:root` in `src/index.css`.
