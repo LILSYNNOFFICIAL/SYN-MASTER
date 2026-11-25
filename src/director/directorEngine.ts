@@ -56,6 +56,14 @@ import { renderAndAnalyzeOffThread } from '../dsp/workerClient';
 import { QC_TARGET_PROFILES, runQualityControl } from '../dsp/qc';
 import { analyzeTrackIntelligence, computeRegionEnergyDb, getDiagnosisThresholds } from './analyzeIntelligence';
 import { MUD_CORRECTION_HZ, MUD_REGION_HZ } from '../dsp/bandMap';
+import {
+  REFINE_MUD_PROPORTIONAL_Q,
+  measureRumble,
+  mudBell,
+  planDynamicHighBand,
+  planRumbleHighPass,
+  planSideLowCut,
+} from './eqStrategy';
 import { applyStructuredChainCommands } from './chainCommands';
 import { inspectPluginInventory } from './pluginIntelligence';
 import { validateChainAgainstInventory } from './processorInventory';
@@ -388,9 +396,17 @@ export function buildExplainableMasterPlan(input: {
     hasGenuineNoiseFloor ||
     (analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 && analysis.resonances.some((r) => r.freqHz > 4500));
 
+  // Measured isolated upper resonance (Stage 3 below). When it is sibilance, a keyed dynamic
+  // high shelf de-esses it, so SYN-Restore's static de-esser drops to its light baseline
+  // instead of stacking a second de-esser on the same region.
+  const topRes = analysis.resonances.find((resonance) =>
+    resonance.freqHz >= 2000 && resonance.freqHz <= 12000 && resonance.excessDb >= 6.0,
+  );
+  const dynamicHighPlan = topRes ? planDynamicHighBand(analysis, topRes) : null;
+
   if (needsRestore) {
     const hiss = hasGenuineNoiseFloor ? Math.min(42, Math.round((nf + 55) * 2.2)) : 4;
-    const deEss = analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 ? 24 : 8;
+    const deEss = analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 && dynamicHighPlan?.kind !== 'sibilance' ? 24 : 8;
     const restoreParams = {
       dcOffset: analysis.dcOffset >= 0.004,
       humRemovalHz: 0 as const,
@@ -437,34 +453,33 @@ export function buildExplainableMasterPlan(input: {
   }
 
   // Stage 2: Surgical Parametric EQ (weighted by Objective + Reference; skipped on already balanced transparent/dynamic tracks)
-  const bands: Array<{
-    id: string;
-    enabled: boolean;
-    shape: 'highpass' | 'lowshelf' | 'bell' | 'highshelf' | 'lowpass' | 'notch';
-    freq: number;
-    gain: number;
-    q: number;
-  }> = [];
+  const bands: EQBand[] = [];
+  const eqTypeNotes: string[] = [];
 
   const needsSubHpf =
     analysis.dcOffset >= 0.002 ||
     analysis.zoneEnergyDb.sub - analysis.zoneEnergyDb.bass > 2.5 ||
     objective.id === 'hip-hop' ||
     objective.id === 'electronic' ||
-    objective.id === 'commercial-loudness';
+    objective.id === 'commercial-loudness' ||
+    measureRumble(analysis).measured;
   if (needsSubHpf) {
-    bands.push({
-      id: 'b1',
-      enabled: true,
-      shape: 'highpass',
-      freq: objective.id === 'transparent' || objective.id === 'dynamic' || objective.id === 'acoustic' ? 24 : 28,
-      gain: 0,
-      q: 0.71,
-    });
+    // Flat 12 dB/oct (legacy) for headroom safety; Flat 18/24 dB/oct only for measured rumble.
+    const rumble = planRumbleHighPass(analysis, objective, 'b1');
+    bands.push(rumble.band);
+    eqTypeNotes.push(rumble.summary);
+  }
+
+  // Mono bass: Side-channel low cut when the low end is measurably decorrelated.
+  const sideLowCut = planSideLowCut(analysis);
+  if (sideLowCut) {
+    bands.push(sideLowCut.band);
+    eqTypeNotes.push(sideLowCut.summary);
   }
 
   const eqReasons: string[] = [];
   let eqBassGain = 0;
+  let eqBassIsTilt = false;
   const eqBassLimit =
     objective.id === 'hip-hop' ||
     objective.id === 'electronic' ||
@@ -485,9 +500,18 @@ export function buildExplainableMasterPlan(input: {
   } else if (bassMidDiff < 2.0 && objective.id !== 'transparent' && objective.id !== 'dynamic' && objective.id !== 'acoustic') {
     eqBassGain = objective.id === 'hip-hop' || objective.id === 'electronic' ? 1.5 : 1.1;
     eqReasons.push(`Lean low-end (Bass-Mid ${bassMidDiff.toFixed(1)} dB)`);
+    eqBassIsTilt = true;
   }
   if (Math.abs(eqBassGain) >= 0.3) {
-    bands.push({ id: 'b2', enabled: true, shape: 'lowshelf', freq: 88, gain: eqBassGain, q: 0.71 });
+    if (eqBassIsTilt) {
+      // A broad lift for a lean low end is a tilt move: Baxandall bass (two half-gain
+      // first-order shelves at 88 Hz and 22 Hz) rises gently instead of adding a shelf bump.
+      bands.push({ id: 'b2', enabled: true, shape: 'lowshelf', subtype: 'baxandall', freq: 88, gain: eqBassGain, q: 0.71 });
+      eqTypeNotes.push(`Baxandall low shelf +${eqBassGain} dB @ 88 Hz (broad tilt for a lean low end)`);
+    } else {
+      // Corrective / reference-matched shelf: Analog (the legacy RBJ shelf, unchanged).
+      bands.push({ id: 'b2', enabled: true, shape: 'lowshelf', freq: 88, gain: eqBassGain, q: 0.71 });
+    }
   }
 
   const mudThresholds = getDiagnosisThresholds(objective, referenceAnalysis);
@@ -504,8 +528,10 @@ export function buildExplainableMasterPlan(input: {
   let mudCut = lowMidBuildup > 3.8 ? Number(Math.max(-3.2, -(lowMidBuildup - 2.6) * 0.6).toFixed(1)) : 0;
   if (useDynamicMudControl) mudCut = Number(Math.max(-1.5, Math.min(mudCut, -0.5)).toFixed(1));
   if (mudCut <= -0.4) {
-    bands.push({ id: 'b3', enabled: true, shape: 'bell', freq: 300, gain: mudCut, q: 1.4 });
+    // Proportional Q: wide and gentle at a small cut, tighter if refinement deepens it.
+    bands.push(mudBell('b3', 300, mudCut));
     eqReasons.push(`Low-mid buildup (+${lowMidBuildup.toFixed(1)} dB) -> ${mudCut} dB @ 300 Hz`);
+    eqTypeNotes.push(`Proportional Q bell ${mudCut} dB @ 300 Hz (mud)`);
   }
 
   if (objective.id === 'vocal-focused' && analysis.zoneEnergyDb.mid - analysis.zoneEnergyDb.bass < -3.0) {
@@ -514,6 +540,7 @@ export function buildExplainableMasterPlan(input: {
   }
 
   let highAirGain = 0;
+  let highAirIsTilt = false;
   if (referenceAnalysis) {
     // Match air relative to the midrange, not absolute dBFS. This preserves real
     // brightness differences while cancelling a uniform reference level offset.
@@ -523,13 +550,22 @@ export function buildExplainableMasterPlan(input: {
     highAirGain = Number(Math.max(-2.5, Math.min(3.0, levelMatchedAirDelta * 0.4)).toFixed(1));
   } else if (objective.tonalBias === 'bright' && analysis.spectralSlopeDbPerOct < -1.1) {
     highAirGain = analysis.spectralSlopeDbPerOct < -2.2 ? 1.8 : 0.9;
+    highAirIsTilt = true;
   } else if (objective.tonalBias === 'warm') {
     highAirGain = harshExcess > 1.5 ? -0.8 : 0;
   } else if (analysis.spectralSlopeDbPerOct < -3.8) {
     highAirGain = 1.1;
+    highAirIsTilt = true;
   }
   if (Math.abs(highAirGain) >= 0.3) {
-    bands.push({ id: 'b4', enabled: true, shape: 'highshelf', freq: 11200, gain: highAirGain, q: 0.71 });
+    if (highAirIsTilt) {
+      // Measured dark spectral slope: a Baxandall treble shelf keeps rising into the top
+      // octave like a tone control, rather than a shelf plateau at 11.2 kHz.
+      bands.push({ id: 'b4', enabled: true, shape: 'highshelf', subtype: 'baxandall', freq: 8000, gain: highAirGain, q: 0.71 });
+      eqTypeNotes.push(`Baxandall high shelf ${highAirGain > 0 ? '+' : ''}${highAirGain} dB @ 8 kHz (slope ${analysis.spectralSlopeDbPerOct.toFixed(2)} dB/oct)`);
+    } else {
+      bands.push({ id: 'b4', enabled: true, shape: 'highshelf', freq: 11200, gain: highAirGain, q: 0.71 });
+    }
     eqReasons.push(`Tilt (${analysis.spectralSlopeDbPerOct.toFixed(2)} dB/oct) + ${objective.tonalBias} bias -> ${highAirGain > 0 ? '+' : ''}${highAirGain} dB @ 11.2 kHz`);
   }
 
@@ -555,13 +591,14 @@ export function buildExplainableMasterPlan(input: {
         `Centroid: ${analysis.spectralCentroidHz} Hz`,
         `Low-Mid/Mid: ${lowMidBuildup >= 0 ? '+' : ''}${lowMidBuildup.toFixed(1)} dB`,
         ...(eqReasons.length ? [eqReasons[0]] : []),
+        ...(sideLowCut ? [`Low-End Corr: ${analysis.lowEndCorrelation.toFixed(2)}`] : []),
       ],
       proposedCorrection:
         eqParams.bands.length > 1
           ? 'Shape tonal contour surgically while clearing subsonic rumble below 28 Hz.'
           : 'Insert linear/clean high-pass at 24–28 Hz without altering musical midrange timbre.',
       selectedProcessor: 'parametric-eq',
-      proposedParamsSummary: `${eqParams.phaseMode.toUpperCase()} phase · Tilt ${tiltDb >= 0 ? '+' : ''}${tiltDb} dB · ${eqParams.bands.length} band(s)`,
+      proposedParamsSummary: `${eqParams.phaseMode.toUpperCase()} phase · Tilt ${tiltDb >= 0 ? '+' : ''}${tiltDb} dB · ${eqParams.bands.length} band(s)${eqTypeNotes.length ? ` · ${eqTypeNotes.join(' · ')}` : ''}`,
       commands: [
         {
           op: 'add',
@@ -591,6 +628,9 @@ export function buildExplainableMasterPlan(input: {
         maxCutDb: mudMaxCut,
         attackMs: 15,
         releaseMs: 140,
+        // Proportional Q: light dips stay broad, the band narrows as it digs deeper.
+        type: 'proportional' as const,
+        kneeDb: 6,
       },
     ];
     recommendations.push({
@@ -604,7 +644,7 @@ export function buildExplainableMasterPlan(input: {
       ],
       proposedCorrection: `Attenuate 250 Hz dynamically (up to ${mudMaxCut} dB) only when the low-mids build up.`,
       selectedProcessor: 'dynamic-eq',
-      proposedParamsSummary: `Band @ 250 Hz (Q=1.0, maxCut=${mudMaxCut} dB, 15/140 ms)`,
+      proposedParamsSummary: `Proportional Q band @ 250 Hz (Q=1.0, maxCut=${mudMaxCut} dB, 15/140 ms, 6 dB knee)`,
       commands: [
         {
           op: 'add',
@@ -625,44 +665,39 @@ export function buildExplainableMasterPlan(input: {
   // Broad high-mid energy and coherent musical harmonics are not enough evidence to
   // trigger frequency-selective gain reduction; those are handled by the tonal plan
   // and auditioned rather than automatically treated as defects.
-  const topRes = analysis.resonances.find((resonance) =>
-    resonance.freqHz >= 2000 && resonance.freqHz <= 12000 && resonance.excessDb >= 6.0,
-  );
-  if (topRes) {
+  if (topRes && dynamicHighPlan) {
     const targetFreq = topRes.freqHz;
-    const dynBands = [
-      {
-        id: 'd1',
-        enabled: true,
-        freq: targetFreq,
-        q: topRes ? 2.8 : 1.8,
-        thresholdDb: Math.round(Math.max(-32, Math.min(-14, analysis.rmsDb + 1))),
-        maxCutDb: Number(Math.max(-5.5, -Math.min(4.5, (topRes?.excessDb ?? harshExcess) * 0.45)).toFixed(1)),
-        attackMs: 6,
-        releaseMs: 95,
-      },
-    ];
+    const dynBands = [dynamicHighPlan.band];
+    const sibilance = dynamicHighPlan.kind === 'sibilance';
     recommendations.push({
       id: 'rec-dyn-eq',
-      characteristic: 'Dynamic upper-mid harshness / localized resonance spike',
+      characteristic: sibilance
+        ? 'Sibilance: isolated resonance in the 4.5-10 kHz de-essing range'
+        : 'Dynamic upper-mid harshness / localized resonance spike',
       supportingMeasurements: [
         `High-Mid vs Mid: ${harshExcess >= 0 ? '+' : ''}${harshExcess.toFixed(1)} dB`,
-        ...(topRes ? [`Resonance: ${topRes.freqHz} Hz (+${topRes.excessDb} dB)`] : []),
+        ...dynamicHighPlan.evidence,
       ],
-      proposedCorrection: `Attenuate ${targetFreq} Hz dynamically only when transient peaks exceed threshold.`,
+      proposedCorrection: sibilance
+        ? `De-ess dynamically: a high shelf keyed at ${targetFreq} Hz dips only while sibilants exceed threshold.`
+        : `Attenuate ${targetFreq} Hz dynamically only when transient peaks exceed threshold.`,
       selectedProcessor: 'dynamic-eq',
-      proposedParamsSummary: `Band 1 @ ${targetFreq} Hz (Q=${dynBands[0].q}, maxCut=${dynBands[0].maxCutDb} dB)`,
+      proposedParamsSummary: dynamicHighPlan.summary,
       commands: [
         {
           op: 'add',
           processorType: 'dynamic-eq',
-          name: 'Dynamic Resonance Control',
+          name: sibilance ? 'Dynamic De-Esser' : 'Dynamic Resonance Control',
           params: { bands: dynBands },
-          rationale: `Tame ${targetFreq} Hz spikes dynamically without dulling quiet passages.`,
+          rationale: sibilance
+            ? `Tame sibilance keyed at ${targetFreq} Hz without dulling the top end between sibilants.`
+            : `Tame ${targetFreq} Hz spikes dynamically without dulling quiet passages.`,
         },
       ],
       expectedResult: 'Reduces listener fatigue while preserving average spectral brightness.',
-      potentialTradeoffs: 'Over-taming above 3 kHz can soften snare crack or vocal bite.',
+      potentialTradeoffs: sibilance
+        ? 'Too low a threshold can lisp vocals or soften hi-hats; capped and soft-kneed.'
+        : 'Over-taming above 3 kHz can soften snare crack or vocal bite.',
       priority: 'recommended',
       statementType: 'hypothesis',
     });
@@ -782,7 +817,9 @@ export function buildExplainableMasterPlan(input: {
       highWidth,
       lowCrossHz: 150,
       highCrossHz: 3500,
-      monoBassBelowHz: analysis.lowEndCorrelation < 0.5 ? 115 : 90,
+      // The EQ's Side-channel low cut already makes the low end mono; do not stack a second
+      // mono-bass crossover on top of it.
+      monoBassBelowHz: sideLowCut ? 0 : analysis.lowEndCorrelation < 0.5 ? 115 : 90,
       lrBalanceDb: Number((-analysis.lrBalanceDb * 0.75).toFixed(2)),
       midSideGainDb: objective.stereoPreference === 'wide' && analysis.phaseCorrelation > 0.4 ? 0.3 : 0,
     };
@@ -797,9 +834,11 @@ export function buildExplainableMasterPlan(input: {
         `Low-End Corr: ${analysis.lowEndCorrelation.toFixed(2)}`,
         `L/R Balance: ${analysis.lrBalanceDb.toFixed(2)} dB`,
       ],
-      proposedCorrection: 'Anchor sub-bass in mono and correct L/R balance bias cleanly.',
+      proposedCorrection: sideLowCut
+        ? 'Narrow the low band and correct L/R balance; mono bass comes from the EQ Side-channel low cut.'
+        : 'Anchor sub-bass in mono and correct L/R balance bias cleanly.',
       selectedProcessor: 'stereo-imager',
-      proposedParamsSummary: `MonoBass <${imgParams.monoBassBelowHz}Hz · L/R ${imgParams.lrBalanceDb >= 0 ? '+' : ''}${imgParams.lrBalanceDb} dB · Mid ${midWidth}% / High ${highWidth}%`,
+      proposedParamsSummary: `${imgParams.monoBassBelowHz > 0 ? `MonoBass <${imgParams.monoBassBelowHz}Hz` : 'MonoBass via EQ Side low cut'} · L/R ${imgParams.lrBalanceDb >= 0 ? '+' : ''}${imgParams.lrBalanceDb} dB · Mid ${midWidth}% / High ${highWidth}%`,
       commands: [
         {
           op: 'add',
@@ -1699,7 +1738,7 @@ export function deriveRefinementCommands(
         }
       } else {
         appliedGain = -stepDb;
-        bands.push({ id: 'refine-low-mid', enabled: true, shape: 'bell', freq: findMudCenterHz(post), gain: appliedGain, q: 1.2 });
+        bands.push(mudBell('refine-low-mid', findMudCenterHz(post), appliedGain, REFINE_MUD_PROPORTIONAL_Q));
       }
       const atLimit = bellIndex >= 0 && appliedGain <= -4;
       const rationale =
