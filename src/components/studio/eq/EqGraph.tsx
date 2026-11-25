@@ -33,6 +33,8 @@ export interface EqGraphCurves {
   perBand?: Array<number[] | null>;
   /** Live (dynamic) curve, drawn over the static one. */
   live?: number[] | null;
+  /** Extra spectra in gain units on their own frequency grid (Match EQ source / reference). */
+  spectra?: Array<{ key: string; freqs: readonly number[]; values: number[]; color: string; fill?: boolean }>;
 }
 
 export type AnalyzerMode = 'off' | 'pre' | 'post' | 'both';
@@ -297,6 +299,15 @@ export const EqGraph: React.FC<Props> = ({
           </g>
         )}
         {postPath && <path d={postPath} className="syn-eqx-spec-post" pointerEvents="none" />}
+        {curves.spectra?.map((sp) => {
+          const d = curvePath(sp.freqs as number[], sp.values);
+          return (
+            <g key={sp.key} pointerEvents="none" data-spectrum={sp.key}>
+              {sp.fill && <path d={`${d} L${W},${H} L0,${H} Z`} fill={sp.color} fillOpacity={0.1} stroke="none" />}
+              <path d={d} fill="none" stroke={sp.color} strokeWidth={1.3} strokeOpacity={0.85} />
+            </g>
+          );
+        })}
         {prePath && <path d={prePath} className={analyzer === 'pre' ? 'syn-eqx-spec-post' : 'syn-eqx-spec-pre'} pointerEvents="none" />}
         {curves.perBand?.map((pb, i) =>
           pb && nodes[i] ? (

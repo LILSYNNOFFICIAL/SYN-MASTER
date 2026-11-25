@@ -1,5 +1,6 @@
 import type { ProcessorModule, ProcessorType } from '../../types/mastering';
 import { createProcessorModule, createDefaultParams } from '../../dsp/chainValidation';
+import { matchEqStore } from '../../engine/matchEqStore';
 
 /**
  * The "Add module" menu. Every entry renders through a real SYN-DSP processor; tool
@@ -63,6 +64,15 @@ export const MODULE_CATALOG: CatalogItem[] = [
     id: 'dyn-eq', label: 'Dynamic EQ', category: 'EQ & Filters', type: 'dynamic-eq',
     description: 'Cuts resonances only when they jump out',
     build: () => mk('dynamic-eq', 'Dynamic EQ'),
+  },
+  {
+    id: 'match-eq', label: 'Match EQ', category: 'EQ & Filters', type: 'match-eq',
+    description: 'Matches the tonal balance of the loaded reference track (learned spectra)',
+    // Learns straight away when a reference track is loaded; otherwise Learn in its editor.
+    build: () => {
+      const profile = matchEqStore.getProfile();
+      return mk('match-eq', 'Match EQ', profile ? { source: profile.source, reference: profile.reference, ...(profile.referenceName ? { referenceName: profile.referenceName } : {}) } : {});
+    },
   },
   {
     id: 'comp', label: 'Compressor', category: 'Dynamics', type: 'compressor',

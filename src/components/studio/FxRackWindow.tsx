@@ -6,7 +6,8 @@ import { ProcessorModuleCard } from '../ProcessorModuleCard';
 import { FloatingWindow } from './FloatingWindow';
 import { CATALOG_CATEGORIES, MODULE_CATALOG } from './moduleCatalog';
 import { ParametricEQ2 } from './ParametricEQ2';
-import type { AudioAnalysis } from '../../types/mastering';
+import type { AudioAnalysis, MatchEqParams } from '../../types/mastering';
+const MatchEQPanel = React.lazy(() => import('./MatchEQPanel'));
 
 interface Props {
   open: boolean;
@@ -242,6 +243,11 @@ export const FxRackWindow: React.FC<Props> = ({
                       spectrum={spectrum ?? null}
                       onChange={(params) => update(idx, { ...mod, params })}
                     />
+                  )}
+                  {mod.type === 'match-eq' && (
+                    <React.Suspense fallback={<p role="status">Loading Match EQ…</p>}>
+                      <MatchEQPanel variant="rack" module={mod} onChange={(params: MatchEqParams) => update(idx, { ...mod, params })} />
+                    </React.Suspense>
                   )}
                   <ProcessorModuleCard
                     module={{ ...mod, expanded: true }}

@@ -24,12 +24,14 @@ import type {
   TransientShaperParams,
   ClipperParams,
   DitherParams,
+  MatchEqParams,
   MultibandMaximizerParams,
   MultibandMaximizerBand,
   StereoImagerParams,
 } from '../types/mastering';
 import type { ProcessorMeterTelemetry } from '../dsp/offlineDsp';
 import { createDefaultParams } from '../dsp/chainValidation';
+import { isMatchEqLearned, matchEqPeakCorrectionDb } from '../dsp/matchEq';
 import {
   BypassButton,
   HorizontalSlider,
@@ -269,6 +271,8 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                 'Oversampled peak clipper that shaves transients before the limiter.'}
               {module.type === 'multiband-maximizer' &&
                 'Maximus-style 3-band maximizer: per-band drive and compression into a true-peak ceiling.'}
+              {module.type === 'match-eq' &&
+                'Matches the long-term tonal balance of the loaded reference track with a smoothed, limited correction curve.'}
               {module.type === 'dither' &&
                 'Quantizes the master to 16/20/24 bit with TPDF or noise-shaped dither. Keep it last in the chain.'}
               {module.type === 'external-vst3' &&
@@ -1184,6 +1188,40 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                 <RotaryKnob label="Sustain" value={p.sustainDb} min={-12} max={12} step={0.1} defaultValue={0} unit="dB" size="sm" onChange={(v) => setParam<TransientShaperParams>({ sustainDb: v })} />
                 <RotaryKnob label="Speed" value={p.speedMs} min={2} max={60} step={1} defaultValue={15} unit="ms" size="sm" onChange={(v) => setParam<TransientShaperParams>({ speedMs: v })} />
                 <RotaryKnob label="Detector HPF" value={p.lowCutHz} min={20} max={300} step={1} defaultValue={80} unit="Hz" size="sm" scale="logarithmic" onChange={(v) => setParam<TransientShaperParams>({ lowCutHz: v })} />
+              </div>
+            );
+          })()}
+
+          {module.type === 'match-eq' && (() => {
+            const p = module.params as MatchEqParams;
+            const learned = isMatchEqLearned(p);
+            const peak = matchEqPeakCorrectionDb(p, module.intensity / 100);
+            return (
+              <div className="flex flex-col gap-2.5" data-testid="match-eq-card">
+                <p className="text-[11px] text-[#9CA3AF]">{learned ? `Learned · ${p.referenceName ?? 'reference'} · peak ${peak.toFixed(1)} dB` : 'Not learned (pass-through). Load a reference and press Learn in the Match EQ editor.'}</p>
+                <div className="p-2.5 rounded bg-[#10131B] border border-[#222634] grid grid-cols-3 gap-x-2 gap-y-3">
+                  <RotaryKnob label="Amount" value={p.amount} min={0} max={100} step={1} defaultValue={75} unit="%" size="sm" onChange={(v) => setParam<MatchEqParams>({ amount: v })} />
+                  <RotaryKnob label="Max boost" value={p.maxBoostDb} min={0} max={12} step={0.1} defaultValue={6} unit="dB" size="sm" onChange={(v) => setParam<MatchEqParams>({ maxBoostDb: v })} />
+                  <RotaryKnob label="Max cut" value={p.maxCutDb} min={0} max={12} step={0.1} defaultValue={6} unit="dB" size="sm" onChange={(v) => setParam<MatchEqParams>({ maxCutDb: v })} />
+                </div>
+                <label className="flex items-center justify-between gap-2 text-[11px] text-[#9CA3AF]">
+                  <span>Smoothing</span>
+                  <select aria-label="Match EQ smoothing" value={p.smoothing} onChange={(e) => setParam<MatchEqParams>({ smoothing: Number(e.target.value) as MatchEqParams['smoothing'] })} className="bg-[#161923] border border-[#2D3343] rounded px-2 py-1 text-xs text-[#F7F8FA]">
+                    {[1, 2, 3, 6, 12, 24].map((n) => <option key={n} value={n}>1/{n} oct</option>)}
+                  </select>
+                </label>
+                <label className="flex items-center justify-between gap-2 text-[11px] text-[#9CA3AF]">
+                  <span>Channel</span>
+                  <select aria-label="Match EQ channel" value={p.channel} onChange={(e) => setParam<MatchEqParams>({ channel: e.target.value as MatchEqParams['channel'] })} className="bg-[#161923] border border-[#2D3343] rounded px-2 py-1 text-xs text-[#F7F8FA]">
+                    <option value="stereo">Stereo</option><option value="mid">Mid</option><option value="side">Side</option>
+                  </select>
+                </label>
+                <label className="flex items-center justify-between gap-2 text-[11px] text-[#9CA3AF]">
+                  <span>Phase</span>
+                  <select aria-label="Match EQ phase" value={p.phase} onChange={(e) => setParam<MatchEqParams>({ phase: e.target.value === 'minimum' ? 'minimum' : 'linear' })} className="bg-[#161923] border border-[#2D3343] rounded px-2 py-1 text-xs text-[#F7F8FA]">
+                    <option value="linear">Linear phase</option><option value="minimum">Minimum phase</option>
+                  </select>
+                </label>
               </div>
             );
           })()}

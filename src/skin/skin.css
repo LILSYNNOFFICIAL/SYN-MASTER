@@ -840,3 +840,19 @@ g.is-solo .syn-eqx-node{stroke-dasharray:3 2;}
 @media (prefers-reduced-motion:reduce){
   .syn-deq *, .syn-deq *::before, .syn-deq *::after{scroll-behavior:auto !important;animation:none !important;transition:none !important;}
 }
+
+/* Match EQ editor (shared EQ skin) */
+.syn-meq-actions{display:flex;gap:6px;flex-wrap:wrap;}
+.syn-meq-legend{justify-content:flex-start;gap:14px;font-size:11px;color:#9FB6CC;}
+.syn-meq-legend span{display:inline-flex;align-items:center;gap:5px;}
+.syn-meq-legend i{display:inline-block;width:14px;height:3px;border-radius:2px;}
+.syn-meq-legend .syn-meq-legend-curve{background:linear-gradient(90deg,#2EA8FF,#3FE0FF,#8B5CF6,#E040FB);}
+.syn-meq-controls,.syn-meq-presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;align-items:end;margin-top:8px;}
+.syn-meq-seg-field .syn-seg{display:flex;}
+.syn-meq-seg-field .syn-seg button{flex:1;min-height:32px;}
+.syn-meq-name input{width:100%;min-height:32px;background:#0B1020;border:1px solid var(--line-blue,#1E3A5F);border-radius:8px;color:#E8F6FF;padding:0 8px;}
+.syn-meq-manage ul{list-style:none;margin:4px 0 0;padding:0;}
+.syn-meq-manage li{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#C9D8E8;padding:2px 0;}
+.syn-meq-manage button{color:#FF8A9A;background:none;border:0;cursor:pointer;}
+.syn-meq-notice,.syn-meq-hint{font-size:12px;color:#9FE7FF;margin:6px 0 0;}
+@media (max-width:480px){.syn-meq-controls,.syn-meq-presets{grid-template-columns:1fr 1fr;}}

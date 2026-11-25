@@ -83,6 +83,7 @@ import {
 } from './director/tempMasteringWorkspace';
 import { SynAudioEngine, type AuditionTarget, type AudioEngineInfo } from './engine/audioEngine';
 import { telemetryStore } from './engine/telemetryStore';
+import { matchEqStore } from './engine/matchEqStore';
 import { SynHostBridge, type HostBridgeSnapshot } from './services/hostBridge';
 import {
   listProjects,
@@ -1069,6 +1070,7 @@ export default function App() {
       const engine = engineRef.current!;
       sourceChannelsRef.current = channels;
       sourceRateRef.current = sampleRate;
+      matchEqStore.setSource(channels, sampleRate);
       setFades(NO_FADES);
       setPostPeaksHi(null);
       engine.setSourceChannels(channels, sampleRate);
@@ -1145,6 +1147,7 @@ export default function App() {
     const stem = generateDemoMasterStem('reference-bright', 44100, 14);
     referenceChannelsRef.current = stem.channels;
     engineRef.current!.setReferenceChannels(stem.channels, stem.sampleRate);
+    matchEqStore.setReference(stem.channels, stem.sampleRate, stem.name);
     const analysis = analyzeAudioBuffer(stem.channels, stem.sampleRate);
     setReferenceTrack({
       id: `ref-${Date.now()}`,
@@ -1167,6 +1170,7 @@ export default function App() {
       const decoded = await engineRef.current!.decodeFile(file);
       referenceChannelsRef.current = decoded.channels;
       engineRef.current!.setReferenceChannels(decoded.channels, decoded.sampleRate);
+      matchEqStore.setReference(decoded.channels, decoded.sampleRate, file.name);
       const analysis = analyzeAudioBuffer(decoded.channels, decoded.sampleRate);
       setReferenceTrack({
         id: `ref-${Date.now()}`,
@@ -1371,6 +1375,7 @@ export default function App() {
       objectiveId,
       customSpec: customObjective,
       referenceAnalysis: referenceTrack?.analysis ?? null,
+      matchEqProfile: referenceTrack ? matchEqStore.getProfile() : null,
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });
@@ -1462,6 +1467,7 @@ export default function App() {
       objectiveId,
       customSpec: customObjective,
       referenceAnalysis: referenceTrack?.analysis ?? null,
+      matchEqProfile: referenceTrack ? matchEqStore.getProfile() : null,
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });
@@ -1625,6 +1631,9 @@ export default function App() {
         qcProfile: activeQcProfile,
         exportConfig,
         referenceAnalysis: referenceTrack?.analysis ?? null,
+        matchEqReference: referenceTrack && matchEqStore.getSnapshot().reference
+          ? { spectra: matchEqStore.getSnapshot().reference!, name: referenceTrack.name }
+          : null,
         externalPlugins: hostSnapshot.plugins,
         hostConnected: hostSnapshot.status === 'connected',
         initialChain: geminiInitialChain ?? (runOperatingMode === 'assisted' ? chain : undefined),
@@ -1978,6 +1987,7 @@ export default function App() {
         targetLufs: Math.max(-18, Math.min(-8, referenceTrack.analysis.integratedLufs)),
       },
       referenceAnalysis: referenceTrack.analysis,
+      matchEqProfile: matchEqStore.getProfile(),
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });

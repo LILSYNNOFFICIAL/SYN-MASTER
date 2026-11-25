@@ -4,6 +4,7 @@ import type {
   AudioAnalysis,
   CompressorParams,
   DynamicEQParams,
+  MatchEqParams,
   LimiterParams,
   MasterFinalReport,
   MasteringPreset,
@@ -22,6 +23,7 @@ import { ParametricEQ2 } from '../studio/ParametricEQ2';
 // Loaded when the Dynamic EQ tab is first opened (keeps the initial bundle in budget).
 const loadDynamicEQPanel = () => import('../studio/DynamicEQPanel');
 const DynamicEQPanel = React.lazy(() => loadDynamicEQPanel().then(({ DynamicEQPanel }) => ({ default: DynamicEQPanel })));
+const MatchEQPanel = React.lazy(() => import('../studio/MatchEQPanel'));
 import { SpectrumAndEQCanvas } from '../CanvasVisualizers';
 import { ArcKnob } from './ArcKnob';
 import { GlowFader } from './GlowFader';
@@ -246,7 +248,7 @@ const StepLabel: React.FC<{ n: number; text: string; hint?: string; className?: 
 );
 
 export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
-  const [eqView, setEqView] = useState<'eq' | 'dyneq' | 'spectrum' | 'spectrogram'>('eq');
+  const [eqView, setEqView] = useState<'eq' | 'dyneq' | 'matcheq' | 'spectrum' | 'spectrogram'>('eq');
   // Prefetch the code-split Dynamic EQ editor after first paint so the tab opens instantly.
   useEffect(() => {
     const t = window.setTimeout(() => { void loadDynamicEQPanel(); }, 300);
@@ -273,6 +275,16 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
 
   const eq = find('parametric-eq');
   const dynEq = chain.find((m) => m.type === 'dynamic-eq');
+  const matchEq = chain.find((m) => m.type === 'match-eq');
+  // Match EQ goes early (after repair stages), not just before loudness like other tools.
+  const addMatchEq = () => {
+    const item = MODULE_CATALOG.find((c) => c.type === 'match-eq');
+    if (!item) return;
+    const at = chain.findIndex((m) => m.type !== 'restore');
+    const next = [...chain];
+    next.splice(at < 0 ? chain.length : at, 0, { ...item.build(), expanded: false });
+    p.onChangeChain(next);
+  };
   const ts = find('transient-shaper');
   const comp = find('compressor');
   const sat = find('saturation');
@@ -434,12 +446,21 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               <p className="syn-eq-sub">{eq ? eq.name : 'Precision · Color · Balance'}{p.sampleRate ? ` · ${(p.sampleRate / 1000).toFixed(1)} kHz` : ''}</p>
             </div>
             <div className="syn-seg" role="group" aria-label="EQ view">
-              {([['eq', 'EQ'], ['dyneq', 'Dynamic EQ'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
+              {([['eq', 'EQ'], ['dyneq', 'Dynamic EQ'], ['matcheq', 'Match EQ'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
                 <button key={id} type="button" aria-pressed={eqView === id} className={eqView === id ? 'is-on' : ''} onClick={() => setEqView(id)}>{label}</button>
               ))}
             </div>
           </div>
-          {eqView === 'dyneq' ? (
+          {eqView === 'matcheq' ? (
+            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Match EQ…</p></div>}>
+              <MatchEQPanel
+                module={matchEq}
+                onAdd={addMatchEq}
+                onChange={(next) => { if (matchEq) setParams<MatchEqParams>(matchEq, next); }}
+                onToggle={(on) => { if (matchEq) patch(matchEq.id, { enabled: true, bypassed: !on }); }}
+              />
+            </React.Suspense>
+          ) : eqView === 'dyneq' ? (
             <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Dynamic EQ…</p></div>}>
             <DynamicEQPanel
               module={dynEq}
