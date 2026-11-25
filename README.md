@@ -386,7 +386,7 @@ A successful CI run verifies the build and scripted QA path on the GitHub runner
 
 See [native/WINDOWS_BUILD.md](native/WINDOWS_BUILD.md) for prerequisites, configure/build commands, and VST3 validation instructions.
 
-**Licensing:** the native VST companion (`native/`) is licensed **AGPL-3.0-only** ([native/LICENSE](native/LICENSE)) and uses JUCE 8.0.17-security under JUCE's AGPLv3 option (with the MIT-licensed VST3 SDK 3.8.0). The repo-root [LICENSE](LICENSE) covers `native/` only: the web app's licence is unchanged and is not declared by it. Details: [docs/VST_COMPANION.md](docs/VST_COMPANION.md#licensing).
+**Licensing:** the whole repository, web app and native VST companion (`native/`), is licensed **AGPL-3.0-only** ([LICENSE](LICENSE), scope in [NOTICE](NOTICE)); decided by the owner on 2026-11-25. The companion uses JUCE 8.0.17-security under JUCE's AGPLv3 option (with the MIT-licensed VST3 SDK 3.8.0). Third-party code keeps its own licence ([docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md)). Details: [docs/VST_COMPANION.md](docs/VST_COMPANION.md#licensing).
 
 ## Deployment and synchronization
 

@@ -97,8 +97,8 @@ Not done:
 The owner chose the free route: **the native companion (`native/`) is licensed AGPL-3.0-only**, and
 JUCE is used under its **AGPLv3** option (no commercial JUCE licence).
 
-- Licence text: `native/LICENSE` (GNU AGPLv3, verbatim from gnu.org). The repo-root `LICENSE` states
-  that only `native/` is covered; the web app's licensing is unchanged and not declared by it.
+- Licence text: `native/LICENSE` (GNU AGPLv3, verbatim from gnu.org). The repo-root `LICENSE` (same
+  text) now covers the whole repository, web app included (owner decision 2026-11-25; scope in `NOTICE`).
 - SPDX headers (`AGPL-3.0-only`) are on the companion's C++ sources, `native/CMakeLists.txt`, the
   validation script and the release workflow.
 - **JUCE 8.0.17-security** (pinned in `native/CMakeLists.txt`) is the latest 8.0.x security release.
