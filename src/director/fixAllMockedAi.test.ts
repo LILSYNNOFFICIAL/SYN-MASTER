@@ -280,7 +280,7 @@ test('Fix All does not converge while blocking QC failures remain even if the ob
     customSpec: {
       targetLufs: sourceAnalysis.integratedLufs,
       maxTruePeakDb: -1,
-      minDynamicRangeDb: 0,
+      minDynamicRangeDb: 100,
     },
     qcProfile: { ...QC_TARGET_PROFILES[0], minDynamicRangeDb: 100 },
     initialChain: [createProcessorModule('parametric-eq')],

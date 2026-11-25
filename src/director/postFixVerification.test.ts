@@ -966,7 +966,7 @@ test('Noise cleanup reports collateral transient and air loss instead of claimin
   assert.match(noise.nextRecommendedAction ?? '', /conservative|restor|reduction/i);
 });
 
-test('Sub/Bass excess uses one blocking <= 0 dB target and produces a measured EQ repair', () => {
+test('Sub/Bass excess uses the objective-aware +4.5 dB target and produces a measured EQ repair', () => {
   const measured = withSubPeakSpectrum(analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR));
   const source = {
     ...measured,
@@ -979,7 +979,7 @@ test('Sub/Bass excess uses one blocking <= 0 dB target and produces a measured E
   assert.ok(subCheck, 'The objective gate must expose the Sub/Bass check');
   assert.equal(subCheck.status, 'fail', 'A +5.3 dB source finding must not pass');
   assert.equal(subCheck.measured, '+5.3 dB over bass');
-  assert.match(subCheck.target, /≤ 0\.0 dB/i);
+  assert.match(subCheck.target, /≤ \+4\.5 dB/i);
 
   assert.equal(findSubBassCorrectionHz(source), 40, 'The correction centre must follow the strongest measured sub-band region');
   const repair = deriveGateRepairCommands(gate, [], source);
@@ -997,13 +997,13 @@ test('Sub/Bass excess uses one blocking <= 0 dB target and produces a measured E
 
   const partiallyCorrected = {
     ...source,
-    zoneEnergyDb: { ...source.zoneEnergyDb, sub: source.zoneEnergyDb.bass + 0.5 },
+    zoneEnergyDb: { ...source.zoneEnergyDb, sub: source.zoneEnergyDb.bass + 4.6 },
   };
   assert.equal(
     evaluateMasterTargets(partiallyCorrected, objective, { preAnalysis: source })
       .checks.find((check) => check.id === 'sub-excess')?.status,
     'fail',
-    'A +0.5 dB result must not be accepted by the former <= +1 dB diagnostic tolerance',
+    'A +4.6 dB result must remain outside the +4.5 dB streaming limit',
   );
 
   const corrected = {
@@ -1022,7 +1022,7 @@ test('Sub/Bass correction extends an existing EQ instead of duplicating its band
   const measured = withSubPeakSpectrum(analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR));
   const source = {
     ...measured,
-    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 3.5 },
+    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 5.5 },
   };
   const gate = evaluateMasterTargets(source, resolveObjectiveTarget('streaming'), { preAnalysis: source });
   const eq = createProcessorModule('parametric-eq');
@@ -1041,7 +1041,7 @@ test('Sub/Bass repair removes additive Bass Enhancer sub gain and refines its ow
   const measured = withSubPeakSpectrum(analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR));
   const source = {
     ...measured,
-    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 4.2 },
+    zoneEnergyDb: { ...measured.zoneEnergyDb, sub: measured.zoneEnergyDb.bass + 5.2 },
   };
   const objective = resolveObjectiveTarget('streaming');
   const gate = evaluateMasterTargets(source, objective, { preAnalysis: source });
@@ -1111,11 +1111,11 @@ test('Sub/Bass iterative correction uses smaller bounded increments near the tar
   assert.ok(firstAdd && firstAdd.op === 'add');
   const firstBand = (firstAdd.params as { bands: Array<{ id: string; gain: number }> }).bands.find((band) => band.id === 'syn-sub-excess');
   assert.ok(firstBand);
-  assert.ok(firstBand.gain <= -3.9 && firstBand.gain >= -4.0, 'Initial correction should be measured but not an oversized fixed cut');
+  assert.ok(firstBand.gain <= -0.59 && firstBand.gain >= -0.61, 'Initial correction should be measured but not an oversized fixed cut');
 
   const residual = {
     ...source,
-    zoneEnergyDb: { ...source.zoneEnergyDb, sub: source.zoneEnergyDb.bass + 0.2 },
+    zoneEnergyDb: { ...source.zoneEnergyDb, sub: source.zoneEnergyDb.bass + 4.7 },
   };
   const residualGate = evaluateMasterTargets(residual, objective, { preAnalysis: source });
   const eq = createProcessorModule('parametric-eq', {
