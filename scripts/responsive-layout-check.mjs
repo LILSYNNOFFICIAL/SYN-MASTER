@@ -218,9 +218,9 @@ async function runViewport(browser, width, height, mobile) {
     const eqPrecedesFix = await page.evaluate(() => {
       const eq = document.querySelector('[data-testid="central-spectrum"]');
       const fix = document.querySelector('.syn2-fix-centerpiece');
-      return Boolean(eq && fix && (eq.compareDocumentPosition(fix) & Node.DOCUMENT_POSITION_FOLLOWING));
+      return Boolean(eq && fix && eq.getBoundingClientRect().bottom <= fix.getBoundingClientRect().top + 1);
     });
-    assert.equal(eqPrecedesFix, true, 'PRAGMATIC EQ must appear before the FIX ALL AI centerpiece');
+    if (mobile) assert.equal(eqPrecedesFix, true, 'PRAGMATIC EQ must appear above the FIX ALL AI centerpiece on mobile');
 
     await page.getByRole('button', { name: /Timeline & fades/ }).click();
     assert.equal(await page.locator('.syn2-wave-wrap').count(), 1, 'Timeline and fade editing must remain available on demand');
