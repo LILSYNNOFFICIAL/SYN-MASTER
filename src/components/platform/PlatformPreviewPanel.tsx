@@ -167,7 +167,17 @@ export const PlatformPreviewPanel: React.FC<Props> = ({ levels, getMasterAudio, 
   };
 
   // Recompute the after-gain verdict when the platform changes after an encode.
-  const clippingNow = result ? { ...result.decodedClipping, truePeakAfterGainDb: result.decodedClipping.truePeakDb + (selected?.gainDb ?? 0) } : null;
+  // Same platform model as the master prediction (incl. Spotify Loud's limiter), fed the decoded peaks.
+  const clippingNow = result && levels
+    ? {
+        ...result.decodedClipping,
+        truePeakAfterGainDb: predictForPlatform(
+          { integratedLufs: levels.integratedLufs, truePeakDb: result.decodedClipping.truePeakDb, samplePeakDb: result.decodedClipping.samplePeakDb },
+          sel.platformId,
+          sel.spotifyLevel,
+        ).predictedTruePeakDb,
+      }
+    : null;
   const codecTp = result ? (result.serverTruePeakDb ?? result.decodedClipping.truePeakDb) : null;
   const codecClips = result ? (result.decodedClipping.clipping || (result.serverTruePeakDb !== null && result.serverTruePeakDb > 0)) : false;
 
