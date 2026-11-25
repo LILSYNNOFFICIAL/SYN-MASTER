@@ -9,6 +9,7 @@
  */
 import { getPreset, MAX_AGENT_TIMEOUT_SEC, MIN_TIMEOUT_SEC, type ProviderPreset } from './providerPresets.ts';
 import { toGeminiSchema } from './masteringPrompt.ts';
+import { checkModelName } from './modelNames.ts';
 
 export interface ProviderConfig {
   presetId: string;
@@ -30,7 +31,7 @@ export interface AiCallRequest {
   schema: unknown;
 }
 
-export type ProviderErrorCode = 'config' | 'network' | 'auth' | 'http' | 'timeout' | 'cancelled' | 'parse';
+export type ProviderErrorCode = 'config' | 'network' | 'auth' | 'model' | 'http' | 'timeout' | 'cancelled' | 'parse';
 
 export class ProviderError extends Error {
   code: ProviderErrorCode;
@@ -224,11 +225,42 @@ async function doFetch(
   }
 }
 
-async function ensureOk(res: Response, url: string, secrets: string[]): Promise<void> {
+const MODEL_ERROR_RE = /model[^.]{0,80}(not[ _]found|does not exist|not exist|unknown|invalid|not supported|unsupported|not available|no access|deprecated|retired)|(unknown|invalid|unsupported)[ _]model|not_found_error/i;
+
+/** True when an HTTP error is about the model name rather than the URL, key or payload. */
+export function looksLikeModelError(status: number, detail: string, nativeEndpoint: boolean): boolean {
+  if (status === 404 && nativeEndpoint) return true;
+  return (status === 400 || status === 404 || status === 422) && MODEL_ERROR_RE.test(detail);
+}
+
+interface ErrorContext {
+  /** Model id that was sent, for model errors. */
+  model?: string;
+  /** Preset default to suggest, for model errors. */
+  defaultModel?: string;
+  /** The endpoint path is fixed by the adapter, so a 404 can only be the model. */
+  nativeEndpoint?: boolean;
+}
+
+async function ensureOk(res: Response, url: string, secrets: string[], ctx: ErrorContext = {}): Promise<void> {
   if (res.ok) return;
   const detail = await readErrorDetail(res, secrets);
-  if (res.status === 401 || res.status === 403) {
+  // Gemini answers a bad key with HTTP 400 INVALID_ARGUMENT rather than 401.
+  if (res.status === 401 || res.status === 403 || (res.status === 400 && /api[ _-]?key (not valid|invalid|is invalid)|invalid (x-)?api[ _-]?key|incorrect api key/i.test(detail))) {
     throw new ProviderError('auth', `${hostOf(url)} rejected the key/token (HTTP ${res.status}). ${detail}`.trim(), res.status);
+  }
+  if (ctx.model !== undefined && looksLikeModelError(res.status, detail, Boolean(ctx.nativeEndpoint))) {
+    const hint =
+      ctx.defaultModel && ctx.defaultModel !== ctx.model
+        ? ` Check the model name in Settings → AI Provider (the current default is ${ctx.defaultModel}).`
+        : ' Check the model name in Settings → AI Provider against the provider\'s model list.';
+    throw new ProviderError('model', `${hostOf(url)} does not accept the model "${ctx.model}" (HTTP ${res.status}).${hint} ${detail}`.trim(), res.status);
+  }
+  if (res.status === 404) {
+    throw new ProviderError('http', `${hostOf(url)} returned HTTP 404: the URL was not found. Check the base URL (it usually ends in /v1). ${detail}`.trim(), res.status);
+  }
+  if (res.status === 429) {
+    throw new ProviderError('http', `${hostOf(url)} is rate-limiting or out of quota (HTTP 429). Wait and retry, or check the account's billing/limits. ${detail}`.trim(), res.status);
   }
   throw new ProviderError('http', `${hostOf(url)} returned HTTP ${res.status}. ${detail}`.trim(), res.status);
 }
@@ -243,10 +275,11 @@ export interface ShapedRequest {
 }
 
 const ANTHROPIC_TOOL = 'submit_mastering_strategy';
+const ANTHROPIC_TOOL_INSTRUCTION = `Return your answer by calling the ${ANTHROPIC_TOOL} tool once with the complete JSON decision. Do not answer in prose.`;
 
 export function shapeRequest(config: ProviderConfig, req: AiCallRequest, opts: { withResponseFormat?: boolean } = {}): ShapedRequest {
   const preset = getPreset(config.presetId);
-  const model = config.model.trim() || preset.defaultModel;
+  const model = checkModelName(config.presetId, config.model).model || config.model.trim() || preset.defaultModel;
   const withFormat = opts.withResponseFormat !== false;
   switch (preset.adapter) {
     case 'gemini': {
@@ -280,10 +313,12 @@ export function shapeRequest(config: ProviderConfig, req: AiCallRequest, opts: {
             model,
             max_tokens: 8192,
             system: req.systemPrompt,
-            messages: [{ role: 'user', content: req.userPrompt }],
-            // Structured output via a forced tool call whose input_schema is the strategy schema.
-            tools: [{ name: ANTHROPIC_TOOL, description: 'Return the mastering decision as structured JSON.', input_schema: req.schema }],
-            tool_choice: { type: 'tool', name: ANTHROPIC_TOOL },
+            messages: [{ role: 'user', content: `${req.userPrompt}\n\n${ANTHROPIC_TOOL_INSTRUCTION}` }],
+            // Structured output via a tool whose input_schema is the strategy schema. tool_choice stays
+            // "auto": current Claude models (Sonnet 5.5, Opus 5.5, ...) reject a forced tool_choice with
+            // HTTP 400, so the prompt asks for the tool and the parser also accepts a plain JSON reply.
+            tools: [{ name: ANTHROPIC_TOOL, description: 'Return the mastering decision as structured JSON. Always call this exactly once with the complete decision.', input_schema: req.schema }],
+            tool_choice: { type: 'auto' },
           }),
         },
       };
@@ -361,16 +396,26 @@ export function parseProviderResponse(config: ProviderConfig, payload: unknown):
   const p = payload as Record<string, any>;
   switch (preset.adapter) {
     case 'gemini': {
+      if (p?.promptFeedback?.blockReason) throw new ProviderError('parse', `Gemini blocked the request (blockReason: ${String(p.promptFeedback.blockReason)}).`);
       const parts: Array<{ text?: string; thought?: boolean }> = p?.candidates?.[0]?.content?.parts ?? [];
       const text = parts.filter((x) => typeof x.text === 'string' && !x.thought).map((x) => x.text).join('');
-      if (!text) throw new ProviderError('parse', `Gemini returned no text (finishReason: ${p?.candidates?.[0]?.finishReason ?? 'unknown'}).`);
+      if (!text) {
+        const reason = p?.candidates?.[0]?.finishReason ?? 'unknown';
+        const hint = reason === 'MAX_TOKENS' ? ' The reply hit the output-token limit.' : '';
+        throw new ProviderError('parse', `Gemini returned no text (finishReason: ${reason}).${hint}`);
+      }
       return extractJsonObject(text);
     }
     case 'anthropic': {
       const blocks: Array<{ type: string; name?: string; input?: unknown; text?: string }> = p?.content ?? [];
       const tool = blocks.find((b) => b.type === 'tool_use' && b.name === ANTHROPIC_TOOL);
       if (tool && tool.input && typeof tool.input === 'object') return tool.input as Record<string, unknown>;
+      if (p?.stop_reason === 'refusal') throw new ProviderError('parse', 'Claude declined to answer (stop_reason: refusal).');
       const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('');
+      if (!text.trim()) {
+        const hint = p?.stop_reason === 'max_tokens' ? ' The reply hit max_tokens before the JSON was written.' : '';
+        throw new ProviderError('parse', `Claude returned no tool call or text (stop_reason: ${p?.stop_reason ?? 'unknown'}).${hint}`);
+      }
       return extractJsonObject(text);
     }
     case 'openai':
@@ -380,7 +425,9 @@ export function parseProviderResponse(config: ProviderConfig, payload: unknown):
       if (Array.isArray(content)) content = content.map((c: { text?: string }) => c?.text ?? '').join('');
       if (typeof content !== 'string' || !content.trim()) {
         if (msg?.refusal) throw new ProviderError('parse', `The model refused: ${String(msg.refusal).slice(0, 200)}`);
-        throw new ProviderError('parse', 'The model returned an empty message.');
+        const finish = p?.choices?.[0]?.finish_reason;
+        const hint = finish === 'length' ? ' The reply hit the output-token limit (finish_reason: length).' : finish ? ` (finish_reason: ${finish})` : '';
+        throw new ProviderError('parse', `The model returned an empty message.${hint}`);
       }
       return extractJsonObject(content);
     }
@@ -414,7 +461,17 @@ export function validateConfig(config: ProviderConfig): string | null {
     }
   }
   if (preset.adapter === 'openai-compatible' && !(config.model.trim() || preset.defaultModel)) return 'Enter a model name.';
+  const modelCheck = checkModelName(config.presetId, config.model);
+  if (modelCheck.level === 'error') return modelCheck.message ?? 'Check the model name.';
   return null;
+}
+
+/** Non-blocking model notice (deprecated id, redirected slug), or null. */
+export function modelWarning(config: ProviderConfig): string | null {
+  const preset = getPreset(config.presetId);
+  if (preset.adapter === 'builtin-gemini') return null;
+  const c = checkModelName(config.presetId, config.model);
+  return c.level === 'warning' ? (c.message ?? null) : null;
 }
 
 /** Send one request to the configured provider and return the extracted JSON object. */
@@ -433,7 +490,11 @@ export async function callProvider(config: ProviderConfig, req: AiCallRequest, o
       res = await doFetch(shaped.url, shaped.init, config, opts);
     }
   }
-  await ensureOk(res, shaped.url, secrets);
+  await ensureOk(res, shaped.url, secrets, {
+    model: preset.adapter === 'webhook' ? undefined : checkModelName(config.presetId, config.model).model,
+    defaultModel: preset.defaultModel || undefined,
+    nativeEndpoint: preset.adapter === 'gemini' || preset.adapter === 'openai' || preset.adapter === 'anthropic' || preset.id === 'xai',
+  });
   let payload: unknown;
   const text = await res.text();
   try {

@@ -8,6 +8,10 @@
  *   - 'gemini' / 'openai' / 'anthropic' are the native adapters.
  * Nothing else needs to change: the settings panel, the adapters and the tests read this list.
  *
+ * Native default model ids (Gemini, OpenAI, Anthropic, xAI) were checked against each provider's
+ * official model list on 2026-11-25; see src/ai/modelNames.ts for sources and the lifecycle table
+ * that warns about deprecated / retired ids. Other presets' defaults are not re-verified.
+ *
  * browserCors is what we know about direct browser calls (no server proxy is shipped on purpose):
  *   'yes'        documented to allow browser calls
  *   'unverified' may or may not send CORS headers; if the browser blocks it, use OpenRouter or a local gateway
@@ -67,7 +71,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Google Gemini (your key)',
     group: 'native',
     adapter: 'gemini',
-    defaultModel: 'gemini-2.5-pro',
+    defaultModel: 'gemini-4-hydrogen',
     defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     baseUrlEditable: false,
     key: 'required',
@@ -82,7 +86,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'OpenAI',
     group: 'native',
     adapter: 'openai',
-    defaultModel: 'gpt-4.1',
+    defaultModel: 'gpt-6.2-sol',
     defaultBaseUrl: 'https://api.openai.com/v1',
     baseUrlEditable: false,
     key: 'required',
@@ -97,7 +101,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Anthropic Claude',
     group: 'native',
     adapter: 'anthropic',
-    defaultModel: 'claude-sonnet-4-5',
+    defaultModel: 'claude-sonnet-5-5',
     defaultBaseUrl: 'https://api.anthropic.com/v1',
     baseUrlEditable: false,
     key: 'required',
@@ -109,10 +113,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     setupNote: 'Sent with the anthropic-dangerous-direct-browser-access header, which Anthropic requires for browser calls.',
   },
   // ---- Cloud services via the OpenAI-compatible adapter ----------------------------------
-  { id: 'openrouter', label: 'OpenRouter', group: 'cloud', adapter: 'openai-compatible', defaultModel: 'openai/gpt-4.1', defaultBaseUrl: 'https://openrouter.ai/api/v1', baseUrlEditable: true, key: 'required', jsonMode: 'json_object', agentic: false, defaultTimeoutSec: 60, browserCors: 'yes', setupNote: 'One key for many models. Also the easiest route to a provider that blocks browser calls.' },
+  { id: 'openrouter', label: 'OpenRouter', group: 'cloud', adapter: 'openai-compatible', defaultModel: 'openai/gpt-6.2-sol', defaultBaseUrl: 'https://openrouter.ai/api/v1', baseUrlEditable: true, key: 'required', jsonMode: 'json_object', agentic: false, defaultTimeoutSec: 60, browserCors: 'yes', setupNote: 'One key for many models. Also the easiest route to a provider that blocks browser calls.' },
   { id: 'groq', label: 'Groq', group: 'cloud', adapter: 'openai-compatible', defaultModel: 'llama-3.3-70b-versatile', defaultBaseUrl: 'https://api.groq.com/openai/v1', baseUrlEditable: true, key: 'required', jsonMode: 'json_object', agentic: false, defaultTimeoutSec: 60, browserCors: 'unverified' },
   { id: 'mistral', label: 'Mistral', group: 'cloud', adapter: 'openai-compatible', defaultModel: 'mistral-large-latest', defaultBaseUrl: 'https://api.mistral.ai/v1', baseUrlEditable: true, key: 'required', jsonMode: 'json_object', agentic: false, defaultTimeoutSec: 60, browserCors: 'unverified' },
-  { id: 'xai', label: 'xAI (Grok)', group: 'cloud', adapter: 'openai-compatible', defaultModel: 'grok-4', defaultBaseUrl: 'https://api.x.ai/v1', baseUrlEditable: true, key: 'required', jsonMode: 'json_object', agentic: false, defaultTimeoutSec: 90, browserCors: 'unverified' },
+  { id: 'xai', label: 'xAI (Grok)', group: 'cloud', adapter: 'openai-compatible', defaultModel: 'grok-4.7', defaultBaseUrl: 'https://api.x.ai/v1', baseUrlEditable: true, key: 'required', jsonMode: 'json_object', agentic: false, defaultTimeoutSec: 90, browserCors: 'unverified' },
   { id: 'deepseek', label: 'DeepSeek', group: 'cloud', adapter: 'openai-compatible', defaultModel: 'deepseek-chat', defaultBaseUrl: 'https://api.deepseek.com/v1', baseUrlEditable: true, key: 'required', jsonMode: 'json_object', agentic: false, defaultTimeoutSec: 90, browserCors: 'unverified' },
   { id: 'together', label: 'Together AI', group: 'cloud', adapter: 'openai-compatible', defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', defaultBaseUrl: 'https://api.together.xyz/v1', baseUrlEditable: true, key: 'required', jsonMode: 'json_object', agentic: false, defaultTimeoutSec: 60, browserCors: 'unverified' },
   { id: 'fireworks', label: 'Fireworks', group: 'cloud', adapter: 'openai-compatible', defaultModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct', defaultBaseUrl: 'https://api.fireworks.ai/inference/v1', baseUrlEditable: true, key: 'required', jsonMode: 'json_object', agentic: false, defaultTimeoutSec: 60, browserCors: 'unverified' },
