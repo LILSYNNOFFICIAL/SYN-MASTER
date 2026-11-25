@@ -802,3 +802,41 @@ g.is-solo .syn-eqx-node{stroke-dasharray:3 2;}
   .syn-eqx-toolbar .syn-eqx-num input{width:44px;}
   .syn-eqx-legend{padding-left:0;}
 }
+
+
+/* Nov 25 · Dynamic EQ shares the Ozone graph/popover system with a brighter live glow. */
+.syn-deq{
+  border-color:rgba(63,224,255,.52);
+  background:
+    radial-gradient(ellipse at 12% 0%,rgba(46,168,255,.22),transparent 48%),
+    radial-gradient(ellipse at 88% 100%,rgba(139,92,246,.22),transparent 52%),
+    linear-gradient(165deg,rgba(5,16,32,.88),rgba(3,7,16,.94));
+  box-shadow:0 0 0 1px rgba(63,224,255,.10) inset,0 0 24px rgba(46,168,255,.18),0 0 42px rgba(139,92,246,.12);
+}
+.syn-deq[data-on="false"] .syn-deq-graph,.syn-deq[data-on="false"] .syn-eqx-bands{opacity:.48;filter:saturate(.55);}
+.syn-deq-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.syn-deq-live-label{font:700 9px var(--syn-font-mono,monospace);letter-spacing:.12em;color:var(--skin-cyan);text-shadow:0 0 9px var(--glow-cyan);}
+.syn-deq .syn-eqx-canvas{border:1px solid rgba(46,168,255,.24);border-radius:12px;background:radial-gradient(ellipse at 50% 50%,rgba(46,168,255,.08),transparent 72%),rgba(1,5,13,.62);box-shadow:inset 0 0 22px rgba(46,168,255,.08),0 0 16px rgba(46,168,255,.12);}
+.syn-deq .syn-eqx-svg{filter:drop-shadow(0 0 5px rgba(46,168,255,.18));}
+.syn-deq .syn-eqx-svg [data-curve="main"]{filter:drop-shadow(0 0 5px rgba(63,224,255,.7)) drop-shadow(0 0 12px rgba(139,92,246,.45));}
+.syn-deq .syn-eqx-live{stroke:#F5B82E;stroke-width:2.8;filter:drop-shadow(0 0 5px #3FE0FF) drop-shadow(0 0 12px #8B5CF6);stroke-linecap:round;}
+.syn-deq .syn-eqx-node{filter:drop-shadow(0 0 5px currentColor) drop-shadow(0 0 10px rgba(46,168,255,.45));}
+.syn-deq .syn-eqx-node:focus-visible{filter:drop-shadow(0 0 8px #3FE0FF) drop-shadow(0 0 16px #8B5CF6);}
+.syn-deq .syn-eqx-qhandles rect{filter:drop-shadow(0 0 5px currentColor);}
+.syn-deq .syn-eqx-band{min-height:38px;border-color:color-mix(in srgb,var(--band-color) 65%,transparent);background:linear-gradient(180deg,color-mix(in srgb,var(--band-color) 12%,rgba(4,10,22,.94)),rgba(2,7,16,.92));box-shadow:0 0 9px color-mix(in srgb,var(--band-color) 22%,transparent),inset 0 0 8px color-mix(in srgb,var(--band-color) 8%,transparent);}
+.syn-deq .syn-eqx-band.is-sel{box-shadow:inset 0 0 0 1px var(--band-color),0 0 12px color-mix(in srgb,var(--band-color) 52%,transparent),0 0 24px color-mix(in srgb,var(--band-color) 22%,transparent);}
+.syn-deq .syn-eqx-gr{height:3px;box-shadow:0 0 8px var(--band-color),0 0 14px var(--band-color);}
+.syn-deq .syn-eqx-pop{border-color:color-mix(in srgb,var(--band-color) 65%,#3FE0FF);box-shadow:0 12px 32px rgba(0,0,0,.72),0 0 0 1px rgba(63,224,255,.16) inset,0 0 18px color-mix(in srgb,var(--band-color) 42%,transparent),0 0 32px rgba(46,168,255,.18);}
+.syn-deq .syn-eqx-chip.is-on{box-shadow:0 0 0 1px rgba(191,243,255,.35) inset,0 0 12px var(--glow-cyan),0 0 22px rgba(46,168,255,.25);}
+.syn-deq .syn-eqx-thr-level{box-shadow:0 0 7px #3FE0FF,0 0 14px rgba(46,168,255,.65);}
+.syn-deq .syn-eqx-thr-line{box-shadow:0 0 7px rgba(255,255,255,.85),0 0 12px rgba(63,224,255,.5);}
+.syn-deq-footnote{margin:0;color:#83AFCF;font:500 10px/1.5 var(--syn-font-mono,monospace);}
+@media (max-width:640px){
+  .syn-deq{padding:8px;}
+  .syn-deq .syn-eqx-canvas{padding:0 0 18px 22px;}
+  .syn-deq-toolbar{align-items:flex-start;}
+  .syn-deq-live-label{font-size:8px;}
+}
+@media (prefers-reduced-motion:reduce){
+  .syn-deq *, .syn-deq *::before, .syn-deq *::after{scroll-behavior:auto !important;animation:none !important;transition:none !important;}
+}

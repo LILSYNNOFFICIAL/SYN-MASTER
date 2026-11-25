@@ -402,6 +402,30 @@ async function runWavExportE2E(browser) {
     const addDynamicEq = page.getByRole('button', { name: /Add Dynamic EQ/i });
     if (await addDynamicEq.isVisible()) await addDynamicEq.click();
     await page.locator('.syn-deq-power').waitFor({ state: 'visible', timeout: 10000 });
+
+    // Verify the Dynamic EQ editor uses the shared Ozone graph, type menu, popover and trace meter.
+    const dynGraph = page.locator('.syn-deq-graph .syn-eqx-svg');
+    await dynGraph.waitFor({ state: 'visible', timeout: 10000 });
+    const dynNodes = page.locator('.syn-deq-graph .syn-eqx-node');
+    assert.equal(await dynNodes.count(), 2, 'default Dynamic EQ must render both bands on the shared graph');
+    await dynNodes.first().click();
+    const dynPop = page.locator('.syn-deq .syn-eqx-pop');
+    await dynPop.waitFor({ state: 'visible' });
+    await dynPop.locator('.syn-eqx-thr-meter').waitFor({ state: 'visible' });
+    await dynPop.locator('.syn-eqx-type-btn').click();
+    const dynTypeMenu = page.locator('.syn-eqx-menu');
+    await dynTypeMenu.waitFor({ state: 'visible' });
+    for (const type of ['Bell', 'Proportional Q', 'Band Shelf', 'Baxandall Bass', 'Baxandall Treble', 'Low Shelf', 'High Shelf']) {
+      assert.equal(await dynTypeMenu.getByText(type, { exact: true }).isVisible(), true, 'Dynamic EQ type menu includes ' + type);
+    }
+    await page.keyboard.press('Escape');
+    await dynPop.getByRole('button', { name: 'More settings' }).click();
+    await dynPop.locator('.syn-eqx-pop-adv').waitFor({ state: 'visible' });
+    assert.equal(await dynPop.getByLabel('Ratio').isVisible(), true, 'advanced Dynamic EQ controls include ratio');
+    await page.locator('.syn-deq-addband').click();
+    assert.equal(await dynNodes.count(), 3, 'Dynamic EQ + Band adds a graph node');
+    await page.locator('.syn-deq .syn-eqx-pop').getByRole('button', { name: 'Delete Band 3' }).click();
+    assert.equal(await dynNodes.count(), 2, 'deleting a Dynamic EQ band removes its graph node');
     step('telemetry');
     await page.locator('[data-testid="render-peak-telemetry"]').waitFor({ state: 'visible', timeout: 30000 });
 

@@ -436,6 +436,10 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
             <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Dynamic EQ…</p></div>}>
             <DynamicEQPanel
               module={dynEq}
+              sampleRate={p.sampleRate}
+              preSpectrum={p.source}
+              postSpectrum={p.master}
+              trace={p.dynamicEqTraces?.find((item) => item.moduleId === dynEq?.id)}
               onAdd={() => add('dynamic-eq')}
               onChange={(next) => { if (dynEq) setParams<DynamicEQParams>(dynEq, next); }}
               onToggle={(on) => { if (dynEq) patch(dynEq.id, { enabled: true, bypassed: !on }); }}
