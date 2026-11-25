@@ -450,7 +450,8 @@ export const AiMasterView: React.FC<Props> = ({
                   key={m.id}
                   type="button"
                   onClick={() => onChangeOperatingMode(m.id)}
-                  className={`p-2 rounded border text-left transition-colors ${
+                  aria-pressed={operatingMode === m.id}
+                  className={`syn-ai-mode-card p-2 rounded border text-left transition-colors ${
                     operatingMode === m.id
                       ? 'bg-[#D4AF37]/15 border-[#D4AF37] text-[#F2CA52]'
                       : 'bg-[#0C0D12] border-[#242732] text-[#C5CDD8] hover:border-[#3A3F50]'
@@ -484,7 +485,8 @@ export const AiMasterView: React.FC<Props> = ({
                   key={obj.id}
                   type="button"
                   onClick={() => onChangeObjectiveId(obj.id)}
-                  className={`px-2.5 py-1 rounded border text-[11px] font-semibold whitespace-nowrap ${
+                  aria-pressed={objectiveId === obj.id}
+                  className={`syn-ai-chip-btn px-2.5 py-1 rounded border text-[11px] font-semibold whitespace-nowrap ${
                     objectiveId === obj.id
                       ? 'bg-[#D4AF37] text-[#070709] border-[#F2CA52]'
                       : 'bg-[#0C0D12] border-[#262934] text-[#C5CDD8] hover:border-[#D4AF37]/60'
@@ -727,7 +729,7 @@ export const AiMasterView: React.FC<Props> = ({
           {effectiveVerification ? (
             <div className="flex flex-col gap-3 text-xs">
               {activeDiagnosis && activeDiagnosis.workingWell.length > 0 && (
-                <div className="p-2.5 rounded bg-[#10B981]/10 border border-[#10B981]/30">
+                <div className="syn-ai-good p-2.5 rounded bg-[#10B981]/10 border border-[#10B981]/30">
                   <div className="font-semibold text-[#34D399] mb-1">Working Well in Source</div>
                   <ul className="list-disc list-inside text-[#C5CDD8] flex flex-col gap-0.5">
                     {activeDiagnosis.workingWell.map((w, idx) => (
@@ -745,7 +747,7 @@ export const AiMasterView: React.FC<Props> = ({
                     Remaining Active Problems ({effectiveVerification.activeFindings.length})
                   </span>
                   {effectiveVerification.activeFindings.length > 0 && (
-                    <button type="button" onClick={onFixAllProblems} disabled={directorRunning} className="rounded-md bg-[#D4AF37] px-3 py-1.5 text-[10px] font-extrabold tracking-wide text-[#08090B] hover:bg-[#F2CA52] disabled:cursor-not-allowed disabled:opacity-50">
+                    <button type="button" onClick={onFixAllProblems} disabled={directorRunning} className="syn-ai-fixall rounded-md bg-[#D4AF37] px-3 py-1.5 text-[10px] font-extrabold tracking-wide text-[#08090B] hover:bg-[#F2CA52] disabled:cursor-not-allowed disabled:opacity-50">
                       {directorRunning ? 'FIXING & VERIFYING…' : 'FIX ALL & VERIFY'}
                     </button>
                   )}
@@ -766,7 +768,7 @@ export const AiMasterView: React.FC<Props> = ({
                       <div
                         key={vf.findingId}
                         data-testid={`active-finding-${vf.findingId}`}
-                        className="p-2.5 rounded border bg-[#EF4444]/8 border-[#EF4444]/35 flex flex-col gap-1.5"
+                        className="syn-ai-finding syn-ai-finding-open p-2.5 rounded border bg-[#EF4444]/8 border-[#EF4444]/35 flex flex-col gap-1.5"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
@@ -845,7 +847,7 @@ export const AiMasterView: React.FC<Props> = ({
                       <div
                         key={vf.findingId}
                         data-testid={`resolved-finding-${vf.findingId}`}
-                        className="p-2.5 rounded border bg-[#10B981]/8 border-[#10B981]/35 flex flex-col gap-1.5"
+                        className="syn-ai-finding syn-ai-finding-resolved p-2.5 rounded border bg-[#10B981]/8 border-[#10B981]/35 flex flex-col gap-1.5"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <span className="font-bold text-[#F7F8FA]">
@@ -1067,12 +1069,12 @@ export const AiMasterView: React.FC<Props> = ({
                   : postFallbackLabel,
               },
             ].map((row) => (
-              <div key={row.label} className="p-2 rounded bg-[#0C0D12] border border-[#21242F]">
+              <div key={row.label} className="syn-ai-tile p-2 rounded bg-[#0C0D12] border border-[#21242F]">
                 <div className="text-[10px] text-[#9CA3AF] font-sans">{row.label}</div>
                 <div className="text-[11px] text-[#9CA3AF] mt-0.5">Pre: {row.pre}</div>
                 <div
                   className={`text-xs font-bold ${
-                    row.post === 'UNVERIFIED' ? 'text-[#FCA5A5]' : 'text-[#F2CA52]'
+                    row.post === 'UNVERIFIED' ? 'text-[#FCA5A5]' : 'syn-ai-tile-post text-[#F2CA52]'
                   }`}
                 >
                   Post: {row.post}

@@ -648,3 +648,35 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-plugin-workspace .syn-workspace-empty-plugins svg[class*="text-[#34D399]"]{color:var(--skin-cyan) !important;filter:drop-shadow(0 0 4px var(--glow-cyan));}
 .syn-plugin-workspace [class*="bg-[#EF4444]/10"]{border-radius:12px !important;}
 @media (max-width:767px){.syn-plugin-workspace .syn-plug-card{border-radius:16px !important;}.syn-plugin-workspace .syn-plug-primary{min-height:44px;}}
+
+/* ==========================================================================
+   Nov 25 · AI Assistant page: same glass + glow language as the console.
+   Gold = the verified FIX ALL action and measured "Post" values, electric blue /
+   cyan = AI controls and selection, purple / magenta = open problems.
+   ========================================================================== */
+.syn-ai-workspace [class*="bg-[#0C0D12]"],.syn-ai-workspace [class*="bg-[#161820]"]:not(input):not(select),.syn-ai-workspace [class*="bg-[#0B0C10]"]{
+  background:linear-gradient(170deg,rgba(10,22,40,.78),rgba(4,9,18,.86)) !important;border-color:rgba(46,168,255,.24) !important;border-radius:12px !important;box-shadow:inset 0 0 14px rgba(46,168,255,.05);}
+.syn-ai-workspace input[class*="bg-[#161820]"]{background:var(--skin-glass-2) !important;border-color:var(--line-blue) !important;border-radius:10px !important;}
+.syn-ai-workspace .syn-ai-mode-card{border-radius:14px !important;}
+.syn-ai-workspace .syn-ai-mode-card:not([aria-pressed="true"]):hover{border-color:var(--line-blue-strong) !important;box-shadow:0 0 14px var(--glow-blue-soft);}
+.syn-ai-workspace .syn-ai-mode-card[aria-pressed="true"]{background:radial-gradient(ellipse at 20% 0%,rgba(63,224,255,.35),transparent 60%),linear-gradient(180deg,rgba(46,168,255,.32),rgba(24,103,201,.18)) !important;
+  border-color:var(--line-blue-strong) !important;color:#fff !important;box-shadow:0 0 0 1px rgba(63,224,255,.35) inset,0 0 20px var(--glow-blue);}
+.syn-ai-workspace .syn-ai-mode-card[aria-pressed="true"],.syn-ai-workspace .syn-ai-mode-card[aria-pressed="true"] *{color:#fff !important;opacity:1;text-shadow:0 0 8px var(--glow-cyan);}
+.syn-ai-workspace .syn-ai-mode-card[aria-pressed="true"] [class*="text-[#9CA3AF]"]{color:#CFE9FF !important;text-shadow:none;}
+.syn-ai-workspace .syn-ai-chip-btn{border-radius:999px !important;padding-inline:12px !important;}
+.syn-ai-workspace .syn-ai-chip-btn:not([aria-pressed="true"]){background:rgba(46,168,255,.06) !important;border-color:rgba(46,168,255,.3) !important;color:#CFE9FF !important;}
+.syn-ai-workspace .syn-ai-chip-btn[aria-pressed="true"]{background:linear-gradient(180deg,#3FE0FF,#2EA8FF) !important;border-color:#BFF3FF !important;color:#02101f !important;box-shadow:0 0 14px var(--glow-cyan) !important;}
+.syn-ai-workspace button.syn-ai-fixall{background:linear-gradient(180deg,#FFD36B,var(--skin-gold) 55%,#C88A12) !important;color:#120c00 !important;border:1px solid var(--skin-gold-bright) !important;box-shadow:0 0 16px var(--skin-gold-glow),inset 0 1px 0 rgba(255,255,255,.45) !important;}
+.syn-ai-workspace button.syn-ai-fixall *{color:#120c00 !important;opacity:1;}
+.syn-ai-workspace button.syn-ai-fixall:hover:not(:disabled){box-shadow:0 0 0 1px var(--skin-gold-bright),0 0 24px rgba(245,184,46,.55) !important;}
+.syn-ai-workspace .syn-ai-tile{transition:border-color .2s ease,box-shadow .2s ease;}
+.syn-ai-workspace .syn-ai-tile:hover{border-color:var(--line-blue-strong) !important;box-shadow:0 0 14px var(--glow-blue-soft);}
+.syn-ai-workspace .syn-ai-tile [class*="text-[#9CA3AF]"]{color:#8FB7D6 !important;}
+.syn-ai-workspace .syn-ai-tile-post{color:var(--skin-gold) !important;text-shadow:0 0 10px var(--skin-gold-glow);}
+.syn-ai-workspace .syn-ai-good{background:radial-gradient(ellipse at 0% 0%,rgba(63,224,255,.14),transparent 60%),rgba(4,16,24,.7) !important;border-color:rgba(63,224,255,.4) !important;border-radius:14px !important;box-shadow:0 0 14px rgba(63,224,255,.12);}
+.syn-ai-workspace .syn-ai-good > div:first-child{color:var(--skin-cyan) !important;text-shadow:0 0 8px var(--glow-cyan);}
+.syn-ai-workspace .syn-ai-finding{border-radius:14px !important;}
+.syn-ai-workspace .syn-ai-finding-open{background:radial-gradient(ellipse at 0% 0%,rgba(224,64,251,.16),transparent 60%),linear-gradient(170deg,rgba(28,8,36,.75),rgba(8,4,14,.85)) !important;border-color:rgba(224,64,251,.45) !important;box-shadow:0 0 18px rgba(224,64,251,.14);}
+.syn-ai-workspace .syn-ai-finding-resolved{background:radial-gradient(ellipse at 0% 0%,rgba(63,224,255,.14),transparent 60%),rgba(4,16,24,.75) !important;border-color:rgba(63,224,255,.4) !important;}
+.syn-ai-workspace [class*="text-[#9CA3AF]"]{color:#8FB7D6;}
+@media (max-width:767px){.syn-ai-workspace .syn-ai-chip-btn{min-height:40px;}.syn-ai-workspace button.syn-ai-fixall{min-height:44px;}}
