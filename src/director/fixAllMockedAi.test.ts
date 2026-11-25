@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { analyzeAudioBuffer } from '../dsp/analyzer';
 import { processChainOffline } from '../dsp/offlineDsp';
 import { createProcessorModule } from '../dsp/chainValidation';
+import { QC_TARGET_PROFILES } from '../dsp/qc';
 import { requestRefine, requestStrategy } from '../ai/masteringClient';
 import { formatModeLine, MODE_MEANINGS } from '../ai/masteringPrompt';
 import type { ProviderConfig } from '../ai/providerAdapters';
@@ -264,4 +265,36 @@ test('Fix All applies deterministic gate repairs alongside a valid unchanged AI 
     bands.some((band) => band.id === 'syn-sub-excess' && (band.freq ?? 0) >= 20 && (band.freq ?? 0) <= 60 && (band.gain ?? 0) < 0),
     'deterministic sub-bass gate repair must be merged into a valid AI refinement instead of being skipped',
   );
+});
+
+
+test('Fix All does not converge while blocking QC failures remain even if the objective gate passes', async () => {
+  const src = quietMix();
+  const sourceAnalysis = analyzeAudioBuffer(src, SR);
+  let refineCalls = 0;
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: src,
+    sampleRate: SR,
+    operatingMode: 'autonomous',
+    objectiveId: 'custom',
+    customSpec: {
+      targetLufs: sourceAnalysis.integratedLufs,
+      maxTruePeakDb: -1,
+      minDynamicRangeDb: 0,
+    },
+    qcProfile: { ...QC_TARGET_PROFILES[0], minDynamicRangeDb: 100 },
+    initialChain: [createProcessorModule('parametric-eq')],
+    maxIterations: 2,
+    maxCpuBudgetMs: 60_000,
+    aiRefineCallback: async (ctx) => {
+      refineCalls++;
+      return { chain: ctx.currentChain, producedBy: 'mock AI (no QC correction)' };
+    },
+  });
+
+  assert.equal(report.targetGate?.passed, true, 'objective targets are deliberately satisfied by the unchanged render');
+  assert.ok(report.qcReport.failCount > 0, 'fixture deliberately retains a blocking QC failure');
+  assert.equal(refineCalls, 1, 'QC failures must prevent early convergence and trigger an AI refinement');
+  assert.notEqual(report.status, 'converged', 'a master with blocking QC failures cannot be marked converged');
+  assert.match(report.stopReason, /QC|not fully verified/i, 'the final reason must disclose the remaining QC failure');
 });
