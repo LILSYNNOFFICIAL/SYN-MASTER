@@ -299,7 +299,8 @@ function applyDynamicEQ(
           targetGainDb = Math.max(limitDb * intensityScale, -over * slope * intensityScale);
         }
       }
-      const gainCoeff = targetGainDb < currentGainDb ? gainAttackCoeff : gainReleaseCoeff;
+      // Attack while the gain moves away from 0 dB (deeper cut or bigger boost), release on the way back.
+      const gainCoeff = Math.abs(targetGainDb) > Math.abs(currentGainDb) ? gainAttackCoeff : gainReleaseCoeff;
       currentGainDb = gainCoeff * currentGainDb + (1 - gainCoeff) * targetGainDb;
       if (Math.abs(currentGainDb) > maxGr) maxGr = Math.abs(currentGainDb);
 

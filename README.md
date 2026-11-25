@@ -483,7 +483,8 @@ The client-entered cloud token is a shared bearer credential, not individual use
 - [x] **Glow pass** (`89bb6a2`): hover/active/focus glow on buttons, tabs, selects, cards, knobs, faders, nav and menus; ambient blue/purple accents (console aura, EQ + Fix panel border breathe, header sweep, step badges, Export pulse). All animation off under `prefers-reduced-motion`.
 - [x] **Mode steers the AI** (`ffb2759`): the strategy request always includes `Mode: <mode> — <meaning>` alongside the Objective (only prompt change; tests in `src/ai/masteringPrompt.test.ts`).
 - [x] **G Dynamic EQ** (`4be09e0`): the engine already had a `dynamic-eq` processor (offline render, export and realtime graph). New "Dynamic EQ" tab beside EQ edits it (≤4 bands: freq, range, Q, threshold, attack, release; on/bypass). Off until added, so the default output is unchanged. Ratio is fixed by the engine (≈2.9:1) and shown, not editable. `src/dsp/dynamicEqExport.test.ts` checks it changes the export render and that bypass is bit-identical.
-- [ ] Not done: ratio control for Dynamic EQ (needs a DSP change); Stem Studio has no canvases of its own (its cards/accents were re-coloured via CSS); playhead dragging on the spectrogram.
+- [x] Dynamic EQ ratio (1:1 to 20:1) and cut/boost mode (`ff79089`); boost mode now attacks as the boost rises and releases as it falls (previously inverted). Default ratio 20/7 keeps legacy output identical.
+- [ ] Not done: Stem Studio has no canvases of its own (its cards/accents were re-coloured via CSS); playhead dragging on the spectrogram.
 
 ### GUI redesign status (blue-glow pass, Nov 24 2026)
 Owner feedback round 2 ("more blue glow everywhere"). Skin lives in `src/skin/skin.css` (layer scale, blue glow tokens `--glow-*`, `--line-blue*`); overlays render through `src/ui/Portal.tsx`.
