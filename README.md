@@ -515,7 +515,7 @@ Open items, in priority order:
 2. [x] **Dynamic EQ ratio knob:** ratio and cut/boost mode are implemented in the offline and realtime preview paths, with legacy chains defaulting to the original ≈2.9:1 cut slope. The console and rack expose ratio and mode controls.
 3. **EQ live preview jump:** the drag-time estimate ignores the limiter/maximizer, so the waveform jumps and then settles. Estimate post-limiter level, or hold the previous size while dragging.
 4. **Mobile checks:** drag-seek on a real phone, mobile menubar dropdown positions, glow performance on slow devices, prefers-reduced-motion.
-5. **Live spectrum sample rate:** it assumes a 48 kHz context, so read `audioContext.sampleRate`.
+5. [x] **Live spectrum sample rate:** the live FFT mapping now uses `AudioContext.sampleRate` published by `SynAudioEngine.getLiveTelemetry()` instead of assuming 48 kHz.
 6. **AI Assistant page:** reskinned only. Rebuild its layout to match the console.
 7. **Plugins & Host tab + Windows companion:** restyle the tab (connection status, plugin list, add-to-chain, params, Open Editor). Give the companion window a JUCE LookAndFeel in the same skin. Add a release workflow `.github/workflows/windows-companion-release.yml` and tag v0.1.0. Ports: HTTP 127.0.0.1:47832, WS 127.0.0.1:47833; pairing code SYN-XXXX-XXXX. See docs/VST_COMPANION.md.
 8. **BYO-AI leftovers:** shimmer calibration on real audio, best-candidate fallback when every pass is rejected, BYO docs, and checking that the model names (`claude-sonnet-4-5`, `grok-4`) are current.
