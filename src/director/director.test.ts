@@ -1020,6 +1020,10 @@ test('Fix All does not converge while a baseline technical finding remains unres
     clickAtStart: false,
     clickAtEnd: false,
     dcOffset: 0,
+    zoneEnergyDb: {
+      ...baseline.zoneEnergyDb,
+      sub: Math.min(baseline.zoneEnergyDb.sub, baseline.zoneEnergyDb.bass + 3),
+    },
   };
 
   const report = await runAutonomousDirectorLoop({
