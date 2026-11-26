@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, shell, utilityProcess } = require('electron');
 const { spawn } = require('node:child_process');
+const { randomBytes } = require('node:crypto');
 const fs = require('node:fs/promises');
 const net = require('node:net');
 const path = require('node:path');
@@ -8,6 +9,7 @@ let mainWindow = null;
 let webProcess = null;
 let nativeProcess = null;
 let webPort = null;
+let aiSessionSecret = null;
 let backendPromise = null;
 let appOrigin = null;
 let nativePairing = null;
@@ -120,6 +122,7 @@ async function startBackend() {
     }
 
     webPort = await getFreeLoopbackPort();
+    aiSessionSecret = randomBytes(32).toString('hex');
     appOrigin = `http://127.0.0.1:${webPort}`;
 
     webProcess = utilityProcess.fork(serverPath, [], {
@@ -129,6 +132,7 @@ async function startBackend() {
         HOST: '127.0.0.1',
         PORT: String(webPort),
         DOTENV_CONFIG_PATH: envFile,
+        SYN_MASTER_SESSION_SECRET: aiSessionSecret,
       },
       stdio: 'ignore',
     });
