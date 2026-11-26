@@ -248,7 +248,17 @@ export function buildDiagnosticLog(input: {
       target: 'confidence < 0.60, or side HF reduced ≥ 1 dB after de-shimmer',
       tools: ['restore'],
       settings: [...settingsFor(chain, ['restore']), sh.confidence >= 0.6 ? 'Auto: SYN-Restore deShimmer on (30–80% by confidence)' : 'Suggested if audible: SYN-Restore deShimmer 30–50%'],
-      status: master ? (reducedDb !== null && reducedDb <= -1 ? 'fixed' : 'advisory') : 'open',
+      status: !report
+        ? 'open'
+        : !report.postFixVerification?.analysisFresh || !report.postFixVerification.postAnalysis
+          ? 'unverified'
+          : reducedDb !== null && reducedDb <= -1
+            ? 'fixed'
+            : reducedDb !== null && reducedDb < 0
+              ? 'improved'
+              : reducedDb !== null
+                ? 'not-fixed'
+                : 'unverified',
     });
   } else if (!sh) {
     const hiCorr = source.stereoBandCorrelation?.high;
