@@ -2,7 +2,6 @@ import React, { useEffect, useRef } from 'react';
 import { Pause, Play, SkipBack, SkipForward, Upload } from 'lucide-react';
 import { telemetryStore } from '../../engine/telemetryStore';
 import type { FadeCurve, FadeSettings } from '../../dsp/fades';
-import { TimelineWaveform } from './TimelineWaveform';
 
 interface Props {
   prePeaks: number[];
@@ -69,40 +68,14 @@ const TransportControls: React.FC<Props> = (p) => {
 };
 
 export const TimelinePlayer: React.FC<Props> = (p) => {
-  const hasTrack = p.durationSec > 0;
   if (p.transportOnly) return <TransportControls {...p} />;
   return (
-    <section className={`syn-card syn-player syn-area-player${p.integrated ? ' syn-player-integrated' : ''}`} aria-label={p.integrated ? 'Integrated EQ timeline fades' : 'Timeline player and fades'}>
-      {p.integrated ? (
-        <>
-          <div className="syn-player-integrated-readout"><span>TRACK POSITION</span><TimeReadout durationSec={p.durationSec} /></div>
-          {hasTrack ? (
-            <TimelineWaveform prePeaks={p.prePeaks} postPeaks={p.postPeaks} durationSec={p.durationSec} showPost={p.showPost} fades={p.fades} onFadesChange={p.onFadesChange} onSeek={p.onSeek} heightPx={112} />
-          ) : <div className="syn-player-empty">Import a track to edit fades</div>}
-        </>
-      ) : (
-        <>
-          <div className="syn-player-head">
-            <h3 className="syn-card-title">Timeline</h3>
-            <span className="syn-player-hint">Click or drag to seek · drag the end knobs to fade</span>
-            <TimeReadout durationSec={p.durationSec} />
-          </div>
-          {hasTrack ? (
-            <TimelineWaveform
-              prePeaks={p.prePeaks}
-              postPeaks={p.postPeaks}
-              durationSec={p.durationSec}
-              showPost={p.showPost}
-              fades={p.fades}
-              onFadesChange={p.onFadesChange}
-              onSeek={p.onSeek}
-              heightPx={112}
-            />
-          ) : (
-            <div className="syn-player-empty">Import a track to see its waveform</div>
-          )}
-        </>
-      )}
+    <section className={`syn-card syn-player syn-area-player${p.integrated ? ' syn-player-integrated' : ''}`} aria-label="Fade controls for the existing EQ waveform">
+      <div className="syn-player-integrated-readout">
+        <span>FADES · EXISTING EQ WAVEFORM</span>
+        <TimeReadout durationSec={p.durationSec} />
+      </div>
+      <p className="syn-player-hint">Drag the cyan fade handles on the EQ waveform above. Choose the fade curves here.</p>
       {!p.hideTransport && <TransportControls {...p} />}
       {p.extra}
       <div className="syn-player-controls">
