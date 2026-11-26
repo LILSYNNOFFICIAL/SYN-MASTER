@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           export NODE_ENV=production
           export PORT=4179
-          export SYN_MASTER_AI_ACCESS_TOKEN="$(printf '%064d' 0)"
+          export SYN_MASTER_SESSION_SECRET="$(printf '%064d' 0)"
           npm start > /tmp/syn-master-start.log 2>&1 &
           server_pid=$!
           cleanup() {
@@ -81,11 +81,13 @@ jobs:
               curl --fail --silent "http://127.0.0.1:$PORT/" > /dev/null
               # Exercise the production AI access gate without invoking Gemini. A valid
               # token must reach input validation (400), while absent auth must stop at 401.
-              for endpoint in master refine; do
+              session_status="$(curl --silent --cookie-jar /tmp/syn-master-guest-cookie.txt --output /dev/null --write-out '%{http_code}' --request POST --header 'Origin: http://127.0.0.1:$PORT' "http://127.0.0.1:$PORT/api/ai/session")"
+          test "$session_status" = "204"
+          for endpoint in master refine; do
                 url="http://127.0.0.1:$PORT/api/ai/$endpoint"
-                unauthorized_status="$(curl --silent --output /tmp/syn-master-unauthorized.json --write-out '%{http_code}' --request POST --header 'Content-Type: application/json' --data '{}' "$url")"
+                unauthorized_status="$(curl --silent --output /tmp/syn-master-unauthorized.json --write-out '%{http_code}' --request POST --header "Origin: http://127.0.0.1:$PORT" --header 'Content-Type: application/json' --data '{}' "$url")"
                 test "$unauthorized_status" = "401"
-                authorized_status="$(curl --silent --output /tmp/syn-master-authorized.json --write-out '%{http_code}' --request POST --header 'Content-Type: application/json' --header "Authorization: Bearer $SYN_MASTER_AI_ACCESS_TOKEN" --data '{}' "$url")"
+                authorized_status="$(curl --silent --cookie /tmp/syn-master-guest-cookie.txt --output /tmp/syn-master-authorized.json --write-out '%{http_code}' --request POST --header "Origin: http://127.0.0.1:$PORT" --header 'Content-Type: application/json' --data '{}' "$url")"
                 test "$authorized_status" = "400"
               done
               exit 0
