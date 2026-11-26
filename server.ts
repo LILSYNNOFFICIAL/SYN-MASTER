@@ -68,8 +68,37 @@ app.post('/api/ai/session', (req, res) => {
 });
 // IP request limits run before signed guest-session validation. Session-based spend caps
 // run only after a valid HttpOnly cookie has established an anonymous client identity.
+const MAX_CONCURRENT_AI_REQUESTS = 8;
+const MAX_CONCURRENT_AI_PER_SESSION = 2;
+let activeAiRequests = 0;
+const activeAiBySession = new Map<string, number>();
+function aiConcurrencyGuard(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const routePath = String(req.path || '').toLowerCase().replace(/\/+$/, '');
+  if (req.method !== 'POST' || (routePath !== '/master' && routePath !== '/refine')) return next();
+  const sessionId = String(res.locals.guestSessionId ?? '');
+  const sessionActive = activeAiBySession.get(sessionId) ?? 0;
+  if (!sessionId || activeAiRequests >= MAX_CONCURRENT_AI_REQUESTS || sessionActive >= MAX_CONCURRENT_AI_PER_SESSION) {
+    req.resume();
+    res.status(429).json({ error: 'Cloud AI is busy for this guest session. Wait for the current request to finish and try again.' });
+    return;
+  }
+  activeAiRequests += 1;
+  activeAiBySession.set(sessionId, sessionActive + 1);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    activeAiRequests = Math.max(0, activeAiRequests - 1);
+    const remaining = Math.max(0, (activeAiBySession.get(sessionId) ?? 1) - 1);
+    if (remaining) activeAiBySession.set(sessionId, remaining);
+    else activeAiBySession.delete(sessionId);
+  };
+  res.once('finish', release);
+  res.once('close', release);
+  next();
+}
 const aiSpendGuard = createAiSpendMiddleware(createAiSpendLimiter({ limits: readAiSpendLimitsFromEnv(process.env) }));
-app.use('/api/ai', aiRateLimiter, aiGuestSession.middleware, aiSpendGuard);
+app.use('/api/ai', aiRateLimiter, aiGuestSession.middleware, aiConcurrencyGuard, aiSpendGuard);
 // Offline codec jobs are CPU-intensive but must not compete with AI requests for the
 // same budget, so export has its own per-client limiter.
 const allowExportRequest = createRateLimiter({ limit: 30, windowMs: 60_000, maxKeys: 10_000 });
