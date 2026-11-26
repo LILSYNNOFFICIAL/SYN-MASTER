@@ -47,7 +47,7 @@ export function diagnosticStatusForFinding(
   findingId: string,
 ): DiagnosticLogEntry['status'] {
   const verification = report?.postFixVerification;
-  if (!verification) return report ? 'unverified' : 'open';
+  if (!verification || !verification.analysisFresh || !verification.postAnalysis) return report ? 'unverified' : 'open';
   if (verification.resolvedFindings.some((f) => f.originalFinding.id === findingId && f.status === 'RESOLVED' && f.measurementReliable)) {
     return 'fixed';
   }
