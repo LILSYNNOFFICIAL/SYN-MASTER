@@ -140,26 +140,33 @@ export async function separateActiveRebalanceStems(options: { highQuality?: bool
   // FIX ALL may request separation immediately after import, while the asynchronous
   // device/memory assessment is still running. Never start the model before that gate.
   if (!state.assessment && state.status === 'checking') {
-    await new Promise<void>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      let unsubscribe: () => void = () => {};
-      const finish = (error?: Error) => {
-        if (timer !== null) clearTimeout(timer);
-        unsubscribe();
-        if (error) reject(error);
-        else resolve();
-      };
-      const check = () => {
-        if (state.fingerprint !== fingerprint) {
-          finish(new Error('The active track changed before stem separation could start.'));
-        } else if (state.assessment || state.status !== 'checking') {
-          finish();
-        }
-      };
-      unsubscribe = subscribeRebalanceStems(check);
-      timer = setTimeout(() => finish(new Error('Stem-separation resource assessment timed out.')), 10000);
-      check();
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        let unsubscribe: () => void = () => {};
+        const finish = (error?: Error) => {
+          if (timer !== null) clearTimeout(timer);
+          unsubscribe();
+          if (error) reject(error);
+          else resolve();
+        };
+        const check = () => {
+          if (state.fingerprint !== fingerprint) {
+            finish(new Error('The active track changed before stem separation could start.'));
+          } else if (state.assessment || state.status !== 'checking') {
+            finish();
+          }
+        };
+        unsubscribe = subscribeRebalanceStems(check);
+        timer = setTimeout(() => finish(new Error('Stem-separation resource assessment timed out.')), 10000);
+        check();
+      });
+    } catch (cause) {
+      if (state.fingerprint === fingerprint) {
+        setState({ status: 'error', error: cause instanceof Error ? cause.message : 'Stem-separation resource assessment failed.' });
+      }
+      return;
+    }
   }
   if (state.fingerprint !== fingerprint || activeSource !== source) return;
   if (!state.assessment) {
