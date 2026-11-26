@@ -256,7 +256,7 @@ export default function App() {
 
   const [projectId, setProjectId] = useState(() => `proj-${Date.now()}`);
   const [projectName, setProjectName] = useState('Untitled Mastering Session');
-  const [mode, setMode] = useState<MasteringMode>('hybrid');
+  const [mode, setMode] = useState<MasteringMode>('ai-auto');
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [savedChains, setSavedChains] = useState<SavedChainRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -2872,6 +2872,8 @@ export default function App() {
       isPlaying={isPlaying}
       onTogglePlay={togglePlay}
       mode={mode}
+      fades={fades}
+      onFadesChange={setFades}
       onTargetLufs={(lufs) => {
         setTargetPresetId(null);
         setCustomObjective((prev) => ({ ...prev, targetLufs: lufs }));
