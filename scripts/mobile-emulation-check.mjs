@@ -15,7 +15,7 @@ const port = process.env.SYN_MOBILE_PORT ?? '4182';
 const baseUrl = `http://127.0.0.1:${port}`;
 const server = spawn(process.execPath, ['server.ts'], {
   stdio: 'ignore',
-  env: { ...process.env, NODE_ENV: 'production', PORT: port, HOST: '127.0.0.1', SYN_MASTER_AI_ACCESS_TOKEN: 'mobile-emulation-check-token-0123456789abcdef' },
+  env: { ...process.env, NODE_ENV: 'production', PORT: port, HOST: '127.0.0.1', SYN_MASTER_SESSION_SECRET: 'mobile-emulation-session-secret-0123456789abcdef' },
 });
 
 async function waitForServer() {
