@@ -17,16 +17,26 @@
   <img alt="Google Gen AI SDK" src="https://img.shields.io/badge/Google_Gen_AI-SDK-4285F4?logo=googlegemini&logoColor=white">
   <img alt="ONNX Runtime Web" src="https://img.shields.io/badge/ONNX_Runtime-Web-005CED?logo=onnx&logoColor=white">
   <img alt="Web Audio API" src="https://img.shields.io/badge/Web_Audio_API-Offline_DSP-8A2BE2">
-  <img alt="JUCE VST3 companion" src="https://img.shields.io/badge/JUCE- VST3_Companion-333333">
+  <img alt="JUCE VST3 companion" src="https://img.shields.io/badge/JUCE-VST3_Companion-333333">
 </p>
 
 ## Built with
 
-**Coding:** [ChatGPT](https://chatgpt.com/) · Hark AI · [GitHub Copilot](https://github.com/features/copilot) · [Google AI Studio](https://aistudio.google.com/)
+**Coding:**
 
-**Guidance:** [Claude](https://claude.ai/) · [Google Gemini](https://gemini.google.com/)
+[![ChatGPT](https://img.shields.io/badge/ChatGPT-OpenAI-412991?logo=openai&logoColor=white)](https://chatgpt.com/)
+![Hark AI](https://img.shields.io/badge/Hark_AI-Creative_Tools-7657D5)
+[![GitHub Copilot](https://img.shields.io/badge/GitHub_Copilot-Coding_Assistant-000000?logo=githubcopilot&logoColor=white)](https://github.com/features/copilot)
+[![Google AI Studio](https://img.shields.io/badge/Google_AI_Studio-Development-4285F4?logo=google&logoColor=white)](https://aistudio.google.com/)
 
-**UI:** Hark AI
+**Guidance:**
+
+[![Claude](https://img.shields.io/badge/Claude-Guidance-D97757?logo=anthropic&logoColor=white)](https://claude.ai/)
+[![Google Gemini](https://img.shields.io/badge/Google_Gemini-Guidance-8E75B2?logo=googlegemini&logoColor=white)](https://gemini.google.com/)
+
+**UI:**
+
+![Hark AI](https://img.shields.io/badge/Hark_AI-UI_Design-7657D5)
 
 SYN MASTER is an AI-assisted mastering workstation (React + TypeScript + Vite front end, an Express server that holds the Gemini key, offline Web Audio / SYN-DSP rendering, and an optional Windows VST3 companion host). It was created in **Google AI Studio** (published at https://syn-master.ai.studio/), edited with ChatGPT, and synced back into AI Studio through this GitHub repo.
 
@@ -60,7 +70,7 @@ This section records the technologies and dependencies currently declared by the
 
 ### npm packages
 
-Versions are copied from `package.json`. `^ `-style ranges follow npm semver and may resolve to a newer compatible patch/minor version when dependencies are installed.
+Versions are copied from `package.json`. `^`-prefixed ranges follow npm semver and may resolve to a newer compatible patch/minor version when dependencies are installed.
 
 **Runtime dependencies**
 
