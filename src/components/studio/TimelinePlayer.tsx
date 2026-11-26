@@ -16,7 +16,7 @@ interface Props {
   onTogglePlay: () => void;
   onImport: (file: File) => void;
   disabled?: boolean;
-  /** Render only transport/fade controls; the waveform is already overlaid behind the EQ graph. */
+  /** Render the timeline readout, waveform and fade controls inside the integrated EQ layout. */
   integrated?: boolean;
   /** Render only the transport controls for placement in the EQ header. */
   transportOnly?: boolean;
