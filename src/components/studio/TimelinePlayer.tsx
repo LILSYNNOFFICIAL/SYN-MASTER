@@ -74,7 +74,17 @@ export const TimelinePlayer: React.FC<Props> = (p) => {
   return (
     <section className={`syn-card syn-player syn-area-player${p.integrated ? ' syn-player-integrated' : ''}`} aria-label={p.integrated ? 'Integrated EQ timeline fades' : 'Timeline player and fades'}>
       {p.integrated ? (
-        <div className="syn-player-integrated-readout"><span>TRACK POSITION</span><TimeReadout durationSec={p.durationSec} /></div>
+        <>
+          <div className="syn-player-integrated-readout"><span>TRACK POSITION</span><TimeReadout durationSec={p.durationSec} /></div>
+          {hasTrack ? (
+            <TimelineWaveform prePeaks={p.prePeaks} postPeaks={p.postPeaks} durationSec={p.durationSec} showPost={p.showPost} fades={p.fades} onFadesChange={p.onFadesChange} onSeek={p.onSeek} heightPx={112} />
+          ) : <div className="syn-player-empty">Import a track to edit fades</div>}
+          <div className="syn-player-fades" role="group" aria-label="Timeline fade curves">
+            <label><span>Fade in <b>{p.fades.inSec.toFixed(2)}s</b></span><select value={p.fades.inCurve} onChange={(e) => p.onFadesChange({ ...p.fades, inCurve: e.target.value as FadeCurve })} aria-label="Fade-in curve">{CURVES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
+            <label><span>Fade out <b>{p.fades.outSec.toFixed(2)}s</b></span><select value={p.fades.outCurve} onChange={(e) => p.onFadesChange({ ...p.fades, outCurve: e.target.value as FadeCurve })} aria-label="Fade-out curve">{CURVES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
+            {(p.fades.inSec > 0 || p.fades.outSec > 0) && <button type="button" className="syn-player-clear" onClick={() => p.onFadesChange({ ...p.fades, inSec: 0, outSec: 0 })}>Clear fades</button>}
+          </div>
+        </>
       ) : (
         <>
           <div className="syn-player-head">
