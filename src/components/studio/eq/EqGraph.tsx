@@ -227,7 +227,7 @@ export const EqGraph: React.FC<Props> = ({
   }, []);
 
   const onDouble = (e: React.MouseEvent) => {
-    if (!onAdd) return;
+    if (!onAdd || (e.target as Element | null)?.closest?.('[data-fade-handle]')) return;
     const p = toLocal(e);
     onAdd(Math.round(clampF(xToF(p.x))), Number(clampG(yToG(p.y)).toFixed(1)));
   };
