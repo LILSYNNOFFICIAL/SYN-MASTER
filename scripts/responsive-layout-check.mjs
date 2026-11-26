@@ -13,7 +13,7 @@ const server = spawn(process.execPath, ['server.ts'], {
     NODE_ENV: 'production',
     PORT: port,
     HOST: '127.0.0.1',
-    SYN_MASTER_AI_ACCESS_TOKEN: 'responsive-layout-check-token-0123456789abcdef',
+    SYN_MASTER_SESSION_SECRET: 'responsive-layout-session-secret-0123456789abcdef',
   },
 });
 
