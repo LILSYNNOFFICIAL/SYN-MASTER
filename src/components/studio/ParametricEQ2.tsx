@@ -18,6 +18,7 @@ import {
   usesGain,
 } from '../../dsp/eqDesign';
 import { MAX_EQ_BANDS, validateProcessorParams } from '../../dsp/chainValidation';
+import type { FadeSettings } from '../../dsp/fades';
 import { EqGraph, type AnalyzerMode, type EqGraphNode } from './eq/EqGraph';
 import { EqBandPopover, NumField, SelField } from './eq/EqBandPopover';
 import { EqTypeMenu, type TypeMenuOption } from './eq/EqTypeMenu';
@@ -47,6 +48,9 @@ interface Props {
   durationSec?: number;
   /** Seek the shared track timeline from the overlaid waveform. */
   onSeek?: (sec: number) => void;
+  /** Fade curves are rendered over the same waveform blanket. */
+  fades?: FadeSettings;
+  onFadesChange?: (next: FadeSettings) => void;
   /** Source (pre-chain) analysis. */
   preSpectrum?: AudioAnalysis | null;
   /** Rendered (post-chain) analysis. */
@@ -109,7 +113,7 @@ function readAnalyzer(): AnalyzerMode {
 }
 
 export const ParametricEQ2: React.FC<Props> = ({
-  params, sampleRate, spectrum, onChange, variant = 'classic', waveformPeaks = null, durationSec = 0, onSeek,
+  params, sampleRate, spectrum, onChange, variant = 'classic', waveformPeaks = null, durationSec = 0, onSeek, fades, onFadesChange,
   preSpectrum, postSpectrum, outputGainDb, onOutputGainDb,
 }) => {
   const isConsole = variant === 'console';
@@ -353,6 +357,8 @@ export const ParametricEQ2: React.FC<Props> = ({
         waveformPeaks={isConsole ? waveformPeaks : null}
         durationSec={isConsole ? durationSec : 0}
         onSeek={isConsole ? onSeek : undefined}
+        fades={isConsole ? fades : undefined}
+        onFadesChange={isConsole ? onFadesChange : undefined}
         ariaLabel="Parametric EQ. Click or drag the waveform background to seek; focus the graph background and use Left/Right to seek (Shift for 1-second steps, Home/End for start/end). Tab to a band node; arrow keys move frequency and gain, plus and minus change Q, S solos, Delete removes, Escape closes. Drag nodes, wheel or the diamond handles for Q, double-click to add a band."
       >
         {popover}
