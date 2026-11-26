@@ -137,7 +137,40 @@ test('tampered, missing and expired guest cookies are rejected', () => {
   }
 });
 
-test('guest bootstrap rejects cross-origin requests and fails closed without a production signing secret', () => {
+test('production derives a stable, domain-separated guest signing key from the server Gemini key when no override is configured', () => {
+  const providerKey = 'server-side-gemini-api-key-for-syn-master-123456789';
+  const firstReplica = createAiGuestSession({ providerKey, production: true, now: () => 1_000 });
+  const secondReplica = createAiGuestSession({ providerKey, production: true, now: () => 1_000 });
+  assert.equal(firstReplica.isConfigured, true);
+  assert.equal(secondReplica.isConfigured, true);
+
+  const bootstrap = makeResponse();
+  firstReplica.bootstrap(makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https', secure: true }), bootstrap.response);
+  assert.equal(bootstrap.statusCode, 204);
+  const cookie = bootstrap.headers['set-cookie'].split(';', 1)[0];
+
+  const accepted = makeResponse();
+  let nextCalled = false;
+  secondReplica.middleware(
+    makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https', secure: true, cookie, fetchSite: 'same-origin' }),
+    accepted.response,
+    (() => { nextCalled = true; }) as NextFunction,
+  );
+  assert.equal(nextCalled, true, 'another replica must validate the same signed guest cookie');
+
+  const differentKeyReplica = createAiGuestSession({ providerKey: providerKey + '-different', production: true });
+  const rejected = makeResponse();
+  let differentKeyNextCalled = false;
+  differentKeyReplica.middleware(
+    makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https', cookie, fetchSite: 'same-origin' }),
+    rejected.response,
+    (() => { differentKeyNextCalled = true; }) as NextFunction,
+  );
+  assert.equal(differentKeyNextCalled, false, 'a different provider key must not validate the cookie');
+  assert.equal(rejected.statusCode, 401);
+});
+
+test('guest bootstrap rejects cross-origin requests and fails closed only when neither a valid override nor Gemini server key exists', () => {
   const sessions = createAiGuestSession({ secret: SECRET, production: true });
   const crossOrigin = makeResponse();
   sessions.bootstrap(makeRequest({ origin: 'https://attacker.example', host: 'app.example', protocol: 'https' }), crossOrigin.response);
@@ -147,10 +180,13 @@ test('guest bootstrap rejects cross-origin requests and fails closed without a p
   const unavailable = makeResponse();
   unconfigured.bootstrap(makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https' }), unavailable.response);
   assert.equal(unavailable.statusCode, 503);
+
+  const invalidProvider = createAiGuestSession({ providerKey: 'MY_GEMINI_API_KEY', production: true });
+  assert.equal(invalidProvider.isConfigured, false);
 });
 
 test('production rejects placeholder signing secrets and reuse of the Gemini provider key', () => {
-  const placeholder = createAiGuestSession({ secret: 'GENERATE_A_RANDOM_64_CHARACTER_HEX_SECRET', production: true });
+  const placeholder = createAiGuestSession({ secret: 'GENERATE_A_RANDOM_64_CHARACTER_HEX_SECRET', providerKey: 'server-side-gemini-api-key-for-syn-master-123456789', production: true });
   assert.equal(placeholder.isConfigured, false);
   const reused = createAiGuestSession({ secret: SECRET, providerKey: SECRET, production: true });
   assert.equal(reused.isConfigured, false);

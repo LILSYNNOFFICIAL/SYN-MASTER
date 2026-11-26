@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, hkdfSync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 
 const COOKIE_NAME = 'syn_master_guest';
@@ -33,11 +33,29 @@ export function createAiGuestSession(options: AiGuestSessionOptions = {}) {
   const production = options.production === true;
   const now = options.now ?? Date.now;
   const configuredSecret = String(options.secret ?? '').trim();
-  const isPlaceholder = /^(GENERATE_|CHANGE_ME|REPLACE_ME|YOUR_)/i.test(configuredSecret);
-  const reusesProviderKey = Boolean(configuredSecret && options.providerKey && configuredSecret === options.providerKey);
-  const secret = configuredSecret.length >= 32 && !isPlaceholder && !reusesProviderKey
-    ? configuredSecret
-    : production ? '' : randomBytes(32).toString('hex');
+  const providerKey = String(options.providerKey ?? '').trim();
+  const isPlaceholder = (value: string) => /^(GENERATE_|CHANGE_ME|REPLACE_ME|YOUR_|MY_)/i.test(value);
+  const configuredSecretIsValid = configuredSecret.length >= 32
+    && !isPlaceholder(configuredSecret)
+    && configuredSecret !== providerKey;
+  // AI Studio provisions GEMINI_API_KEY as a server-side secret automatically.
+  // Derive a domain-separated signing key from it when no dedicated override is supplied.
+  // HKDF gives every Cloud Run replica the same independent cookie key without requiring
+  // another manually configured secret or reusing the raw Gemini credential.
+  const derivedSecret = providerKey.length >= 32 && !isPlaceholder(providerKey)
+    ? Buffer.from(hkdfSync(
+      'sha256',
+      providerKey,
+      'SYN-MASTER guest-session key derivation v1',
+      'HttpOnly signed guest cookie',
+      32,
+    )).toString('hex')
+    : '';
+  const secret = configuredSecret
+    ? (configuredSecretIsValid ? configuredSecret : '')
+    : production
+      ? derivedSecret
+      : randomBytes(32).toString('hex');
 
   function parse(req: Request): SessionPayload | null {
     if (!secret) return null;
