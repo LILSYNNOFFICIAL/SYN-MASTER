@@ -2883,10 +2883,7 @@ export default function App() {
       blanketPeaks={chainBypassed || auditionTarget === 'original' ? prePeaksHi : postPeaksHi ?? prePeaksHi}
       timelineTransport={
         <TimelinePlayer
-          prePeaks={prePeaksHi}
-          postPeaks={postPeaksHi}
           durationSec={activeTrack?.durationSec ?? 0}
-          showPost={auditionTarget !== 'original'}
           isPlaying={isPlaying}
           fades={fades}
           onFadesChange={setFades}
@@ -2899,10 +2896,7 @@ export default function App() {
       }
       timeline={
         <TimelinePlayer
-          prePeaks={prePeaksHi}
-          postPeaks={postPeaksHi}
           durationSec={activeTrack?.durationSec ?? 0}
-          showPost={auditionTarget !== 'original'}
           isPlaying={isPlaying}
           fades={fades}
           onFadesChange={setFades}
