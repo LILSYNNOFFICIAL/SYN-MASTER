@@ -406,7 +406,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
       <LightRibbons className="syn-console-ribbons" />
 
       <div className="syn-flow-top">
-        <section className="syn-card syn-eq-panel syn-area-eq" data-testid="central-spectrum" data-testid-overlay="waveform-eq" aria-label="Master EQ and spectrum">
+        <section className="syn-card syn-eq-panel syn-area-eq" data-testid="central-spectrum" aria-label="Master EQ and spectrum">
           <StepLabel n={1} text="Import & EQ" hint="Waveform timeline behind the live EQ response" className="syn-eq-step-label" />
           <div className="syn-eq-head">
             <div>

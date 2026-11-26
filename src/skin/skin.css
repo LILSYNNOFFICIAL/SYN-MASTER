@@ -948,3 +948,6 @@ g.is-solo .syn-eqx-node{stroke-dasharray:3 2;}
   .syn-player-integrated .syn-player-controls{align-items:stretch;}
   .syn-player-integrated .syn-player-fades{width:100%;}
 }
+
+/* The shared EQ/waveform canvas also acts as the track-seek surface. */
+.syn-ceq-svg[tabindex="0"]{cursor:crosshair;}

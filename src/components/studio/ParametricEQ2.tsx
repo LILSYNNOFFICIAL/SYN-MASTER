@@ -353,7 +353,7 @@ export const ParametricEQ2: React.FC<Props> = ({
         waveformPeaks={isConsole ? waveformPeaks : null}
         durationSec={isConsole ? durationSec : 0}
         onSeek={isConsole ? onSeek : undefined}
-        ariaLabel="Parametric EQ. Tab to a band node; arrow keys move frequency and gain, plus and minus change Q, S solos, Delete removes, Escape closes. Drag nodes, wheel or the diamond handles for Q, double-click to add a band."
+        ariaLabel="Parametric EQ. Click or drag the waveform background to seek; focus the graph background and use Left/Right to seek (Shift for 1-second steps, Home/End for start/end). Tab to a band node; arrow keys move frequency and gain, plus and minus change Q, S solos, Delete removes, Escape closes. Drag nodes, wheel or the diamond handles for Q, double-click to add a band."
       >
         {popover}
       </EqGraph>

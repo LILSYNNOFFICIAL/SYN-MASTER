@@ -263,7 +263,7 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectru
         waveformPeaks={waveformPeaks}
         durationSec={durationSec}
         onSeek={onSeek}
-        ariaLabel="Dynamic EQ frequency response graph. Drag a node to change frequency, use the handles or mouse wheel to change Q, and double-click to add a band."
+        ariaLabel="Dynamic EQ frequency response graph. Click or drag the waveform background to seek; focus the graph background and use Left/Right to seek (Shift for 1-second steps, Home/End for start/end). Drag a node to change frequency, use the handles or mouse wheel to change Q, and double-click to add a band."
         className="syn-deq-graph"
       >
         {popover}
