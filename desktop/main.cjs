@@ -1,6 +1,5 @@
-const { app, BrowserWindow, dialog, ipcMain, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, dialog, shell, utilityProcess } = require('electron');
 const { spawn } = require('node:child_process');
-const { randomBytes } = require('node:crypto');
 const fs = require('node:fs/promises');
 const net = require('node:net');
 const path = require('node:path');
@@ -9,7 +8,6 @@ let mainWindow = null;
 let webProcess = null;
 let nativeProcess = null;
 let webPort = null;
-let aiAccessToken = null;
 let backendPromise = null;
 let appOrigin = null;
 let nativePairing = null;
@@ -122,7 +120,6 @@ async function startBackend() {
     }
 
     webPort = await getFreeLoopbackPort();
-    aiAccessToken = randomBytes(32).toString('hex');
     appOrigin = `http://127.0.0.1:${webPort}`;
 
     webProcess = utilityProcess.fork(serverPath, [], {
@@ -132,7 +129,6 @@ async function startBackend() {
         HOST: '127.0.0.1',
         PORT: String(webPort),
         DOTENV_CONFIG_PATH: envFile,
-        SYN_MASTER_AI_ACCESS_TOKEN: aiAccessToken,
       },
       stdio: 'ignore',
     });
@@ -239,8 +235,6 @@ async function createMainWindow() {
     });
   }
 }
-
-ipcMain.handle('syn-master:get-ai-access-token', () => aiAccessToken);
 
 app.setAppUserModelId('com.lilsynn.synmaster');
 const hasSingleInstance = app.requestSingleInstanceLock();
