@@ -345,7 +345,7 @@ export const AiMasterView: React.FC<Props> = ({
     directorReport.status === 'converged' &&
     directorReport.qcReport.failCount === 0 &&
     directorReport.postFixVerification?.analysisFresh === true &&
-    directorReport.postFixVerification.postAnalysis &&
+    directorReport.postFixVerification?.postAnalysis &&
     (directorReport.postFixVerification?.activeFindings ?? []).every((finding) =>
       isSourceLimitationFinding(finding.findingId),
     ) &&
