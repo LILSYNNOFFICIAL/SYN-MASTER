@@ -358,21 +358,21 @@ Because cloud AI is on by default for FIX ALL, the two routes that spend `GEMINI
 
 | Limit | Default | Env override |
 | --- | --- | --- |
-| Strategy calls per client per minute | 3 | `SYN_AI_STRATEGY_PER_MINUTE` |
-| Refine calls per client per minute | 12 | `SYN_AI_REFINE_PER_MINUTE` |
-| Strategy calls per client per day | 40 | `SYN_AI_STRATEGY_PER_DAY` |
-| Spending calls (both routes) per client per day | 250 | `SYN_AI_CLIENT_PER_DAY` |
-| Spending calls for the whole server per day | 2000 | `SYN_AI_GLOBAL_PER_DAY` |
+| Strategy calls per guest session per minute | 3 | `SYN_AI_STRATEGY_PER_MINUTE` |
+| Refine calls per guest session per minute | 12 | `SYN_AI_REFINE_PER_MINUTE` |
+| Strategy calls per guest session per day | 40 | `SYN_AI_STRATEGY_PER_DAY` |
+| Spending calls (both routes) per guest session per day | 250 | `SYN_AI_CLIENT_PER_DAY` |
+| Spending calls for this server process per day | 2000 | `SYN_AI_GLOBAL_PER_DAY` |
 
-All limits are checked before any is spent. A refused call gets HTTP 429 with `Retry-After` and `{ error, code: "ai_rate_limited", scope: "client-minute" | "client-day" | "global-day", retryAfterSec, fallback: "local-dsp-planner" }`. The client (`src/ai/cloudRateLimit.ts`) treats any 429 from these routes as a notice, not an error: FIX ALL carries on with the local DSP planner (strategy) or the deterministic director (refine), shows a friendly amber notice under FIX ALL and in the AI Assistant, and sends no further built-in AI requests until the Retry-After time has passed. Day windows are fixed 24 h windows from the first counted call; counters are in-memory per server instance.
+All limits are checked before any is spent. A refused spend-limit call gets HTTP 429 with `Retry-After` and `{ error, code: "ai_rate_limited", scope, retryAfterSec, fallback: "local-dsp-planner" }`; concurrency refusals use the `burst` scope. The client (`src/ai/cloudRateLimit.ts`) treats any 429 from these routes as a notice, not an error: FIX ALL carries on with the local DSP planner (strategy) or the deterministic director (refine), shows a friendly amber notice under FIX ALL and in the AI Assistant, and sends no further built-in AI requests until the Retry-After time has passed. Day windows are fixed 24 h windows from the first counted call; counters are in-memory per server instance.
 
-The limiter is in-memory and applies independently to each server instance. If deploying multiple instances, use a shared rate-limit store at the edge or in a shared data service. This limiter is abuse/cost friction, **not user authentication**.
+Guest-session, IP-rate-limit, spend-limit and concurrency counters are in-memory and apply independently to each server instance. Multi-instance deployments therefore need a shared rate-limit store or an explicit single-instance deployment cap before treating quotas as global. The signed guest cookie provides anonymous session continuity and same-origin request protection, not a real-world user identity, account, entitlement or per-person revocation mechanism.
 
-Express proxy trust is disabled by default. If the deployment is behind a known reverse proxy that overwrites forwarding headers, set `TRUST_PROXY_HOPS` to the exact trusted hop count (1-5). Do not enable proxy trust without confirming the ingress topology, because client-supplied forwarding headers must not be trusted.
+Express proxy trust is disabled by default for direct/local servers. Cloud Run is detected through its `K_SERVICE` environment and trusts one Cloud Run proxy hop for HTTPS Origin validation and Secure guest cookies. For other deployments behind a known reverse proxy that overwrites forwarding headers, set `TRUST_PROXY_HOPS` to the exact trusted hop count (1-5). Do not enable proxy trust without confirming the ingress topology.
 
 AI endpoint errors returned to clients are intentionally generic. Detailed exceptions are logged server-side and must not be returned to browsers.
 
-SYN MASTER is intentionally account-free for now: there is no in-app registration, login, user profile, or multi-user identity layer. The limiter is not an access-control boundary. Do not expose the Gemini-backed API as an unrestricted public endpoint. For a remote deployment, place the entire application behind a private access boundary before sharing it. Google Cloud Run can enforce invocation access through Cloud IAM/IAP, but that relies on Google identities and is separate from SYN MASTER application accounts. If identity-based access is not wanted, use a local-only deployment or a private gateway/tunnel that injects a server-side access credential. Never embed a gateway credential in browser code. Confirm the actual deployment's ingress and access settings before assuming it is private.
+SYN-MASTER is intentionally account-free: ordinary users do not register, log in, provide a Gemini key, or handle operator credentials. The signed guest cookie is an anonymous session identifier and a same-origin protection mechanism, not proof of a person's identity. Keep the Gemini key and session-signing secret exclusively in backend secret storage. Before public multi-instance distribution, configure shared quota storage or explicitly constrain the deployment to one instance; the current in-memory quotas do not coordinate across instances. Verify the deployed ingress, HTTPS cookie behavior, request limits and backend secrets before making public availability claims.
 
 ## Bring your own AI provider (BYO-AI)
 
