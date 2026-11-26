@@ -56,12 +56,17 @@ jobs:
       - name: Unit tests
         run: npm test
       - name: TypeScript
+        if: ${{ !cancelled() }}
         run: npm run lint
       - name: Production build
+        id: build
+        if: ${{ !cancelled() }}
         run: npm run build
       - name: Enforce initial JavaScript bundle budget
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: npm run check:bundle
       - name: Production startup smoke test (Node 22)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -102,9 +107,12 @@ jobs:
           exit 1
 
       - name: Install Playwright Chromium for responsive checks
+        id: playwright
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           npm install --no-save --no-package-lock playwright
           npx playwright install --with-deps chromium
 
       - name: Responsive viewport and workspace smoke tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.playwright.outcome == 'success' }}
         run: node scripts/responsive-layout-check.mjs
