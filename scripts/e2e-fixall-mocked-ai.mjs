@@ -70,7 +70,6 @@ try {
       presetId: 'openai-compatible',
       overrides: { 'openai-compatible': { model: 'mock-model', baseUrl: 'https://mock-ai.invalid/v1' } },
       keys: { 'openai-compatible': 'sk-mock-e2e-0123456789' },
-      serverAccessToken: '',
       remember: false,
     }));
   });
