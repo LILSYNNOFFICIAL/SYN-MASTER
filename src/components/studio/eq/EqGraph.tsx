@@ -184,7 +184,12 @@ export const EqGraph: React.FC<Props> = ({
   };
 
   const endDrag = () => {
-    if (fadeDragRef.current) {
+    if (fadeDragRef.current && fades && onFadesChange && durationSec > 0 && svgRef.current) {
+      const rect = svgRef.current.getBoundingClientRect();
+      const sec = timelineSecondsFromPointer(lastPointerXRef.current, rect.left, rect.width, durationSec);
+      const maxLen = durationSec * 0.5;
+      if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
+      else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
       fadeDragRef.current = null;
       return;
     }
@@ -334,8 +339,8 @@ export const EqGraph: React.FC<Props> = ({
             const p = toLocal(e);
             const inX = (fades.inSec / durationSec) * W;
             const outX = W - (fades.outSec / durationSec) * W;
-            if (p.y <= 30 && Math.abs(p.x - inX) <= 15) fadeDragRef.current = 'in';
-            else if (p.y <= 30 && Math.abs(p.x - outX) <= 15) fadeDragRef.current = 'out';
+            if (p.y <= 20 && Math.abs(p.x - inX) <= 15) fadeDragRef.current = 'in';
+            else if (p.y >= 20 && p.y <= 40 && Math.abs(p.x - outX) <= 15) fadeDragRef.current = 'out';
             if (fadeDragRef.current) {
               e.preventDefault();
               svgRef.current.setPointerCapture?.(e.pointerId);
@@ -404,7 +409,7 @@ export const EqGraph: React.FC<Props> = ({
             {fadeOverlay.inPath && <path d={fadeOverlay.inPath} fill="none" stroke="#E040FB" strokeWidth={2.5} strokeLinecap="round" filter={`url(#${uid}-glow)`} />}
             {fadeOverlay.outPath && <path d={fadeOverlay.outPath} fill="none" stroke="#E040FB" strokeWidth={2.5} strokeLinecap="round" filter={`url(#${uid}-glow)`} />}
             <circle data-fade-handle="in" cx={Math.max(10, fadeOverlay.inX)} cy={12} r={7} fill="#3FE0FF" stroke="#07111C" strokeWidth={2} pointerEvents="all" />
-            <circle data-fade-handle="out" cx={Math.min(W - 10, fadeOverlay.outX)} cy={12} r={7} fill="#3FE0FF" stroke="#07111C" strokeWidth={2} pointerEvents="all" />
+            <circle data-fade-handle="out" cx={Math.min(W - 10, fadeOverlay.outX)} cy={28} r={7} fill="#3FE0FF" stroke="#07111C" strokeWidth={2} pointerEvents="all" />
           </g>
         )}
         {postPath && <path d={postPath} className="syn-eqx-spec-post" pointerEvents="none" />}
