@@ -11,6 +11,7 @@ import { renderStemBusMix, type StemBusMixResult } from '../dsp/stemBusRenderer'
 import { analyzeAudioBuffer } from '../dsp/analyzer';
 import type { ProcessorModule, ProcessorType, ParametricEQParams, CompressorParams, MasterFinalReport, DirectorOperatingMode, MasteringObjectiveId, AudioAnalysis } from '../types/mastering';
 import { runAutonomousDirectorLoop } from '../director/directorEngine';
+import { DEFAULT_DIRECTOR_OPERATING_MODE } from '../director/operatingModeDefaults';
 import { renderAndAnalyzeOffThread, type OffThreadRenderResult } from '../dsp/workerClient';
 import {
   analyzeStemSet,
@@ -63,7 +64,7 @@ export const StemIntelligencePanel: React.FC = () => {
   const [chainsByStemId, setChainsByStemId] = useState<Record<string, ProcessorModule[]>>({});
   const [processedMix, setProcessedMix] = useState<StemBusMixResult | null>(null);
   const [rendering, setRendering] = useState(false);
-  const [directorMode, setDirectorMode] = useState<DirectorOperatingMode>('autonomous');
+  const [directorMode, setDirectorMode] = useState<DirectorOperatingMode>(DEFAULT_DIRECTOR_OPERATING_MODE);
   const [directorObjective, setDirectorObjective] = useState<MasteringObjectiveId>('streaming');
   const [directorRunning, setDirectorRunning] = useState(false);
   const [directorProgress, setDirectorProgress] = useState<{ stage: string; passNumber: number; maxIterations: number } | null>(null);
