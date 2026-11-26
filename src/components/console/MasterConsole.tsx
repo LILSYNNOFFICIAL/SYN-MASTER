@@ -373,6 +373,8 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
       <AddModule type="maximizer" onAdd={add} />
     );
 
+  const progressPercent = p.running ? Math.min(100, Math.max(0, Math.round((p.pass / Math.max(1, p.maxPasses)) * 100))) : 0;
+
   const fixButton = (
     <div className="syn2-fix-centerpiece syn-fixai-wrap">
       <button
@@ -382,10 +384,21 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
         disabled={!p.hasTrack || p.running}
         aria-describedby="syn-fixai-status"
         aria-label={p.running ? 'Fix All with AI is running' : 'Fix All with AI: analyze, fix, render and verify the master'}
+        style={{
+          boxShadow: p.running ? `0 0 0 4px #38BDF8, 0 0 30px rgba(56,189,248,0.5)` : undefined,
+        }}
       >
-        <span className="syn-fixai-ring" aria-hidden="true" />
+        <span
+          className="syn-fixai-ring"
+          aria-hidden="true"
+          style={{
+            background: p.running
+              ? `conic-gradient(#38BDF8 ${progressPercent}%, rgba(212,175,55,0.4) ${progressPercent}%)`
+              : undefined,
+          }}
+        />
         <BrainCircuit className="syn-fixai-icon" aria-hidden="true" />
-        <span className="syn-fixai-text"><span>FIX ALL</span><strong>AI</strong></span>
+        <span className="syn-fixai-text"><span>FIX ALL</span><strong>AI {p.running ? `(${progressPercent}%)` : ''}</strong></span>
         <svg className="syn-fixai-wave" viewBox="0 0 60 16" aria-hidden="true">
           <path d="M0 8 L8 8 L11 3 L14 13 L17 1 L20 15 L23 5 L26 11 L29 7 L32 9 L35 4 L38 12 L41 6 L44 10 L47 8 L60 8" />
         </svg>

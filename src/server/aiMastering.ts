@@ -32,7 +32,7 @@ export class AiTimeoutError extends Error {
 }
 
 export const BUILTIN_GEMINI_MODEL = 'gemini-4-hydrogen';
-const GEMINI_TIMEOUT_MS = 25_000;
+const GEMINI_TIMEOUT_MS = 60_000;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -149,7 +149,7 @@ export async function generateGeminiMasterStrategy(input: {
       },
     }),
     GEMINI_TIMEOUT_MS,
-    'AI mastering strategy timed out after 25s.',
+    'AI mastering strategy timed out after 60s.',
   );
 
   const responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));
@@ -213,7 +213,7 @@ export async function refineGeminiIteration(input: {
       },
     }),
     GEMINI_TIMEOUT_MS,
-    'AI refinement pass timed out after 25s.',
+    'AI refinement pass timed out after 60s.',
   );
 
   const responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));

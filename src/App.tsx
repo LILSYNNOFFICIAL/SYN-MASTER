@@ -389,6 +389,9 @@ export default function App() {
   const [diagnosticArchiveStatus, setDiagnosticArchiveStatus] = useState<
     'loading' | 'idle' | 'saving' | 'saved' | 'session-only' | 'failed'
   >('loading');
+  const [importLoadingPercent, setImportLoadingPercent] = useState<number | null>(null);
+
+
 
   // Subscribe to SynHostBridge and load IndexedDB projects, chains & settings on mount
   useEffect(() => {
@@ -1205,18 +1208,34 @@ export default function App() {
     [loadChannelsAsSource],
   );
 
+  // Auto-load demo mix on startup if no active track is loaded (bypassing initial import screen completely)
+  useEffect(() => {
+    if (!activeTrack) {
+      handleLoadDemoSource('main-mix');
+    }
+  }, [activeTrack, handleLoadDemoSource]);
+
   const handleUploadSourceFile = useCallback(
     async (file: File) => {
       const uploadSeq = ++sourceUploadSeqRef.current;
       const attemptName = file.name;
+      setImportLoadingPercent(15);
       try {
+        setImportLoadingPercent(45);
         const decoded = await engineRef.current!.decodeFile(file);
-        if (uploadSeq !== sourceUploadSeqRef.current) return;
+        if (uploadSeq !== sourceUploadSeqRef.current) {
+          setImportLoadingPercent(null);
+          return;
+        }
+        setImportLoadingPercent(75);
         analyzeAudioBuffer(decoded.channels, decoded.sampleRate);
         const ext = file.name.split('.').pop()?.toUpperCase() ?? 'AUDIO';
         loadChannelsAsSource(decoded.channels, decoded.sampleRate, file.name, file.size, ext, false);
+        setImportLoadingPercent(100);
+        setTimeout(() => setImportLoadingPercent(null), 350);
       } catch (err) {
         if (uploadSeq !== sourceUploadSeqRef.current) return;
+        setImportLoadingPercent(null);
         setStatusNotice(
           `Could not decode "${attemptName}". Please ensure it is a valid WAV, MP3, FLAC, AAC, M4A, OGG, or AIFF audio file.`,
         );
@@ -3211,18 +3230,24 @@ export default function App() {
     />
   );
 
-  if (!activeTrack && !showWorkstationWithoutTrack) {
-    return (
-      <ImportScreen
-        onFile={handleUploadSourceFile}
-        onDemo={() => handleLoadDemoSource('main-mix')}
-        onOpenWorkstation={() => setShowWorkstationWithoutTrack(true)}
-      />
-    );
-  }
-
   return (
     <div className="syn-workstation min-h-screen lg:h-screen w-full flex flex-col bg-[#070709] text-[#F7F8FA] lg:overflow-hidden">
+      {importLoadingPercent !== null && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-md">
+          <div
+            className="w-32 h-32 rounded-full flex items-center justify-center shadow-2xl relative"
+            style={{
+              background: `conic-gradient(#38BDF8 ${importLoadingPercent}%, #D4AF37 ${importLoadingPercent}%)`,
+            }}
+          >
+            <div className="w-28 h-28 rounded-full bg-[#0A0805] flex flex-col items-center justify-center text-center p-2">
+              <span className="font-display font-extrabold text-lg text-[#F2CA52]">{importLoadingPercent}%</span>
+              <span className="text-[10px] font-mono text-[#A8986E]">LOADING</span>
+            </div>
+          </div>
+          <p className="mt-4 font-display text-sm text-[#F5EEDC] tracking-wide">Importing &amp; decoding audio track...</p>
+        </div>
+      )}
       {/* Zone 3-Part Top Bar Contract */}
       <header className="syn-app-header h-14 shrink-0 px-4 border-b border-[#242732] bg-[#0B0C10] flex items-center justify-between gap-8">
         {/* Zone 1: Library drawer toggle + serif wordmark (reference-mockup lockup) */}

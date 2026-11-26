@@ -54,9 +54,9 @@ test('friendly notices mention the local planner and a wait time', () => {
   assert.match(friendlyCloudAiLimitNotice(new CloudAiRateLimitError('', 'global-day', 600)), /server's daily limit.*10 min/);
 });
 
-test('cloud AI client timeout is longer than the server 25s timeout and Stop cancels immediately', async () => {
-  assert.equal(CLOUD_AI_TIMEOUT_MS, 30_000);
-  assert.ok(CLOUD_AI_TIMEOUT_MS > 25_000, 'client timeout must exceed server GEMINI_TIMEOUT_MS (25s)');
+test('cloud AI client timeout is longer than the server 60s timeout and Stop cancels immediately', async () => {
+  assert.equal(CLOUD_AI_TIMEOUT_MS, 70_000);
+  assert.ok(CLOUD_AI_TIMEOUT_MS > 60_000, 'client timeout must exceed server GEMINI_TIMEOUT_MS (60s)');
 
   const cancelController = new AbortController();
   const stopReq = createCloudAiRequestSignal(10_000, cancelController.signal);

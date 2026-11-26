@@ -43,7 +43,7 @@ export class CloudAiHttpError extends Error {
   }
 }
 
-export const CLOUD_AI_TIMEOUT_MS = 30_000;
+export const CLOUD_AI_TIMEOUT_MS = 70_000;
 
 export interface CloudAiRequestSignal {
   signal: AbortSignal;
