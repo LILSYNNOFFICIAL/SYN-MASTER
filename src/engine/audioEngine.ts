@@ -207,8 +207,9 @@ export class SynAudioEngine {
   public setOverrideBuffer(key: string, channels: Float32Array[], sampleRate: number): void {
     this.overrideBuffers.set(key, this.createAudioBufferFromChannels(channels, sampleRate));
     if (key === 'mastered-external' && this.auditionTarget === 'mastered') {
-      if (this.isPlaying && !this.chainBypassed) {
-        // Hot-swap to the freshly verified render at the current position.
+      if (this.isPlaying) {
+        // Hot-swap to the freshly verified render at the current position, including
+        // fade-only renders while the processor rack is bypassed.
         this.play(this.getCurrentTimeSec());
       } else {
         this.rebuildLiveGraph();
@@ -219,7 +220,12 @@ export class SynAudioEngine {
   public clearOverrideBuffer(key: string): void {
     const had = this.overrideBuffers.delete(key);
     if (had && key === 'mastered-external' && this.auditionTarget === 'mastered') {
-      this.rebuildLiveGraph();
+      if (this.isPlaying) {
+        // Return to the source/live chain immediately when the offline render is removed.
+        this.play(this.getCurrentTimeSec());
+      } else {
+        this.rebuildLiveGraph();
+      }
     }
   }
 
@@ -446,7 +452,8 @@ export class SynAudioEngine {
     if (this.auditionTarget.startsWith('candidate-') || this.auditionTarget === 'iteration') {
       return this.overrideBuffers.get(this.auditionTarget) ?? this.sourceBuffer;
     }
-    if (this.auditionTarget === 'mastered' && !this.chainBypassed && this.overrideBuffers.has('mastered-external')) {
+    if (this.auditionTarget === 'mastered' && this.overrideBuffers.has('mastered-external')) {
+      // The offline buffer may contain timeline fades even when the rack is bypassed.
       return this.overrideBuffers.get('mastered-external') ?? this.sourceBuffer;
     }
     return this.sourceBuffer;

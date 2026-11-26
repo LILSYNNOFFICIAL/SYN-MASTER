@@ -100,3 +100,22 @@ test('WAV export render contains Dynamic EQ processing and post-chain timeline f
   }
   assert.ok(renderedPower < sourcePower * 0.5, 'encoded WAV must contain Dynamic EQ attenuation');
 });
+
+test('timeline fades are rendered even when the mastering rack is empty', async () => {
+  const sr = 48000;
+  const src = tone(sr, 1, 440, 0.3);
+  const fades: FadeSettings = { inSec: 0.1, outSec: 0.1, inCurve: 'linear', outCurve: 'linear' };
+  const rendered = await renderMixedChain(src, sr, [], undefined, fades);
+  const inIndex = 1000;
+  const outIndex = sr - 1 - 1000;
+  const fadePosition = inIndex / sr / fades.inSec;
+
+  assert.ok(
+    Math.abs(rendered.channels[0][inIndex] - src[0][inIndex] * fadeGain(fadePosition, 'linear')) < 1e-6,
+    'empty-rack preview must apply the fade-in',
+  );
+  assert.ok(
+    Math.abs(rendered.channels[0][outIndex] - src[0][outIndex] * fadeGain(fadePosition, 'linear')) < 1e-6,
+    'empty-rack preview must apply the fade-out',
+  );
+});

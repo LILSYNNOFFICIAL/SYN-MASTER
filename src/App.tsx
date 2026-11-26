@@ -561,7 +561,9 @@ export default function App() {
           // VERIFY FIX: "Mastered" playback now plays the exact offline render that was
           // measured and verified (and that export uses), instead of the approximate realtime
           // Web Audio graph, which could sound different from what passed verification.
-          if (effectiveChain.length > 0) {
+          if (effectiveChain.length > 0 || getPostFades()) {
+            // Timeline fades are independent of the rack: retain the exact offline preview
+            // buffer even with an empty or bypassed chain so playback matches export.
             engineRef.current!.setOverrideBuffer('mastered-external', result.channels, track.sampleRate);
           } else {
             engineRef.current!.clearOverrideBuffer('mastered-external');
