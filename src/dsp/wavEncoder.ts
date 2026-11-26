@@ -10,6 +10,10 @@ export function resampleChannel(
   fromRate: number,
   toRate: number,
 ): Float32Array {
+  if (!Number.isFinite(fromRate) || !Number.isFinite(toRate) || fromRate < 8000 || toRate < 8000 ||
+      fromRate > 384000 || toRate > 384000) {
+    throw new RangeError(`Unsupported sample-rate conversion: ${fromRate} Hz to ${toRate} Hz`);
+  }
   if (fromRate === toRate || input.length === 0) return input;
   const ratio = fromRate / toRate;
   const outLen = Math.max(1, Math.round(input.length / ratio));
@@ -54,6 +58,20 @@ export function encodeWavBlob(
   sourceSampleRate: number,
   config: ExportConfig,
 ): Blob {
+  if (!channels.length) throw new RangeError('WAV export requires at least one audio channel.');
+  if (!Number.isFinite(sourceSampleRate) || sourceSampleRate < 8000 || sourceSampleRate > 384000) {
+    throw new RangeError(`Unsupported WAV export source sample rate: ${sourceSampleRate}`);
+  }
+  const sourceLength = channels[0]?.length ?? -1;
+  if (sourceLength < 0) throw new RangeError('WAV export channel 0 is missing.');
+  if (sourceLength === 0) throw new RangeError('WAV export requires at least one frame of audio.');
+  for (let channelIndex = 0; channelIndex < channels.length; channelIndex++) {
+    const channel = channels[channelIndex];
+    if (!channel) throw new RangeError(`WAV export channel ${channelIndex} is missing.`);
+    if (channel.length !== sourceLength) {
+      throw new RangeError('All WAV export channels must have the same frame length.');
+    }
+  }
   let processedChannels: Float32Array[] = channels.map((c) => new Float32Array(c));
 
   // Optional Mono fold-down
@@ -73,12 +91,22 @@ export function encodeWavBlob(
     );
   }
 
-  // Final safety ceiling clamp
-  const ceilLin = dbToLinear(config.ceilingDb);
-  for (const ch of processedChannels) {
-    for (let i = 0; i < ch.length; i++) {
-      if (ch[i] > ceilLin) ch[i] = ceilLin;
-      else if (ch[i] < -ceilLin) ch[i] = -ceilLin;
+  // 32-bit float is the lossless render/intermediate format: preserve the exact samples.
+  // PCM quantization formats use the final safety ceiling and are sanitized for NaN/Infinity.
+  if (config.wavBitDepth < 32) {
+    const ceilLin = dbToLinear(config.ceilingDb);
+    for (const ch of processedChannels) {
+      for (let i = 0; i < ch.length; i++) {
+        if (!Number.isFinite(ch[i])) ch[i] = 0;
+        else if (ch[i] > ceilLin) ch[i] = ceilLin;
+        else if (ch[i] < -ceilLin) ch[i] = -ceilLin;
+      }
+    }
+  } else {
+    for (const ch of processedChannels) {
+      for (let i = 0; i < ch.length; i++) {
+        if (!Number.isFinite(ch[i])) ch[i] = 0;
+      }
     }
   }
 

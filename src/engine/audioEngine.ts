@@ -165,6 +165,11 @@ export class SynAudioEngine {
     const ctx = this.ensureContext();
     const arrayBuffer = await file.arrayBuffer();
     const decoded = await ctx.decodeAudioData(arrayBuffer);
+    if (decoded.length === 0) throw new RangeError('The decoded audio file contains no frames.');
+    if (!Number.isFinite(decoded.sampleRate) || decoded.sampleRate < 8000 || decoded.sampleRate > 384000) {
+      throw new RangeError(`Unsupported decoded sample rate: ${decoded.sampleRate} Hz`);
+    }
+    if (decoded.numberOfChannels < 1) throw new RangeError('The decoded audio file contains no channels.');
     const channels: Float32Array[] = [];
     for (let ch = 0; ch < Math.min(2, decoded.numberOfChannels); ch++) {
       channels.push(new Float32Array(decoded.getChannelData(ch)));
@@ -216,6 +221,32 @@ export class SynAudioEngine {
     if (had && key === 'mastered-external' && this.auditionTarget === 'mastered') {
       this.rebuildLiveGraph();
     }
+  }
+
+  public clearSourceAndReference(): void {
+    this.stop();
+    this.sourceBuffer = null;
+    this.referenceBuffer = null;
+    this.overrideBuffers.clear();
+    this.auditionTarget = 'mastered';
+    this.loudnessTrimGainDb = 0;
+  }
+
+  public async dispose(): Promise<void> {
+    this.clearSourceAndReference();
+    for (const node of this.activeChainNodes) {
+      try { node.disconnect(); } catch { /* already disconnected */ }
+    }
+    this.activeChainNodes = [];
+    if (this.ctx) {
+      const context = this.ctx;
+      this.ctx = null;
+      await context.close().catch(() => undefined);
+    }
+  }
+
+  public getOverrideBufferKeys(): string[] {
+    return Array.from(this.overrideBuffers.keys());
   }
 
   public setOnEnded(cb: () => void): void {

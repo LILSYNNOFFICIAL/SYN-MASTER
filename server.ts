@@ -208,7 +208,8 @@ app.post('/api/export/encode', async (req, res) => {
       ![16, 24, 32].includes(wavBitDepth) || ![16, 24].includes(flacBitDepth) || !Number.isInteger(flacCompression) || flacCompression < 0 || flacCompression > 8 ||
       ![128, 192, 256, 320].includes(mp3Bitrate) || ![96, 128, 160, 192, 256, 320].includes(oggBitrate) ||
       ![128, 192, 256, 320].includes(aacBitrate) || ![96, 128, 160, 192, 256].includes(opusBitrate) ||
-      !Number.isFinite(ceilingDb)) {
+      !Number.isFinite(ceilingDb) || ceilingDb < -3 || ceilingDb > -0.1 ||
+      !Number.isFinite(targetLufs) || targetLufs < -24 || targetLufs > -5) {
     req.resume();
     res.status(400).json({ error: 'One or more export settings are outside the supported range.' });
     return;

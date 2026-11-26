@@ -77,8 +77,6 @@ import { inspectPluginInventory } from './director/pluginIntelligence';
 import { validateChainAgainstInventory } from './director/processorInventory';
 import { encodeWavBlob } from './dsp/wavEncoder';
 import { DEFAULT_EXPORT_CONFIG } from './dsp/exportDefaults';
-import { encodeMidiTempoFile } from './dsp/midiEncoder';
-import { createZipBlob, type ZipFileEntry } from './dsp/zipArchive';
 import {
   createTemporaryMasteringWorkspace,
   listMasteringDiagnosticRuns,
@@ -349,6 +347,8 @@ export default function App() {
   const directorRunIdRef = useRef(0);
   const activeTrackIdRef = useRef<string | null>(null);
   const offlineRenderSeqRef = useRef(0);
+  const sourceUploadSeqRef = useRef(0);
+  const referenceUploadSeqRef = useRef(0);
 
   const [aiStrategy, setAiStrategy] = useState<AIMasteringStrategy | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -401,6 +401,7 @@ export default function App() {
     })();
     return () => {
       unsub();
+      void engineRef.current!.dispose();
     };
   }, []);
 
@@ -1119,6 +1120,13 @@ export default function App() {
       setAiChangeBase(null);
       setAiChainAccepted(null);
 
+      engineRef.current!.clearOverrideBuffer('mastered-external');
+      engineRef.current!.clearOverrideBuffer('iteration');
+      for (const key of Array.from(engineRef.current!.getOverrideBufferKeys())) {
+        if (key.startsWith('candidate-')) engineRef.current!.clearOverrideBuffer(key);
+      }
+      engineRef.current!.setAuditionTarget('mastered', 0);
+
       const engine = engineRef.current!;
       sourceChannelsRef.current = channels;
       sourceRateRef.current = sampleRate;
@@ -1174,6 +1182,7 @@ export default function App() {
 
   const handleLoadDemoSource = useCallback(
     (variant: 'main-mix' | 'sine-sweep') => {
+      sourceUploadSeqRef.current += 1;
       const stem = generateDemoMasterStem(variant, 44100, variant === 'sine-sweep' ? 8 : 14);
       loadChannelsAsSource(stem.channels, stem.sampleRate, stem.name, stem.channels[0].byteLength * 2, 'WAV (Synth)', true);
     },
@@ -1182,13 +1191,18 @@ export default function App() {
 
   const handleUploadSourceFile = useCallback(
     async (file: File) => {
+      const uploadSeq = ++sourceUploadSeqRef.current;
+      const attemptName = file.name;
       try {
         const decoded = await engineRef.current!.decodeFile(file);
+        if (uploadSeq !== sourceUploadSeqRef.current) return;
+        analyzeAudioBuffer(decoded.channels, decoded.sampleRate);
         const ext = file.name.split('.').pop()?.toUpperCase() ?? 'AUDIO';
         loadChannelsAsSource(decoded.channels, decoded.sampleRate, file.name, file.size, ext, false);
       } catch (err) {
+        if (uploadSeq !== sourceUploadSeqRef.current) return;
         setStatusNotice(
-          `Could not decode "${file.name}". Please ensure it is a valid WAV, MP3, FLAC, AAC, M4A, OGG, or AIFF audio file.`,
+          `Could not decode "${attemptName}". Please ensure it is a valid WAV, MP3, FLAC, AAC, M4A, OGG, or AIFF audio file.`,
         );
       }
     },
@@ -1196,6 +1210,7 @@ export default function App() {
   );
 
   const handleLoadDemoReference = useCallback(() => {
+    referenceUploadSeqRef.current += 1;
     const stem = generateDemoMasterStem('reference-bright', 44100, 14);
     vocalPreparationAbortRef.current?.abort();
     vocalPreparationAbortRef.current = null;
@@ -1225,8 +1240,11 @@ export default function App() {
   }, []);
 
   const handleUploadReferenceFile = useCallback(async (file: File) => {
+    const uploadSeq = ++referenceUploadSeqRef.current;
     try {
       const decoded = await engineRef.current!.decodeFile(file);
+      if (uploadSeq !== referenceUploadSeqRef.current) return;
+      analyzeAudioBuffer(decoded.channels, decoded.sampleRate);
       vocalPreparationAbortRef.current?.abort();
       vocalPreparationAbortRef.current = null;
       vocalPreparationCacheRef.current.clear();
@@ -1252,6 +1270,7 @@ export default function App() {
       });
       setStatusNotice(`Loaded reference "${file.name}"`);
     } catch {
+      if (uploadSeq !== referenceUploadSeqRef.current) return;
       setStatusNotice(`Failed to decode reference file "${file.name}".`);
     }
   }, []);
@@ -2411,6 +2430,7 @@ export default function App() {
       ));
       if (selectedFormats.length === 0) throw new Error('Select at least one output format.');
 
+      type ZipFileEntry = { name: string; data: Blob | Uint8Array | ArrayBuffer | string };
       const entries: ZipFileEntry[] = [];
       const outputManifest: Array<{ file: string; format: string; bytes: number; integratedLufs?: number | null; truePeakDbtp?: number | null }> = [];
       const deliveryMessages: string[] = [];
@@ -2418,6 +2438,7 @@ export default function App() {
       const audioFormats = selectedFormats.filter((format) => format !== 'mid');
 
       if (selectedFormats.includes('mid')) {
+        const { encodeMidiTempoFile } = await import('./dsp/midiEncoder');
         const midiBlob = encodeMidiTempoFile(safeStem, activeTrack.durationSec, exportConfig.midiTempoBpm ?? 120, exportConfig.saveLoopMarkers ?? true);
         const midiName = safeStem + '.mid';
         entries.push({ name: safeStem + '/' + midiName, data: midiBlob });
@@ -2535,6 +2556,7 @@ export default function App() {
       };
       entries.push({ name: safeStem + '/render-manifest.json', data: JSON.stringify(manifest, null, 2) });
 
+      const { createZipBlob } = await import('./dsp/zipArchive');
       const zipBlob = await createZipBlob(entries);
       if (zipBlob.size < 22) throw new Error('ZIP packaging failed: archive is unexpectedly small.');
       const zipHeader = new Uint8Array(await zipBlob.slice(0, 4).arrayBuffer());
@@ -2700,7 +2722,28 @@ export default function App() {
   };
 
   const handleNewTrack = () => {
+    sourceUploadSeqRef.current += 1;
+    referenceUploadSeqRef.current += 1;
+    vocalPreparationAbortRef.current?.abort();
+    vocalPreparationAbortRef.current = null;
+    vocalPreparationCacheRef.current.clear();
+    vocalSourceOverrideRef.current = null;
+    directorStopRef.current = true;
+    directorRunIdRef.current += 1;
+    activeTrackIdRef.current = null;
+    sourceChannelsRef.current = null;
+    postChannelsRef.current = null;
+    referenceChannelsRef.current = null;
+    referenceTrackIdRef.current = null;
     engineRef.current?.stop();
+    engineRef.current?.clearSourceAndReference();
+    setReferenceTrack(null);
+    setAuditionTarget('original');
+    engineRef.current?.clearOverrideBuffer('mastered-external');
+    engineRef.current?.clearOverrideBuffer('iteration');
+    for (const key of Array.from(engineRef.current?.getOverrideBufferKeys() ?? [])) {
+      if (key.startsWith('candidate-')) engineRef.current?.clearOverrideBuffer(key);
+    }
     setIsPlaying(false);
     telemetryStore.publish({ isPlaying: false, currentTimeSec: 0, live: null });
     setActiveTrack(null);
@@ -3595,12 +3638,14 @@ export default function App() {
               onAuditionCheckpoint={async (cp) => {
                 const src = getRenderSource();
                 if (!src || !activeTrack) return;
+                const checkpointTrackId = activeTrack.id;
                 const res = await renderAndAnalyzeOffThread({
                   sourceChannels: src,
                   sampleRate: activeTrack.sampleRate,
                   chain: cp.chain,
                   postFades: getPostFades(),
                 });
+                if (activeTrackIdRef.current !== checkpointTrackId) return;
                 engineRef.current!.setOverrideBuffer('iteration', res.channels, activeTrack.sampleRate);
                 switchAuditionTarget('iteration', settings.loudnessMatchAB ? -14 - cp.analysis.integratedLufs : 0);
                 if (!isPlaying) {

@@ -5,7 +5,7 @@ import { analyzeAudioBuffer, dbToLinear, linearToDb, maxInterSampleAbsAt, measur
 import { createProcessorModule, validateChain } from './chainValidation';
 import { processChainOffline } from './offlineDsp';
 import { QC_TARGET_PROFILES, runQualityControl } from './qc';
-import { encodeWavBlob } from './wavEncoder';
+import { encodeWavBlob, resampleChannel } from './wavEncoder';
 import { generateDemoMasterStem } from './demoAudio';
 import { buildAlgorithmicStrategy } from './presets';
 import { designHighPass, designHighShelf, processBiquadBuffer } from './biquad';
@@ -47,6 +47,58 @@ test('offline renderer preserves source buffers by default and reuses explicitly
   assert.equal(rendered.channels[0], ownedLeft);
   assert.equal(rendered.channels[1], ownedRight);
   assert.notEqual(ownedLeft[sampleIndex], original, 'Explicit ownership permits in-place DSP on the transferred buffer');
+});
+
+test('audio inputs reject empty, mismatched, unsupported, and non-finite data', () => {
+  assert.throws(
+    () => analyzeAudioBuffer([], 48000),
+    /at least one channel/i,
+  );
+  assert.throws(
+    () => analyzeAudioBuffer([new Float32Array(8), new Float32Array(7)], 48000),
+    /same frame length/i,
+  );
+  assert.throws(
+    () => analyzeAudioBuffer([new Float32Array(8)], 0),
+    /Unsupported analysis sample rate/i,
+  );
+  const nan = new Float32Array(8);
+  nan[3] = Number.NaN;
+  assert.throws(
+    () => analyzeAudioBuffer([nan], 48000),
+    /non-finite sample/i,
+  );
+  assert.throws(
+    () => processChainOffline([new Float32Array(8), new Float32Array(7)], 48000, []),
+    /same frame length/i,
+  );
+  const inf = new Float32Array(8);
+  inf[2] = Number.POSITIVE_INFINITY;
+  assert.throws(
+    () => processChainOffline([inf], 48000, []),
+    /non-finite sample/i,
+  );
+  assert.throws(
+    () => resampleChannel(new Float32Array(8), 48000, 0),
+    /Unsupported sample-rate conversion/i,
+  );
+  assert.throws(
+    () => encodeWavBlob([new Float32Array(8), new Float32Array(7)], 48000, {
+      filename: 'invalid',
+      format: 'wav',
+      wavBitDepth: 24,
+      sampleRate: 48000,
+      channels: 'stereo',
+      dither: 'none',
+      normalizeToTarget: false,
+      targetLufs: -14,
+      ceilingDb: -1,
+      deliveryProfile: 'streaming',
+      metadataTitle: '',
+      metadataArtist: '',
+    }),
+    /same frame length/i,
+  );
 });
 
 function referenceIntegratedLufs(channels: Float32Array[], sampleRate: number): number {

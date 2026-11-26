@@ -452,13 +452,18 @@ test('AUDIT 9: Adversarial Edge Cases (Silence, Near-Silence, Clipped, Inverted 
   assert.equal(qcClip.checks.find((c) => c.id === 'qc-clipping')?.status, 'fail');
 
   // 4. Zero-length / NaN resilience
-  const emptyRes = processChainOffline([new Float32Array(0), new Float32Array(0)], sr, [
-    createProcessorModule('parametric-eq'),
-    createProcessorModule('limiter'),
-  ]);
-  assert.equal(emptyRes.channels[0].length, 0);
-  const aEmpty = analyzeAudioBuffer([new Float32Array(0)], sr);
-  assert.ok(Number.isFinite(aEmpty.integratedLufs));
+  assert.throws(
+    () => processChainOffline([new Float32Array(0), new Float32Array(0)], sr, [
+      createProcessorModule('parametric-eq'),
+      createProcessorModule('limiter'),
+    ]),
+    /at least one frame|frame/i,
+  );
+  assert.throws(
+    () => analyzeAudioBuffer([new Float32Array(0)], sr),
+    /silence|zero|frame|channel|audio/i,
+    'A zero-length buffer must be rejected instead of silently producing a valid-looking analysis',
+  );
 
   // 5. Pink noise spectral slope (~ -3 dB/oct)
   const pink = makePinkNoise(0.25, 2.0, sr);

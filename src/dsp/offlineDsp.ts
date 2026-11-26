@@ -1701,8 +1701,29 @@ export function processChainOffline(
   postFades?: FadeSettings | null,
   options: OfflineDspOptions = {},
 ): OfflineDspResult {
+  if (!sourceChannels.length) {
+    throw new RangeError('Offline DSP requires at least one audio channel.');
+  }
+  if (!Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 384000) {
+    throw new RangeError(`Unsupported offline DSP sample rate: ${sampleRate}`);
+  }
+  const sourceLength = sourceChannels[0]?.length ?? -1;
+  if (sourceLength < 0) throw new RangeError('Offline DSP channel 0 is missing.');
+  if (sourceLength === 0) throw new RangeError('Offline DSP requires at least one frame of audio.');
+  for (let channelIndex = 0; channelIndex < sourceChannels.length; channelIndex++) {
+    const channel = sourceChannels[channelIndex];
+    if (!channel) throw new RangeError(`Offline DSP channel ${channelIndex} is missing.`);
+    if (channel.length !== sourceLength) {
+      throw new RangeError('All offline DSP channels must have the same frame length.');
+    }
+    for (let i = 0; i < channel.length; i++) {
+      if (!Number.isFinite(channel[i])) {
+        throw new RangeError(`Offline DSP received a non-finite sample at channel ${channelIndex}, frame ${i}.`);
+      }
+    }
+  }
   const numCh = sourceChannels.length;
-  const length = sourceChannels[0].length;
+  const length = sourceLength;
   const left = options.takeOwnership ? sourceChannels[0] : new Float32Array(sourceChannels[0]);
   const right = numCh > 1
     ? options.takeOwnership ? sourceChannels[1] : new Float32Array(sourceChannels[1])

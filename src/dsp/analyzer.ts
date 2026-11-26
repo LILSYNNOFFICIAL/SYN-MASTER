@@ -316,10 +316,34 @@ export function analyzeAudioBuffer(
   channels: Float32Array[],
   sampleRate: number,
 ): AudioAnalysis {
-  const numChannels = channels.length;
+  if (!channels.length) {
+    throw new RangeError('Audio analysis requires at least one channel.');
+  }
+  if (!Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 384000) {
+    throw new RangeError(`Unsupported analysis sample rate: ${sampleRate}`);
+  }
   const left = channels[0];
-  const right = numChannels > 1 ? channels[1] : channels[0];
+  if (!left) {
+    throw new RangeError('Audio analysis channel 0 is missing.');
+  }
   const length = left.length;
+  if (length === 0) {
+    throw new RangeError('Audio analysis requires at least one frame of audio.');
+  }
+  for (let channelIndex = 0; channelIndex < channels.length; channelIndex++) {
+    const channel = channels[channelIndex];
+    if (!channel) throw new RangeError(`Audio analysis channel ${channelIndex} is missing.`);
+    if (channel.length !== length) {
+      throw new RangeError('All analyzed audio channels must have the same frame length.');
+    }
+    for (let i = 0; i < channel.length; i++) {
+      if (!Number.isFinite(channel[i])) {
+        throw new RangeError(`Audio contains a non-finite sample at channel ${channelIndex}, frame ${i}.`);
+      }
+    }
+  }
+  const numChannels = channels.length;
+  const right = numChannels > 1 ? channels[1] : channels[0];
   const durationSec = length / sampleRate;
 
   // 1. Sample Peak, True Peak, Clipping, DC Offset, RMS

@@ -218,6 +218,20 @@ test('SYN-MASTER export endpoint creates measurable contract-format files', { ti
   });
   assert.equal(oversizedStatus, 413, 'Declared uploads over 512 MiB must be rejected before buffering.');
 
+  const invalidCeiling = await fetch(baseUrl + '/api/export/encode?format=wav&ceilingDb=0', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', Origin: baseUrl },
+    body: Buffer.alloc(44),
+  });
+  assert.equal(invalidCeiling.status, 400, 'A 0 dB export ceiling must be rejected.');
+
+  const invalidLoudness = await fetch(baseUrl + '/api/export/encode?format=wav&normalizeToTarget=true&targetLufs=-25', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', Origin: baseUrl },
+    body: Buffer.alloc(44),
+  });
+  assert.equal(invalidLoudness.status, 400, 'A target outside the supported loudness range must be rejected.');
+
   const pendingExports = [1, 2].map(() => {
     const request = httpRequest(baseUrl + '/api/export/encode?format=wav&sampleRate=48000', {
       method: 'POST',
