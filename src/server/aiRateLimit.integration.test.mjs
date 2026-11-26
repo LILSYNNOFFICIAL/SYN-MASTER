@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import test from 'node:test';
 
-const TOKEN = 'integration-test-token-0123456789abcdef0123456789';
+const SESSION_SECRET = 'integration-test-session-secret-0123456789abcdef';
+const sessionCookies = new Map();
 
 async function getFreePort() {
   const server = createServer();
@@ -20,7 +21,7 @@ async function getFreePort() {
 async function startServer(t, extraEnv) {
   const port = await getFreePort();
   const baseUrl = 'http://127.0.0.1:' + port;
-  const env = { ...process.env, NODE_ENV: 'production', PORT: String(port), SYN_MASTER_AI_ACCESS_TOKEN: TOKEN, ...extraEnv };
+  const env = { ...process.env, NODE_ENV: 'production', PORT: String(port), SYN_MASTER_SESSION_SECRET: SESSION_SECRET, ...extraEnv };
   // Never let the test reach a real Gemini key: every spending call stops before billing.
   delete env.GEMINI_API_KEY;
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -50,10 +51,21 @@ async function startServer(t, extraEnv) {
   throw new Error('server did not start: ' + diagnostics);
 }
 
-function post(baseUrl, route, { auth = true, body = {} } = {}) {
+async function post(baseUrl, route, { auth = true, body = {} } = {}) {
+  let cookie = '';
+  if (auth) {
+    cookie = sessionCookies.get(baseUrl) ?? '';
+    if (!cookie) {
+      const session = await fetch(baseUrl + '/api/ai/session', { method: 'POST', headers: { Origin: baseUrl } });
+      assert.equal(session.status, 204);
+      cookie = String(session.headers.get('set-cookie') ?? '').split(';', 1)[0];
+      assert.match(cookie, /^syn_master_guest=/);
+      sessionCookies.set(baseUrl, cookie);
+    }
+  }
   return fetch(baseUrl + route, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: 'Bearer ' + TOKEN } : {}) },
+    headers: { 'Content-Type': 'application/json', Origin: baseUrl, ...(cookie ? { Cookie: cookie } : {}) },
     body: JSON.stringify(body),
   });
 }
@@ -61,7 +73,7 @@ function post(baseUrl, route, { auth = true, body = {} } = {}) {
 test('AI spend limits: per-client strategy minute cap, refine budget and unauthenticated traffic', { timeout: 60_000 }, async (t) => {
   const baseUrl = await startServer(t, { SYN_AI_STRATEGY_PER_MINUTE: '2', SYN_AI_REFINE_PER_MINUTE: '1', SYN_AI_GLOBAL_PER_DAY: '50' });
 
-  // Unauthenticated calls are rejected by the access guard and never spend budget.
+  // Requests without a guest cookie are rejected and never spend the AI budget.
   for (let i = 0; i < 4; i++) assert.equal((await post(baseUrl, '/api/ai/master', { auth: false })).status, 401);
 
   // Authorised calls reach the route (400: empty telemetry) until the per-minute cap.
