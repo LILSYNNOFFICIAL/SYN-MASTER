@@ -19,6 +19,8 @@ const statusIcon = (s: string) =>
     <CheckCircle2 className="w-3.5 h-3.5 text-[#7BE0A0]" />
   ) : s === 'not-fixed' || s === 'fail' ? (
     <XCircle className="w-3.5 h-3.5 text-[#FF7A6B]" />
+  ) : s === 'improved' || s === 'partially-resolved' || s === 'unverified' ? (
+    <AlertTriangle className="w-3.5 h-3.5 text-[#E8C85A]" />
   ) : s === 'advisory' ? (
     <AlertTriangle className="w-3.5 h-3.5 text-[#E8C85A]" />
   ) : (
