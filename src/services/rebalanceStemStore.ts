@@ -136,7 +136,36 @@ export async function separateActiveRebalanceStems(options: { highQuality?: bool
   const source = activeSource;
   const fingerprint = state.fingerprint;
   if (!source || !fingerprint || state.status === 'separating') return;
-  if (state.assessment?.level === 'block') {
+
+  // FIX ALL may request separation immediately after import, while the asynchronous
+  // device/memory assessment is still running. Never start the model before that gate.
+  if (!state.assessment && state.status === 'checking') {
+    await new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        unsubscribe();
+        if (error) reject(error);
+        else resolve();
+      };
+      const check = () => {
+        if (state.fingerprint !== fingerprint) {
+          finish(new Error('The active track changed before stem separation could start.'));
+        } else if (state.assessment || state.status !== 'checking') {
+          finish();
+        }
+      };
+      const unsubscribe = subscribeRebalanceStems(check);
+      timer = setTimeout(() => finish(new Error('Stem-separation resource assessment timed out.')), 10000);
+      check();
+    });
+  }
+  if (state.fingerprint !== fingerprint || activeSource !== source) return;
+  if (!state.assessment) {
+    setState({ status: 'error', error: 'Stem separation was not started because device and memory safety could not be assessed.' });
+    return;
+  }
+  if (state.assessment.level === 'block') {
     setState({ status: 'error', error: state.assessment.message });
     return;
   }
