@@ -17,7 +17,7 @@ const MOCK_ORIGIN = 'https://mock-ai.invalid';
 
 const server = spawn(process.execPath, ['server.ts'], {
   stdio: 'ignore',
-  env: { ...process.env, NODE_ENV: 'production', PORT: port, HOST: '127.0.0.1', SYN_MASTER_AI_ACCESS_TOKEN: 'e2e-fixall-check-token-0123456789abcdef', GEMINI_API_KEY: '' },
+  env: { ...process.env, NODE_ENV: 'production', PORT: port, HOST: '127.0.0.1', SYN_MASTER_SESSION_SECRET: 'e2e-fixall-session-secret-0123456789abcdef', GEMINI_API_KEY: '' },
 });
 
 async function waitForServer() {
