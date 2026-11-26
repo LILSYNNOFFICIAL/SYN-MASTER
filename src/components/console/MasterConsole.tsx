@@ -78,7 +78,7 @@ export interface MasterConsoleProps {
   aiChanges?: React.ReactNode;
   /** Peaks of the processed preview render (falls back to the source); drawn as the glowing blanket behind the EQ curve. */
   blanketPeaks?: number[] | null;
-  /** Timeline player rendered directly under the EQ panel. */
+  /** Transport/fade controls rendered inside the unified waveform + EQ canvas. */
   timeline?: React.ReactNode;
   /** Opens the AI Assistant (Mastering Director) workspace. Planning / explanations, not the one-click fix. */
   onAskAi?: () => void;
@@ -406,10 +406,88 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
       <LightRibbons className="syn-console-ribbons" />
 
       <div className="syn-flow-top">
-        <div className="syn-flow-step syn-area-player">
-          <StepLabel n={1} text="Import" hint="Load a track, seek and set fades" />
+        <section className="syn-card syn-eq-panel syn-area-eq" data-testid="central-spectrum" data-testid-overlay="waveform-eq" aria-label="Master EQ and spectrum">
+          <StepLabel n={1} text="Import & EQ" hint="Waveform timeline behind the live EQ response" className="syn-eq-step-label" />
+          <div className="syn-eq-head">
+            <div>
+              <h2 className="syn-eq-title">SYN EQ</h2>
+              <p className="syn-eq-sub">{eq ? eq.name : 'Precision · Color · Balance'}{p.sampleRate ? ` · ${(p.sampleRate / 1000).toFixed(1)} kHz` : ''}</p>
+            </div>
+            <div className="syn-seg" role="group" aria-label="EQ view">
+              {([['eq', 'EQ'], ['dyneq', 'Dynamic EQ'], ['matcheq', 'Match EQ'], ['vocal', 'Vocal'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
+                <button key={id} type="button" aria-pressed={eqView === id} className={eqView === id ? 'is-on' : ''} onClick={() => setEqView(id)}>{label}</button>
+              ))}
+            </div>
+          </div>
+          {eqView === 'matcheq' ? (
+            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Match EQ…</p></div>}>
+              <MatchEQPanel
+                module={matchEq}
+                onAdd={addMatchEq}
+                onChange={(next) => { if (matchEq) setParams<MatchEqParams>(matchEq, next); }}
+                onToggle={(on) => { if (matchEq) patch(matchEq.id, { enabled: true, bypassed: !on }); }}
+              />
+            </React.Suspense>
+          ) : eqView === 'vocal' ? (
+            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Vocal Rebalance…</p></div>}>
+              <VocalRebalancePanel
+                module={vocalRb}
+                onAdd={addVocalRebalance}
+                onChange={(next) => { if (vocalRb) setParams<VocalRebalanceParams>(vocalRb, next); }}
+                onToggle={(on) => { if (vocalRb) patch(vocalRb.id, { enabled: true, bypassed: !on }); }}
+              />
+            </React.Suspense>
+          ) : eqView === 'dyneq' ? (
+            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Dynamic EQ…</p></div>}>
+            <DynamicEQPanel
+              module={dynEq}
+              sampleRate={p.sampleRate}
+              preSpectrum={p.source}
+              postSpectrum={p.master}
+              trace={p.dynamicEqTraces?.find((item) => item.moduleId === dynEq?.id)}
+              waveformPeaks={p.blanketPeaks ?? p.waveformPeaks}
+              durationSec={p.durationSec}
+              onSeek={p.onSeek}
+              onAdd={() => add('dynamic-eq')}
+              onChange={(next) => { if (dynEq) setParams<DynamicEQParams>(dynEq, next); }}
+              onToggle={(on) => { if (dynEq) patch(dynEq.id, { enabled: true, bypassed: !on }); }}
+            />
+            </React.Suspense>
+          ) : eqView === 'eq' ? (
+            eq ? (
+              <ParametricEQ2
+                variant="console"
+                params={eq.params as ParametricEQParams}
+                sampleRate={p.sampleRate}
+                spectrum={p.master ?? p.source}
+                waveformPeaks={p.blanketPeaks ?? p.waveformPeaks}
+                durationSec={p.durationSec}
+                onSeek={p.onSeek}
+                preSpectrum={p.source}
+                postSpectrum={p.master}
+                outputGainDb={eq.outputGainDb}
+                onOutputGainDb={(db) => patch(eq.id, { outputGainDb: db })}
+                onChange={(next) => setParams<ParametricEQParams>(eq, next)}
+              />
+            ) : (
+              <div className="syn-eq-empty"><AddModule type="parametric-eq" onAdd={add} /></div>
+            )
+          ) : (
+            <SpectrumAndEQCanvas
+              preAnalysis={p.source}
+              postAnalysis={p.master}
+              referenceAnalysis={p.referenceAnalysis}
+              chain={p.chainBypassed ? [] : chain}
+              sampleRate={p.sampleRate}
+              mode={eqView === 'spectrogram' ? 'spectrogram' : 'spectrum'}
+              waveformPeaks={p.waveformPeaks}
+              durationSec={p.durationSec}
+              onSeek={p.onSeek}
+              heightClass="h-64"
+            />
+          )}
           {p.timeline}
-        </div>
+        </section>
         <div className="syn-flow-step syn-flow-fix syn-area-fix">
           <StepLabel n={2} text="Fix with AI" hint="One press: analyze, fix, verify" />
           {fixButton}
@@ -448,83 +526,6 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
       </div>
 
       <div className="syn-console-col syn-console-center">
-        <section className="syn-card syn-eq-panel syn-area-eq" data-testid="central-spectrum" aria-label="Master EQ and spectrum">
-          <div className="syn-eq-head">
-            <div>
-              <h2 className="syn-eq-title">SYN EQ</h2>
-              <p className="syn-eq-sub">{eq ? eq.name : 'Precision · Color · Balance'}{p.sampleRate ? ` · ${(p.sampleRate / 1000).toFixed(1)} kHz` : ''}</p>
-            </div>
-            <div className="syn-seg" role="group" aria-label="EQ view">
-              {([['eq', 'EQ'], ['dyneq', 'Dynamic EQ'], ['matcheq', 'Match EQ'], ['vocal', 'Vocal'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
-                <button key={id} type="button" aria-pressed={eqView === id} className={eqView === id ? 'is-on' : ''} onClick={() => setEqView(id)}>{label}</button>
-              ))}
-            </div>
-          </div>
-          {eqView === 'matcheq' ? (
-            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Match EQ…</p></div>}>
-              <MatchEQPanel
-                module={matchEq}
-                onAdd={addMatchEq}
-                onChange={(next) => { if (matchEq) setParams<MatchEqParams>(matchEq, next); }}
-                onToggle={(on) => { if (matchEq) patch(matchEq.id, { enabled: true, bypassed: !on }); }}
-              />
-            </React.Suspense>
-          ) : eqView === 'vocal' ? (
-            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Vocal Rebalance…</p></div>}>
-              <VocalRebalancePanel
-                module={vocalRb}
-                onAdd={addVocalRebalance}
-                onChange={(next) => { if (vocalRb) setParams<VocalRebalanceParams>(vocalRb, next); }}
-                onToggle={(on) => { if (vocalRb) patch(vocalRb.id, { enabled: true, bypassed: !on }); }}
-              />
-            </React.Suspense>
-          ) : eqView === 'dyneq' ? (
-            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Dynamic EQ…</p></div>}>
-            <DynamicEQPanel
-              module={dynEq}
-              sampleRate={p.sampleRate}
-              preSpectrum={p.source}
-              postSpectrum={p.master}
-              trace={p.dynamicEqTraces?.find((item) => item.moduleId === dynEq?.id)}
-              onAdd={() => add('dynamic-eq')}
-              onChange={(next) => { if (dynEq) setParams<DynamicEQParams>(dynEq, next); }}
-              onToggle={(on) => { if (dynEq) patch(dynEq.id, { enabled: true, bypassed: !on }); }}
-            />
-            </React.Suspense>
-          ) : eqView === 'eq' ? (
-            eq ? (
-              <ParametricEQ2
-                variant="console"
-                params={eq.params as ParametricEQParams}
-                sampleRate={p.sampleRate}
-                spectrum={p.master ?? p.source}
-                waveformPeaks={p.blanketPeaks ?? p.waveformPeaks}
-                durationSec={p.durationSec}
-                preSpectrum={p.source}
-                postSpectrum={p.master}
-                outputGainDb={eq.outputGainDb}
-                onOutputGainDb={(db) => patch(eq.id, { outputGainDb: db })}
-                onChange={(next) => setParams<ParametricEQParams>(eq, next)}
-              />
-            ) : (
-              <div className="syn-eq-empty"><AddModule type="parametric-eq" onAdd={add} /></div>
-            )
-          ) : (
-            <SpectrumAndEQCanvas
-              preAnalysis={p.source}
-              postAnalysis={p.master}
-              referenceAnalysis={p.referenceAnalysis}
-              chain={p.chainBypassed ? [] : chain}
-              sampleRate={p.sampleRate}
-              mode={eqView === 'spectrogram' ? 'spectrogram' : 'spectrum'}
-              waveformPeaks={p.waveformPeaks}
-              durationSec={p.durationSec}
-              onSeek={p.onSeek}
-              heightClass="h-64"
-            />
-          )}
-        </section>
-
         <div className="syn-console-bottom">
           <Card title="Global" area="global" className="syn-card-global">
             <label className="syn-field">

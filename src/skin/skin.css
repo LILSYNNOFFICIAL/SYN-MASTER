@@ -135,7 +135,7 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-ceq-playhead{stroke:#3FE0FF;stroke-width:1.2;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 4px #3FE0FF);opacity:.85;}
 .syn-eq-panel svg .syn-ceq-blanket path{filter:none;}
 
-/* Timeline player (under the EQ) */
+/* Unified EQ timeline: the track waveform is the graph's background layer; transport controls live inside the same EQ panel. */
 .syn-player{display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px !important;border-color:var(--line-blue) !important;
   box-shadow:0 0 0 1px rgba(0,0,0,.4) inset,0 0 26px var(--glow-blue-soft),0 10px 30px rgba(0,0,0,.55) !important;}
 .syn-player-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
@@ -166,10 +166,9 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
 .syn-player-clear{border:0;background:none;color:var(--skin-cyan);font-size:11px;text-decoration:underline;cursor:pointer;min-height:32px;}
 @media (max-width:1023px){
   .syn-console{grid-template-areas:
-      "player player player player player player"
+      "eq eq eq eq eq eq"
       "fix fix fix fix fix fix"
       "step3 step3 step3 step3 step3 step3"
-      "eq eq eq eq eq eq"
       "input input input output output output"
       "dynf dynf dynf tonal tonal tonal"
       "stereo stereo stereo loud loud loud"
@@ -177,7 +176,6 @@ body{background:var(--skin-base) !important;color:var(--skin-text);}
       "global global global presets presets presets" !important;}
   .syn-flow-top{display:contents !important;}
   .syn-area-step3{grid-area:step3;} .syn-area-export{grid-area:export;}
-  .syn-area-player{grid-area:player;}
   .syn-player-hint{display:none;}
   .syn-player-fades{margin-left:0;width:100%;}
   .syn-player-play{flex:1 1 auto;justify-content:center;}
@@ -933,4 +931,20 @@ g.is-solo .syn-eqx-node{stroke-dasharray:3 2;}
 @media (prefers-reduced-motion: reduce) {
   .syn-spin { animation:none; }
   .syn-vr-meter-fill, .syn-vr-progress .syn-progress > span { transition:none; }
+}
+
+
+/* Integrated waveform + EQ workspace: transport no longer draws a second waveform panel. */
+.syn-player-integrated{padding:4px 0 0 !important;border:0 !important;border-radius:0 !important;background:transparent !important;box-shadow:none !important;backdrop-filter:none !important;gap:7px;}
+.syn-player-integrated-readout{display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:2px 4px;color:#7FA9CC;font:700 9px var(--syn-font-mono,monospace);letter-spacing:.14em;}
+.syn-player-integrated .syn-player-transport{margin:0;}
+.syn-player-integrated .syn-player-controls{padding-top:2px;border-top:1px solid rgba(46,168,255,.16);}
+.syn-eq-step-label{margin-bottom:2px;}
+.syn-eq-panel .syn-eqx-plot{min-width:0;}
+@media (max-width:1023px){
+  .syn-eq-panel{min-width:0;width:100%;}
+  .syn-eq-panel .syn-eq-head{align-items:flex-start;flex-direction:column;}
+  .syn-eq-panel .syn-seg{max-width:100%;overflow-x:auto;}
+  .syn-player-integrated .syn-player-controls{align-items:stretch;}
+  .syn-player-integrated .syn-player-fades{width:100%;}
 }

@@ -23,6 +23,9 @@ interface Props {
   sampleRate: number;
   preSpectrum: AudioAnalysis | null;
   postSpectrum: AudioAnalysis | null;
+  waveformPeaks?: number[] | null;
+  durationSec?: number;
+  onSeek?: (sec: number) => void;
   trace?: DynamicEqTrace;
   onAdd: () => void;
   onChange: (next: DynamicEQParams) => void;
@@ -73,7 +76,7 @@ const ThresholdMeter: React.FC<{ detectorDb: number; thresholdDb: number; hasTra
 };
 
 /** Shared Ozone-style graph/popover with a stronger cyan/purple glow and real preview traces. */
-export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectrum, postSpectrum, trace, onAdd, onChange, onToggle }) => {
+export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectrum, postSpectrum, waveformPeaks, durationSec = 0, onSeek, trace, onAdd, onChange, onToggle }) => {
   const [draft, setDraft] = useState<DynamicEQParams | null>(null);
   const params = module?.params as DynamicEQParams | undefined;
   const view = draft ?? params;
@@ -257,6 +260,9 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectru
         preSpectrum={preSpectrum}
         postSpectrum={postSpectrum}
         analyzer={analyzer}
+        waveformPeaks={waveformPeaks}
+        durationSec={durationSec}
+        onSeek={onSeek}
         ariaLabel="Dynamic EQ frequency response graph. Drag a node to change frequency, use the handles or mouse wheel to change Q, and double-click to add a band."
         className="syn-deq-graph"
       >

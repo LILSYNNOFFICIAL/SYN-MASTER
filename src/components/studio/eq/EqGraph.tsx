@@ -56,6 +56,8 @@ interface Props {
   /** Optional glowing waveform blanket (console). */
   waveformPeaks?: number[] | null;
   durationSec?: number;
+  /** Seek the shared track timeline by clicking or dragging the waveform layer. */
+  onSeek?: (sec: number) => void;
   ariaLabel: string;
   /** Popover rendered over the plot. */
   children?: React.ReactNode;
@@ -63,6 +65,12 @@ interface Props {
 }
 
 const GRID_F = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+
+/** Convert a pointer's horizontal position into the shared linear track-time coordinate. */
+export function timelineSecondsFromPointer(clientX: number, left: number, width: number, durationSec: number): number {
+  if (!Number.isFinite(clientX) || !Number.isFinite(left) || !Number.isFinite(width) || width <= 0 || !Number.isFinite(durationSec) || durationSec <= 0) return 0;
+  return Math.max(0, Math.min(durationSec, ((clientX - left) / width) * durationSec));
+}
 
 function spectrumPath(a: AudioAnalysis | null | undefined, closed: boolean): string | null {
   if (!a || !a.spectrumBinsFreq?.length) return null;
@@ -102,6 +110,7 @@ export const EqGraph: React.FC<Props> = ({
   analyzer = 'post',
   waveformPeaks,
   durationSec = 0,
+  onSeek,
   ariaLabel,
   children,
   className = '',
@@ -109,6 +118,9 @@ export const EqGraph: React.FC<Props> = ({
   const uid = useId().replace(/:/g, '');
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<null | { id: string; kind: 'node' | 'qlo' | 'qhi'; fine: boolean; sx: number; sy: number; node: EqGraphNode; last: { freq?: number; yDb?: number; q?: number } }>(null);
+  const seekDragRef = useRef(false);
+  const lastSeekAtRef = useRef(0);
+  const lastPointerXRef = useRef(0);
 
   const toLocal = (e: { clientX: number; clientY: number }) => {
     const r = svgRef.current!.getBoundingClientRect();
@@ -124,6 +136,15 @@ export const EqGraph: React.FC<Props> = ({
   };
 
   const onMove = (e: React.PointerEvent) => {
+    if (seekDragRef.current && onSeek && durationSec > 0 && svgRef.current) {
+      const now = performance.now();
+      if (now - lastSeekAtRef.current >= 60) {
+        lastSeekAtRef.current = now;
+        const rect = svgRef.current.getBoundingClientRect();
+        onSeek(timelineSecondsFromPointer(e.clientX, rect.left, rect.width, durationSec));
+      }
+      return;
+    }
     const d = dragRef.current;
     if (!d) return;
     const p = toLocal(e);
@@ -148,6 +169,14 @@ export const EqGraph: React.FC<Props> = ({
   };
 
   const endDrag = () => {
+    if (seekDragRef.current) {
+      seekDragRef.current = false;
+      if (onSeek && durationSec > 0 && svgRef.current) {
+        const rect = svgRef.current.getBoundingClientRect();
+        onSeek(timelineSecondsFromPointer(lastPointerXRef.current, rect.left, rect.width, durationSec));
+      }
+      return;
+    }
     const d = dragRef.current;
     dragRef.current = null;
     if (d && Object.keys(d.last).length) onNodeChange(d.id, d.last, 'end');
@@ -257,13 +286,36 @@ export const EqGraph: React.FC<Props> = ({
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
         className="syn-ceq-svg syn-eqx-svg"
-        onPointerMove={onMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
+        onPointerMove={(e) => { lastPointerXRef.current = e.clientX; onMove(e); }}
+        onPointerUp={(e) => { lastPointerXRef.current = e.clientX; endDrag(); }}
+        onPointerCancel={() => { seekDragRef.current = false; endDrag(); }}
         onDoubleClick={onDouble}
         onPointerDown={(e) => {
+          const target = e.target as Element | null;
+          if (target?.closest?.('[data-band-id], [data-q-handle]')) return;
+          if (onSeek && durationSec > 0 && svgRef.current) {
+            e.preventDefault();
+            seekDragRef.current = true;
+            lastSeekAtRef.current = 0;
+            lastPointerXRef.current = e.clientX;
+            svgRef.current.setPointerCapture?.(e.pointerId);
+            const rect = svgRef.current.getBoundingClientRect();
+            onSeek(timelineSecondsFromPointer(e.clientX, rect.left, rect.width, durationSec));
+            return;
+          }
           if (e.target === svgRef.current) onSelect(null);
         }}
+        onKeyDown={(e) => {
+          if (e.target !== svgRef.current || !onSeek || durationSec <= 0) return;
+          const current = telemetryStore.getSnapshot().currentTimeSec;
+          const step = e.shiftKey ? 1 : 5;
+          const next = e.key === 'ArrowLeft' ? current - step : e.key === 'ArrowRight' ? current + step : e.key === 'Home' ? 0 : e.key === 'End' ? durationSec - 0.05 : null;
+          if (next !== null) {
+            e.preventDefault();
+            onSeek(Math.max(0, Math.min(durationSec, next)));
+          }
+        }}
+        tabIndex={0}
         role="group"
         aria-label={ariaLabel}
       >

@@ -45,6 +45,8 @@ interface Props {
   variant?: 'classic' | 'console';
   waveformPeaks?: number[] | null;
   durationSec?: number;
+  /** Seek the shared track timeline from the overlaid waveform. */
+  onSeek?: (sec: number) => void;
   /** Source (pre-chain) analysis. */
   preSpectrum?: AudioAnalysis | null;
   /** Rendered (post-chain) analysis. */
@@ -107,7 +109,7 @@ function readAnalyzer(): AnalyzerMode {
 }
 
 export const ParametricEQ2: React.FC<Props> = ({
-  params, sampleRate, spectrum, onChange, variant = 'classic', waveformPeaks = null, durationSec = 0,
+  params, sampleRate, spectrum, onChange, variant = 'classic', waveformPeaks = null, durationSec = 0, onSeek,
   preSpectrum, postSpectrum, outputGainDb, onOutputGainDb,
 }) => {
   const isConsole = variant === 'console';
@@ -350,6 +352,7 @@ export const ParametricEQ2: React.FC<Props> = ({
         analyzer={analyzer}
         waveformPeaks={isConsole ? waveformPeaks : null}
         durationSec={isConsole ? durationSec : 0}
+        onSeek={isConsole ? onSeek : undefined}
         ariaLabel="Parametric EQ. Tab to a band node; arrow keys move frequency and gain, plus and minus change Q, S solos, Delete removes, Escape closes. Drag nodes, wheel or the diamond handles for Q, double-click to add a band."
       >
         {popover}

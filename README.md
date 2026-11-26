@@ -49,6 +49,7 @@ De-click, de-crackle, transient spike repair, and AI-shimmer / metallic artifact
 
 ### 5. Manual mode: a mini DAW built only for mastering
 - Parametric EQ that looks and works like FL Studio's **Fruity Parametric EQ 2** (live spectrum, draggable band nodes, band types).
+- The Parametric and Dynamic EQ views share one top-of-workspace canvas with the actual track waveform behind the EQ response and draggable band nodes in front; click/drag the background waveform to seek, while EQ nodes continue to edit their real DSP bands.
 - **Fade-in / fade-out lines** you click and drag on the waveform (FL Studio style).
 - Compression, multiband compression, limiter/maximizer, high-pass and low-pass filters, frequency splitters/crossovers, a **Maximus-style multiband maximizer**, stereo imager, saturation/exciter, de-esser, dynamic EQ, transient shaper, clipper, dither, loudness targets (Spotify / Apple Music / YouTube presets), **A/B compare**, and new innovative tools.
 - Knobs, dials, and sliders.

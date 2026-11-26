@@ -21,6 +21,8 @@ interface Props {
   onTogglePlay: () => void;
   onImport: (file: File) => void;
   disabled?: boolean;
+  /** Render only transport/fade controls; the waveform is already overlaid behind the EQ graph. */
+  integrated?: boolean;
   /** Optional compact control rendered under the transport (Platform Preview selector). */
   extra?: React.ReactNode;
 }
@@ -53,25 +55,31 @@ const CURVES: { id: FadeCurve; label: string }[] = [
 export const TimelinePlayer: React.FC<Props> = (p) => {
   const hasTrack = p.durationSec > 0;
   return (
-    <section className="syn-card syn-player syn-area-player" aria-label="Timeline player and fades">
-      <div className="syn-player-head">
-        <h3 className="syn-card-title">Timeline</h3>
-        <span className="syn-player-hint">Click or drag to seek · drag the end knobs to fade</span>
-        <TimeReadout durationSec={p.durationSec} />
-      </div>
-      {hasTrack ? (
-        <TimelineWaveform
-          prePeaks={p.prePeaks}
-          postPeaks={p.postPeaks}
-          durationSec={p.durationSec}
-          showPost={p.showPost}
-          fades={p.fades}
-          onFadesChange={p.onFadesChange}
-          onSeek={p.onSeek}
-          heightPx={112}
-        />
+    <section className={`syn-card syn-player syn-area-player${p.integrated ? ' syn-player-integrated' : ''}`} aria-label={p.integrated ? 'Integrated EQ timeline transport and fades' : 'Timeline player and fades'}>
+      {p.integrated ? (
+        <div className="syn-player-integrated-readout"><span>TRACK POSITION</span><TimeReadout durationSec={p.durationSec} /></div>
       ) : (
-        <div className="syn-player-empty">Import a track to see its waveform</div>
+        <>
+          <div className="syn-player-head">
+            <h3 className="syn-card-title">Timeline</h3>
+            <span className="syn-player-hint">Click or drag to seek · drag the end knobs to fade</span>
+            <TimeReadout durationSec={p.durationSec} />
+          </div>
+          {hasTrack ? (
+            <TimelineWaveform
+              prePeaks={p.prePeaks}
+              postPeaks={p.postPeaks}
+              durationSec={p.durationSec}
+              showPost={p.showPost}
+              fades={p.fades}
+              onFadesChange={p.onFadesChange}
+              onSeek={p.onSeek}
+              heightPx={112}
+            />
+          ) : (
+            <div className="syn-player-empty">Import a track to see its waveform</div>
+          )}
+        </>
       )}
       <div className="syn-player-transport" role="group" aria-label="Transport">
         <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(0)} disabled={!hasTrack} aria-label="Jump to start">

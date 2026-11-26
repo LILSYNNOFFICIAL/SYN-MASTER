@@ -2581,6 +2581,7 @@ export default function App() {
           onSeek={seekTo}
           onTogglePlay={togglePlay}
           onImport={handleUploadSourceFile}
+          integrated
           extra={<React.Suspense fallback={null}><PlatformPreviewSelector levels={platformLevels} onOpenPanel={() => setActiveTab('qc')} /></React.Suspense>}
         />
       }
