@@ -92,7 +92,7 @@ export function createAiGuestSession(options: AiGuestSessionOptions = {}) {
 
   function bootstrap(req: Request, res: Response): void {
     if (!secret) {
-      res.status(503).json({ error: 'Cloud AI guest sessions are not configured on this server. Local mastering remains available.' });
+      res.status(503).json({ error: 'Cloud AI is unavailable because the server-side Gemini connection is not configured. Local DSP mastering remains available.' });
       return;
     }
     if (!sameOrigin(req)) {
@@ -107,7 +107,7 @@ export function createAiGuestSession(options: AiGuestSessionOptions = {}) {
 
   function middleware(req: Request, res: Response, next: NextFunction): void {
     if (!secret) {
-      res.status(503).json({ error: 'Cloud AI guest sessions are not configured on this server. Local mastering remains available.' });
+      res.status(503).json({ error: 'Cloud AI is unavailable because the server-side Gemini connection is not configured. Local DSP mastering remains available.' });
       return;
     }
     if (!sameOrigin(req)) {
