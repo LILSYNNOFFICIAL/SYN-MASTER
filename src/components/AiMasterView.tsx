@@ -695,6 +695,7 @@ export const AiMasterView: React.FC<Props> = ({
                   />
                   Include cloud AI reasoning (provider: see AI chip in the top bar; built-in Gemini by default)
                 </label>
+                <a href="https://github.com/LILSYNNOFFICIAL/SYN-MASTER#cloud-ai" target="_blank" rel="noreferrer" className="text-[10px] text-[#3FE0FF] underline underline-offset-2">Cloud AI is provided by SYN-MASTER. No personal API key is required. Learn about guest sessions and usage limits.</a>
               </div>
             )}
           </div>
