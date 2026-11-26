@@ -1,12 +1,6 @@
 import { analyzeAudioBuffer } from '../dsp/analyzer';
-import {
-  assessStemSeparationResources,
-  resampleStereoChannels,
-  separateWithDemucs,
-  type SeparatedAudioStem,
-  type StemSeparationProgress,
-} from '../services/stemSeparation';
-import { applyMixtureConsistency } from '../dsp/stemSeparationMath';
+import type { SeparatedAudioStem, StemSeparationProgress } from '../services/stemSeparation';
+import { DEMUCS_SAMPLE_RATE } from '../dsp/stemSeparationMath';
 import type { MasteringObjectiveId, VocalBalanceVerification } from '../types/mastering';
 import { isAnalysisMeasurementReliable } from './analyzeIntelligence';
 
@@ -82,7 +76,7 @@ export function measureVocalBalance(
 }
 
 export function collapseSeparatedVocalStems(
-  stems: SeparatedAudioStem[],
+  stems: readonly SeparatedAudioStem[],
   sampleRate: number,
 ): SeparatedVocalMaterial | null {
   const vocal = stems.find((stem) => stem.id === 'vocals');
@@ -172,6 +166,7 @@ function requireStereoChannels(channels: Float32Array[]): [Float32Array, Float32
 }
 
 async function prepareDemucsInput(track: VocalBalanceTrackInput): Promise<[Float32Array, Float32Array]> {
+  const { resampleStereoChannels } = await import('../services/stemSeparation');
   const owned = requireStereoChannels(track.channels);
   return resampleStereoChannels(owned, track.sampleRate, 44_100);
 }
@@ -183,29 +178,22 @@ async function separateAndMeasure(
   onProgress?: (label: string, progress: StemSeparationProgress) => void,
 ): Promise<SeparatedVocalMaterial | null> {
   const modelInput = await prepareDemucsInput(track);
-  const stems = await separateWithDemucs(
-    modelInput,
+  const { requestSharedStemSeparation } = await import('../services/stemSeparation');
+  const { stems } = await requestSharedStemSeparation({
+    channels: modelInput,
+    sampleRate: DEMUCS_SAMPLE_RATE,
+    resource: {
+      durationSec: track.durationSec,
+      sampleRate: track.sampleRate,
+      fileSizeBytes: track.fileSizeBytes,
+    },
     signal,
-    (progress) => onProgress?.(label, progress),
-    { timeoutMs: 600_000 },
-  );
-  const original = await prepareDemucsInput(track);
+    onProgress: (progress) => onProgress?.(label, progress),
+  });
   if (stems.length === 0) return null;
-  const length = Math.min(original[0].length, ...stems.map((stem) => stem.channels[0].length));
+  const length = Math.min(modelInput[0].length, ...stems.map((stem) => stem.channels[0].length));
   if (length === 0 || stems.some((stem) => stem.channels[1].length < length)) return null;
-  const alignedOriginal: [Float32Array, Float32Array] = [
-    original[0].slice(0, length),
-    original[1].slice(0, length),
-  ];
-  const alignedStems = stems.map((stem) => [
-    stem.channels[0].slice(0, length),
-    stem.channels[1].slice(0, length),
-  ] as [Float32Array, Float32Array]);
-  applyMixtureConsistency(alignedOriginal, alignedStems);
-  for (let index = 0; index < stems.length; index += 1) {
-    stems[index].channels = alignedStems[index];
-  }
-  return collapseSeparatedVocalStems(stems, 44_100);
+  return collapseSeparatedVocalStems(stems, DEMUCS_SAMPLE_RATE);
 }
 
 function unverified(summary: string, sourceBalanceDb: number | null = null, referenceBalanceDb: number | null = null): VocalBalancePreparation {
@@ -228,8 +216,6 @@ export async function prepareVocalBalanceAgainstReference(input: {
   signal: AbortSignal;
   onProgress?: (label: string, progress: StemSeparationProgress) => void;
 }): Promise<VocalBalancePreparation> {
-  await assessStemSeparationResources([input.source]);
-
   const sourceMaterial = await separateAndMeasure(input.source, input.signal, 'source', input.onProgress);
   if (!sourceMaterial) {
     return unverified('Source separation did not produce reliable, non-silent vocal and accompaniment stems.');
@@ -255,7 +241,6 @@ export async function prepareVocalBalanceAgainstReference(input: {
       before.balanceDb,
     );
   }
-  await assessStemSeparationResources([input.reference]);
   const referenceMaterial = await separateAndMeasure(input.reference, input.signal, 'reference', input.onProgress);
   if (!referenceMaterial) {
     return unverified(
@@ -280,9 +265,10 @@ export async function prepareVocalBalanceAgainstReference(input: {
     };
   }
 
+  const { resampleStereoChannels } = await import('../services/stemSeparation');
   const [vocalAtSessionRate, nonVocalAtSessionRate] = await Promise.all([
-    resampleStereoChannels(sourceMaterial.vocalChannels, 44_100, input.source.sampleRate),
-    resampleStereoChannels(sourceMaterial.nonVocalChannels, 44_100, input.source.sampleRate),
+    resampleStereoChannels(sourceMaterial.vocalChannels, DEMUCS_SAMPLE_RATE, input.source.sampleRate),
+    resampleStereoChannels(sourceMaterial.nonVocalChannels, DEMUCS_SAMPLE_RATE, input.source.sampleRate),
   ]);
   const mix = renderVocalBalanceMix(vocalAtSessionRate, nonVocalAtSessionRate, gainDb);
   const scale = 10 ** (gainDb / 20);

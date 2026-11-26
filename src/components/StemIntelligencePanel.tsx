@@ -1,13 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, AudioLines, FileAudio, Layers3, Loader2, Plus, ScanSearch, Sparkles, Trash2, X } from 'lucide-react';
 import {
-  estimateStemSeparationOutputBytes,
+  requestSharedStemSeparation,
   resampleStereoChannels,
-  separateWithDemucs,
   type StemSeparationProgress,
 } from '../services/stemSeparation';
 import { createProcessorModule } from '../dsp/chainValidation';
-import { applyMixtureConsistency } from '../dsp/stemSeparationMath';
+import { DEMUCS_SAMPLE_RATE, applyMixtureConsistency } from '../dsp/stemSeparationMath';
 import { renderStemBusMix, type StemBusMixResult } from '../dsp/stemBusRenderer';
 import { analyzeAudioBuffer } from '../dsp/analyzer';
 import type { ProcessorModule, ProcessorType, ParametricEQParams, CompressorParams, MasterFinalReport, DirectorOperatingMode, MasteringObjectiveId, AudioAnalysis } from '../types/mastering';
@@ -147,47 +146,28 @@ export const StemIntelligencePanel: React.FC = () => {
         throw new Error('The source mix must be mono or stereo. Export a stereo mix and try again.');
       }
 
-      const deviceMemoryGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-      const estimatedOutputBytes = estimateStemSeparationOutputBytes(decoded.duration, sessionSampleRate);
-      const memoryBudgetBytes = Math.min(2_048, Math.max(768, deviceMemoryGb * 512)) * 1024 * 1024;
-      if (estimatedOutputBytes > memoryBudgetBytes) {
-        const estimatedMb = Math.round(estimatedOutputBytes / (1024 * 1024));
-        const budgetMb = Math.round(memoryBudgetBytes / (1024 * 1024));
-        throw new Error(`This separation needs about ${estimatedMb} MB of decoded stem memory, above this device's estimated ${budgetMb} MB safe working budget. OPFS now handles chunk accumulation on disk, but Stem Studio still loads all four stems for editing and mixing. Try a shorter section or a device with more memory.`);
-      }
-      if (!navigator.storage?.getDirectory || !navigator.storage?.estimate) {
-        throw new Error('This browser does not support the required temporary disk storage (OPFS). Open SYN-MASTER in a current Chrome or Edge browser over HTTPS.');
-      }
-      const storageEstimate = await navigator.storage.estimate();
-      const availableStorageBytes = Math.max(0, (storageEstimate.quota ?? 0) - (storageEstimate.usage ?? 0));
-      const requiredStorageBytes = Math.ceil(estimatedOutputBytes * 1.15);
-      if (availableStorageBytes < requiredStorageBytes) {
-        const availableMb = Math.floor(availableStorageBytes / (1024 * 1024));
-        const requiredMb = Math.ceil(requiredStorageBytes / (1024 * 1024));
-        throw new Error(`Not enough browser temporary storage for safe stem separation. About ${requiredMb} MB is required, but only ${availableMb} MB is available. Free disk space or clear unused browser site data, then retry.`);
-      }
-
-      // OfflineAudioContext performs browser-native sample-rate conversion to the
-      // fixed 44.1 kHz input expected by the exported HT-Demucs graph.
-      const outputLength = Math.max(1, Math.ceil(decoded.duration * 44_100));
-      const offline = new OfflineAudioContext(2, outputLength, 44_100);
-      const input = offline.createBuffer(2, decoded.length, decoded.sampleRate);
       const left = decoded.getChannelData(0);
-      input.copyToChannel(left, 0);
-      input.copyToChannel(decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : left, 1);
-      const source = offline.createBufferSource();
-      source.buffer = input;
-      source.connect(offline.destination);
-      source.start(0);
-      const resampled = await offline.startRendering();
+      const right = decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : left;
+      const resampled = await resampleStereoChannels(
+        [left, right],
+        decoded.sampleRate,
+        DEMUCS_SAMPLE_RATE,
+      );
       if (controller.signal.aborted) throw new DOMException('Separation cancelled.', 'AbortError');
 
-      const separated = await separateWithDemucs(
-        [resampled.getChannelData(0).slice(), resampled.getChannelData(1).slice()],
-        controller.signal,
-        setSeparationProgress,
-        { highQuality: separationHighQuality },
-      );
+      const separation = await requestSharedStemSeparation({
+        channels: resampled,
+        sampleRate: DEMUCS_SAMPLE_RATE,
+        resource: {
+          durationSec: decoded.duration,
+          sampleRate: sessionSampleRate,
+          fileSizeBytes: file.size,
+        },
+        signal: controller.signal,
+        onProgress: setSeparationProgress,
+        highQuality: separationHighQuality,
+      });
+      const separated = separation.stems;
       const baseName = file.name.replace(/\.[^.]+$/, '');
       const imported: LoadedStem[] = [];
       setSeparationProgress({ stage: 'resampling', progress: 0, completedChunks: 0, totalChunks: separated.length });
@@ -196,7 +176,6 @@ export const StemIntelligencePanel: React.FC = () => {
         if (controller.signal.aborted) throw new DOMException('Separation cancelled.', 'AbortError');
         const channels = await resampleStereoChannels(stem.channels, 44_100, sessionSampleRate);
         if (controller.signal.aborted) throw new DOMException('Separation cancelled.', 'AbortError');
-        stem.channels = channels;
         setSeparationProgress({
           stage: 'resampling',
           progress: (index + 1) / separated.length,
@@ -226,7 +205,9 @@ export const StemIntelligencePanel: React.FC = () => {
       const trim = (pair: [Float32Array, Float32Array]): [Float32Array, Float32Array] =>
         pair[0].length === alignedLength ? pair : [pair[0].slice(0, alignedLength), pair[1].slice(0, alignedLength)];
       for (const stem of imported) stem.channels = trim(stem.channels as [Float32Array, Float32Array]);
-      const consistency = applyMixtureConsistency(trim(originalAtSession), imported.map((stem) => stem.channels as [Float32Array, Float32Array]));
+      const consistency = sessionSampleRate === DEMUCS_SAMPLE_RATE
+        ? separation.mixtureConsistency
+        : applyMixtureConsistency(trim(originalAtSession), imported.map((stem) => stem.channels as [Float32Array, Float32Array]));
       setSeparationReport(
         `${separationHighQuality ? 'High Quality (2 passes)' : 'Standard'} separation. Stems now sum back to the original mix; ` +
         `the model left a ${consistency.residualDbBefore.toFixed(1)} dB residual, shared out by each stem's local energy.`,
