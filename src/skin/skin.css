@@ -951,3 +951,47 @@ g.is-solo .syn-eqx-node{stroke-dasharray:3 2;}
 
 /* The shared EQ/waveform canvas also acts as the track-seek surface. */
 .syn-ceq-svg[tabindex="0"]{cursor:crosshair;}
+
+
+/* EQ header transport: compact controls beside the view selector. */
+.syn-eq-head > .syn-player-transport {
+  flex: 0 0 auto;
+  gap: 4px;
+  margin: 0 0 0 6px;
+  align-self: center;
+}
+.syn-eq-head > .syn-player-transport .syn-player-icon {
+  width: 25px;
+  min-width: 25px;
+  height: 25px;
+  min-height: 25px;
+  padding: 0;
+  border-radius: 7px;
+}
+.syn-eq-head > .syn-player-transport .syn-player-play {
+  width: 29px;
+  min-width: 29px;
+  height: 29px;
+  min-height: 29px;
+  padding: 0;
+}
+.syn-player-integrated .syn-player-transport { margin: 0; }
+@media (max-width: 1023px) {
+  .syn-eq-panel .syn-eq-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 8px;
+  }
+  .syn-eq-panel .syn-eq-head > .syn-seg {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+  }
+  .syn-eq-head > .syn-player-transport {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+  }
+}
