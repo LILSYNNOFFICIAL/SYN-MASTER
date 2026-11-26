@@ -63,7 +63,7 @@ export const StemIntelligencePanel: React.FC = () => {
   const [chainsByStemId, setChainsByStemId] = useState<Record<string, ProcessorModule[]>>({});
   const [processedMix, setProcessedMix] = useState<StemBusMixResult | null>(null);
   const [rendering, setRendering] = useState(false);
-  const [directorMode, setDirectorMode] = useState<DirectorOperatingMode>('assisted');
+  const [directorMode, setDirectorMode] = useState<DirectorOperatingMode>('autonomous');
   const [directorObjective, setDirectorObjective] = useState<MasteringObjectiveId>('streaming');
   const [directorRunning, setDirectorRunning] = useState(false);
   const [directorProgress, setDirectorProgress] = useState<{ stage: string; passNumber: number; maxIterations: number } | null>(null);
@@ -798,7 +798,7 @@ export const StemIntelligencePanel: React.FC = () => {
               <select value={directorMode} disabled={directorRunning || separating} onChange={(event) => { setDirectorMode(event.target.value as DirectorOperatingMode); setDirectorReport(null); setDirectorPreview(null); }} className="mt-1 w-full rounded border border-[#343A49] bg-[#0C0E13] px-2 py-2 text-xs text-[#E5E7EB]">
                 <option value="manual">Manual · Plan only</option>
                 <option value="assisted">Assisted · One verified pass</option>
-                <option value="autonomous">Autonomous · Iterative refinement</option>
+                <option value="autonomous">AI Automatic · Iterative refinement</option>
               </select>
             </label>
             <label className="text-[10px] text-[#8B93A3]">Mastering Objective
