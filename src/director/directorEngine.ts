@@ -2124,7 +2124,10 @@ export function mergeAiChainWithMeasuredPlan(
       return (params.amount ?? 0) > 0;
     });
 
-  let merged = validateChain([...structuredClone(leadModules), ...structuredClone(aiChain)]);
+  // Do not validate/truncate the AI chain until required measured stages have been
+  // merged. validateChain caps chains at 12 modules, which could otherwise discard
+  // the final limiter when one or two evidence-backed EQ stages are added.
+  let merged = [...structuredClone(leadModules), ...structuredClone(aiChain)];
   for (const type of ['dynamic-eq', 'match-eq'] as const) {
     if (hasEffective(merged, type)) continue;
     const measured = measuredPlanChain.find((module) =>
@@ -2139,6 +2142,15 @@ export function mergeAiChainWithMeasuredPlan(
     );
     const at = insertAt < 0 ? merged.length : insertAt;
     merged.splice(at, 0, structuredClone(measured));
+  }
+  const protectedTypes = new Set(['vocal-rebalance', 'dynamic-eq', 'match-eq', 'restore', 'limiter', 'maximizer', 'dither']);
+  while (merged.length > 12) {
+    let dropAt = -1;
+    for (let i = merged.length - 1; i >= 0; i--) {
+      if (!protectedTypes.has(merged[i].type)) { dropAt = i; break; }
+    }
+    if (dropAt < 0) break;
+    merged.splice(dropAt, 1);
   }
   return validateChain(merged);
 }
