@@ -298,6 +298,8 @@ async function runViewport(browser, width, height, mobile) {
         const modeGrid = page.getByText('Operating Mode', { exact: true }).locator('xpath=following-sibling::div[1]');
         const modeColumns = await modeGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length);
         assert.equal(modeColumns, mobile ? 1 : 3, 'AI Director operating mode cards must stack on mobile and use three desktop columns');
+        const automaticMode = page.locator('.syn-ai-mode-card').filter({ hasText: 'AI Automatic' });
+        assert.equal(await automaticMode.getAttribute('aria-pressed'), 'true', 'AI Automatic must be selected by default in the main Director');
 
         const telemetryGrid = page.locator('[data-testid="measured-before-after-telemetry"] > div.grid');
         const telemetryColumns = await telemetryGrid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length);
