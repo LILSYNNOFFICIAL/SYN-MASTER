@@ -53,6 +53,53 @@ test('production guest bootstrap issues an HttpOnly Secure SameSite=Strict cooki
   assert.equal(parsed.expiresAt, 1_000 + 12 * 60 * 60 * 1000);
 });
 
+test('guest middleware renews a valid session within its final two hours without changing its identity', () => {
+  let now = 1_000;
+  const sessions = createAiGuestSession({ secret: SECRET, production: true, now: () => now });
+  const bootstrapRes = makeResponse();
+  sessions.bootstrap(makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https', secure: true }), bootstrapRes.response);
+  const initialCookie = bootstrapRes.headers['set-cookie'].split(';', 1)[0];
+  const initialSession = sessions.readSession(makeRequest({ cookie: initialCookie }));
+  assert.ok(initialSession);
+
+  now += 10.5 * 60 * 60 * 1000;
+  const renewalRes = makeResponse();
+  let nextCalled = false;
+  sessions.middleware(
+    makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https', secure: true, cookie: initialCookie, fetchSite: 'same-origin' }),
+    renewalRes.response,
+    (() => { nextCalled = true; }) as NextFunction,
+  );
+
+  assert.equal(nextCalled, true);
+  const renewedCookie = renewalRes.headers['set-cookie'];
+  assert.ok(renewedCookie, 'a session inside the renewal window must receive a refreshed cookie');
+  assert.match(renewedCookie, /; HttpOnly/);
+  assert.match(renewedCookie, /; Secure/);
+  assert.match(renewedCookie, /; SameSite=Strict/);
+  const renewedSession = sessions.readSession(makeRequest({ cookie: renewedCookie.split(';', 1)[0] }));
+  assert.equal(renewedSession?.id, initialSession.id, 'renewal must preserve the guest-session identity');
+  assert.equal(renewedSession?.expiresAt, now + 12 * 60 * 60 * 1000);
+});
+
+test('guest middleware rejects cross-site fetch metadata even when the cookie is valid', () => {
+  const sessions = createAiGuestSession({ secret: SECRET, production: true });
+  const bootstrapRes = makeResponse();
+  sessions.bootstrap(makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https' }), bootstrapRes.response);
+  const cookie = bootstrapRes.headers['set-cookie'].split(';', 1)[0];
+  const crossSite = makeResponse();
+  let nextCalled = false;
+
+  sessions.middleware(
+    makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https', cookie, fetchSite: 'cross-site' }),
+    crossSite.response,
+    (() => { nextCalled = true; }) as NextFunction,
+  );
+
+  assert.equal(nextCalled, false);
+  assert.equal(crossSite.statusCode, 403);
+});
+
 test('guest middleware validates the cookie and exposes only its session identifier server-side', () => {
   const sessions = createAiGuestSession({ secret: SECRET, production: true, now: () => 1_000 });
   const bootstrapReq = makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https' });
