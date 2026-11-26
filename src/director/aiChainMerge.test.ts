@@ -46,3 +46,20 @@ test('Match EQ is not invented when no measured reference plan exists', () => {
   assert.equal(merged.some((module) => module.type === 'dynamic-eq'), true);
   assert.equal(merged.some((module) => module.type === 'match-eq'), false);
 });
+
+test('adding measured EQ never truncates the safety limiter from a full AI chain', () => {
+  const ai = [
+    'parametric-eq', 'compressor', 'saturation', 'stereo-imager',
+    'bass-enhancer', 'transient-shaper', 'restore', 'clipper',
+    'multiband-comp', 'multiband-maximizer', 'saturation', 'limiter',
+  ].map((type) => createProcessorModule(type as Parameters<typeof createProcessorModule>[0]));
+  const merged = mergeAiChainWithMeasuredPlan(
+    ai,
+    [],
+    [createProcessorModule('dynamic-eq'), createProcessorModule('match-eq')],
+  );
+  assert.ok(merged.length <= 12);
+  assert.ok(merged.some((module) => module.type === 'limiter'));
+  assert.ok(merged.some((module) => module.type === 'dynamic-eq'));
+  assert.ok(merged.some((module) => module.type === 'match-eq'));
+});
