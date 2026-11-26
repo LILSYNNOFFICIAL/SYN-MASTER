@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { detectClicks } from './clickDetect';
-import { repairClicksChannel, repairEdgeClicksChannel } from './repair';
+import { repairClicksChannel, repairEdgeClicksChannel, repairEdgeClicksStereo } from './repair';
 
 const SR = 44100;
 
@@ -34,4 +34,17 @@ test('edge click repair uses a smooth fade-in rather than leaving a hard file-bo
   assert.equal(ch[0], 0);
   assert.ok(Math.abs(ch[Math.round(SR * 0.008)]) > 0, 'audio should have faded back in by the end of the microfade');
   assert.ok(Math.abs(ch[Math.round(SR * 0.008)]) < Math.abs(tone()[Math.round(SR * 0.008)]) + 0.02);
+});
+
+test('stereo edge repair applies the same fade envelope to both channels', () => {
+  const left = tone();
+  const right = tone().map((sample) => sample * 0.5);
+  left[0] = 0.7;
+  const repaired = repairEdgeClicksStereo(left, right, SR, 8);
+  assert.equal(repaired, 1);
+  assert.equal(left[0], 0);
+  assert.equal(right[0], 0);
+  const at = Math.round(SR * 0.004);
+  assert.ok(Math.abs(left[at]) > 0 && Math.abs(right[at]) > 0);
+  assert.ok(Math.abs(left[at] / right[at] - 2) < 0.05, 'the fade must preserve the stereo level relationship');
 });
