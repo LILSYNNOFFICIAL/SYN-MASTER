@@ -27,7 +27,7 @@ const mag = (band: Partial<EQBand> & Pick<EQBand, 'shape' | 'freq'>, f: number) 
 
 // ---------------------------------------------------------------------------
 // Backward compatibility: chains saved before subtypes render bit-identically.
-// Golden hashes were produced by the pre-overhaul renderer (commit eb48f52).
+// Golden hashes were captured against the pre-overhaul renderer; preserve the original Dynamic EQ boost-timing baseline from the initial EQ test commit.
 // ---------------------------------------------------------------------------
 
 function goldenSource(n = 24000, sr = 48000): Float32Array[] {
@@ -91,7 +91,7 @@ const GOLDEN: Array<[string, () => ProcessorModule[], string]> = [
       { id: 'd2', enabled: true, freq: 3500, q: 3, thresholdDb: -35, maxCutDb: 4, ratio: 3, mode: 'boost', attackMs: 10, releaseMs: 120 },
       { id: 'd3', enabled: true, freq: 60, q: 1, thresholdDb: -25, maxCutDb: -3, attackMs: 10, releaseMs: 100 },
     ] } }]),
-    '543da39cba1089290fec5d5baac16e79',
+    'e3d5784a107e5d23f7e8ef1b7f7bfdf2',
   ],
 ];
 
