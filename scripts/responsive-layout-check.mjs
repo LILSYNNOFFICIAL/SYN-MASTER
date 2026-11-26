@@ -255,8 +255,10 @@ async function runViewport(browser, width, height, mobile) {
     });
     if (mobile) assert.equal(eqPrecedesFix, true, 'Import & EQ (step 1) must appear above FIX ALL AI (step 2) on mobile');
 
-    // The always-visible TimelinePlayer replaced the old "Timeline & fades" toggle.
-    assert.equal(await page.locator('.syn-player .syn2-wave').count(), 1, 'Timeline and fade editing must stay available in the TimelinePlayer');
+    assert.equal(await page.getByLabel('Mastering Mode').inputValue(), 'ai-auto', 'A fresh session must default the dropdown to AI Automatic, not Hybrid');
+    // One existing EQ waveform owns seeking and fade editing. Do not render a duplicate timeline waveform.
+    assert.equal(await page.locator('.syn-player .syn2-wave').count(), 0, 'Fade editing must not create a second waveform');
+    assert.equal(await page.locator('.syn-eqx-svg [data-fade-overlay]').count(), 1, 'Fade curves must be layered over the existing EQ waveform');
     await inspectLayout(page, width, 'studio-timeline');
 
     await page.locator('.syn-library-toggle').click();
@@ -407,20 +409,21 @@ async function runWavExportE2E(browser) {
       buffer: makeToneWav(),
     });
     step('imported');
-    await page.locator('.syn2-wave').waitFor({ state: 'visible', timeout: 30000 });
+    await page.locator('.syn-eqx-svg').waitFor({ state: 'visible', timeout: 30000 });
 
-    const waveform = page.locator('.syn2-wave');
+    const waveform = page.locator('.syn-eqx-svg');
     const box = await waveform.boundingBox();
     assert.ok(box && box.width > 100, 'Imported track must expose an interactive timeline');
+    const fadeY = box.y + box.height * 0.05;
     const dragHandle = async (fromX, toX) => {
-      await page.mouse.move(fromX, box.y + 28);
+      await page.mouse.move(fromX, fadeY);
       await page.mouse.down();
-      await page.mouse.move(toX, box.y + 28, { steps: 4 });
+      await page.mouse.move(toX, fadeY, { steps: 4 });
       await page.mouse.up();
     };
     step('fades');
-    await dragHandle(box.x + 7, box.x + box.width * 0.1);
-    await dragHandle(box.x + box.width - 7, box.x + box.width * 0.9);
+    await dragHandle(box.x + 10, box.x + box.width * 0.1);
+    await dragHandle(box.x + box.width - 10, box.x + box.width * 0.9);
     const fadeControls = await page.locator('.syn-player-fades').innerText();
     assert.match(fadeControls, /Fade in\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-in');
     assert.match(fadeControls, /Fade out\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-out');
@@ -438,7 +441,7 @@ async function runWavExportE2E(browser) {
     await page.locator('.syn-workspace-menu-item').filter({ hasText: 'AI Director' }).click();
     await page.locator('.syn-ai-hero').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('.syn-primary-nav-item').filter({ hasText: 'Dashboard' }).click();
-    await page.locator('.syn-player .syn2-wave').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('.syn-eqx-svg').waitFor({ state: 'visible', timeout: 10000 });
     assert.equal(await page.getByLabel('Fade-in curve').inputValue(), 'exp', 'fade-in curve must survive a workspace switch');
     assert.equal(await page.getByLabel('Fade-out curve').inputValue(), 'scurve', 'fade-out curve must survive a workspace switch');
     assert.match(await page.locator('.syn-player-fades').innerText(), /Fade in\s+0\.10s/i);
