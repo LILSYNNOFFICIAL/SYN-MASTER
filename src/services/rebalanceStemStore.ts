@@ -135,7 +135,35 @@ export function setActiveRebalanceSource(channels: Float32Array[] | null, sample
 export async function separateActiveRebalanceStems(options: { highQuality?: boolean } = {}): Promise<void> {
   const source = activeSource;
   const fingerprint = state.fingerprint;
-  if (!source || !fingerprint || state.status === 'separating') return;
+  if (!source || !fingerprint) return;
+  if (state.status === 'separating') {
+    // A user may already have started separation in the Vocal panel. Wait for that
+    // same-track job rather than reporting "no stems" while it is still running.
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        let unsubscribe: () => void = () => {};
+        const finish = (error?: Error) => {
+          if (timer !== null) clearTimeout(timer);
+          unsubscribe();
+          if (error) reject(error);
+          else resolve();
+        };
+        const check = () => {
+          if (state.fingerprint !== fingerprint) finish(new Error('The active track changed during stem separation.'));
+          else if (state.status !== 'separating') finish();
+        };
+        unsubscribe = subscribeRebalanceStems(check);
+        timer = setTimeout(() => finish(new Error('The active stem-separation job timed out.')), 180000);
+        check();
+      });
+    } catch (cause) {
+      if (state.fingerprint === fingerprint) {
+        setState({ status: 'error', error: cause instanceof Error ? cause.message : 'The active stem-separation job did not finish.' });
+      }
+    }
+    return;
+  }
 
   // FIX ALL may request separation immediately after import, while the asynchronous
   // device/memory assessment is still running. Never start the model before that gate.
