@@ -18,7 +18,7 @@ import {
 import { isValidAnalysisPayload, sanitizeAvailablePlugins, sanitizeVocalBalance } from './src/server/aiPayloadValidation.ts';
 import { createRateLimiter } from './src/server/requestLimiter.mjs';
 import { createAiSpendLimiter, createAiSpendMiddleware, readAiSpendLimitsFromEnv } from './src/server/aiSpendLimiter.mjs';
-import { createAiAccessGuard } from './src/server/aiAccess.ts';
+import { createAiGuestSession } from './src/server/aiAccess.ts';
 import { validateChainAgainstInventory } from './src/director/processorInventory.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,19 +51,25 @@ function aiRateLimiter(
   next();
 }
 // Apply the AI limiter before JSON parsing so malformed or oversized requests are rate-limited too.
-const aiAccessGuard = createAiAccessGuard({
-  accessToken: process.env.SYN_MASTER_AI_ACCESS_TOKEN,
+const aiGuestSession = createAiGuestSession({
+  secret: process.env.SYN_MASTER_SESSION_SECRET,
   production: process.env.NODE_ENV === 'production',
 });
-// Keep the existing IP budget in front of the access check, then reject unauthenticated
-// production calls before JSON parsing or any billable Gemini work.
-// Spend caps for the routes that bill GEMINI_API_KEY (cloud AI is on by default for FIX ALL):
-// per-client strategy/refine calls per minute, per-client daily caps and one global daily cap.
-// It runs after the access guard so unauthenticated traffic can never drain the shared budget.
-// Override with SYN_AI_STRATEGY_PER_MINUTE, SYN_AI_REFINE_PER_MINUTE, SYN_AI_STRATEGY_PER_DAY,
-// SYN_AI_CLIENT_PER_DAY and SYN_AI_GLOBAL_PER_DAY.
+const guestBootstrapLimiter = createRateLimiter({ limit: 20, windowMs: 60_000, maxKeys: 10_000 });
+app.post('/api/ai/session', (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const result = guestBootstrapLimiter(ip);
+  if (!result.allowed) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))));
+    res.status(429).json({ error: 'Cloud AI session setup is temporarily rate-limited. Try again shortly.' });
+    return;
+  }
+  aiGuestSession.bootstrap(req, res);
+});
+// IP request limits run before signed guest-session validation. Session-based spend caps
+// run only after a valid HttpOnly cookie has established an anonymous client identity.
 const aiSpendGuard = createAiSpendMiddleware(createAiSpendLimiter({ limits: readAiSpendLimitsFromEnv(process.env) }));
-app.use('/api/ai', aiRateLimiter, aiAccessGuard, aiSpendGuard);
+app.use('/api/ai', aiRateLimiter, aiGuestSession.middleware, aiSpendGuard);
 // Offline codec jobs are CPU-intensive but must not compete with AI requests for the
 // same budget, so export has its own per-client limiter.
 const allowExportRequest = createRateLimiter({ limit: 30, windowMs: 60_000, maxKeys: 10_000 });
