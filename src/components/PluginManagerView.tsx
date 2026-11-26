@@ -247,7 +247,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
   return (
     <div data-syn-skin="instrument" data-workspace="plugins" className="syn-plugin-workspace flex flex-col gap-4 pb-6">
       {/* Header & Milestone 1 Scope Banner */}
-      <section className="p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
+      <section className="syn-plug-card p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -255,7 +255,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
               <h1 className="font-display text-base font-bold text-[#F7F8FA]">
                 SYN-PLUGIN HOST — Native Plugin Manager
               </h1>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#D4AF37]/15 text-[#F2CA52] border border-[#D4AF37]/40">
+              <span className="syn-plug-milestone px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#D4AF37]/15 text-[#F2CA52] border border-[#D4AF37]/40">
                 Milestone 2: VST3 Hosting &amp; Audio
               </span>
             </div>
@@ -266,7 +266,8 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
 
           <div className="flex items-center gap-2">
             <span
-              className={`px-2.5 py-1 rounded text-[11px] font-semibold border flex items-center gap-1.5 ${
+              data-status={isConnected ? 'connected' : snapshot.status}
+              className={`syn-plug-status px-2.5 py-1 rounded text-[11px] font-semibold border flex items-center gap-1.5 ${
                 isConnected
                   ? 'bg-[#10B981]/15 text-[#34D399] border-[#10B981]/40'
                   : snapshot.status === 'pairing-required'
@@ -308,7 +309,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
         {!isConnected && (
           <form
             onSubmit={handleConnectSubmit}
-            className="p-3 rounded bg-[#090A0E] border border-[#242732] flex flex-wrap items-end gap-3"
+            className="syn-plug-connect p-3 rounded bg-[#090A0E] border border-[#242732] flex flex-wrap items-end gap-3"
           >
             <label className="flex flex-col gap-1 text-[11px] text-[#9CA3AF]">
               Host Port (127.0.0.1)
@@ -334,7 +335,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
             <button
               type="submit"
               disabled={connecting}
-              className="px-4 py-1.5 rounded bg-[#D4AF37] text-[#070709] text-xs font-bold hover:bg-[#F2CA52] disabled:opacity-50"
+              className="px-4 py-1.5 rounded syn-plug-primary bg-[#D4AF37] text-[#070709] text-xs font-bold hover:bg-[#F2CA52] disabled:opacity-50"
             >
               {connecting ? 'Connecting...' : 'Pair & Connect Host'}
             </button>
@@ -357,7 +358,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
 
       {/* Browser-Only Honest Empty State */}
       {!isConnected && snapshot.plugins.length === 0 ? (
-        <section data-testid="workspace-empty-state" data-workspace="plugins" className="syn-workspace-empty syn-workspace-empty-plugins p-6 rounded bg-[#111217] border border-[#242732] grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section data-testid="workspace-empty-state" data-workspace="plugins" className="syn-plug-card syn-workspace-empty syn-workspace-empty-plugins p-6 rounded bg-[#111217] border border-[#242732] grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="flex flex-col gap-3">
             <h2 className="font-display text-sm font-bold text-[#F2CA52] uppercase tracking-wider">
               Windows 11 Companion Host Required for Native Plugins
@@ -396,14 +397,14 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
       ) : (
         <>
           {/* Scan Controls & Directories Panel */}
-          <section className="p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
+          <section className="syn-plug-card p-4 rounded bg-[#111217] border border-[#242732] flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   disabled={!isConnected || snapshot.isScanning}
                   onClick={() => void onScan('incremental')}
-                  className="px-3.5 py-1.5 rounded bg-[#D4AF37] text-[#070709] text-xs font-bold hover:bg-[#F2CA52] disabled:opacity-50 flex items-center gap-1.5"
+                  className="px-3.5 py-1.5 rounded syn-plug-primary bg-[#D4AF37] text-[#070709] text-xs font-bold hover:bg-[#F2CA52] disabled:opacity-50 flex items-center gap-1.5"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${snapshot.isScanning ? 'animate-spin' : ''}`} />
                   Scan New / Changed
@@ -635,7 +636,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
           </section>
 
           {/* Search & Filter Toolbar */}
-          <section className="p-3 rounded bg-[#111217] border border-[#242732] flex flex-wrap items-center gap-2.5">
+          <section className="syn-plug-card syn-plug-filters p-3 rounded bg-[#111217] border border-[#242732] flex flex-wrap items-center gap-2.5">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="w-3.5 h-3.5 text-[#6B7280] absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
@@ -716,8 +717,8 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
           {/* Two-Column Catalog List + Inspector */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
             {/* Plugin List */}
-            <section className="xl:col-span-7 rounded bg-[#111217] border border-[#242732] overflow-hidden flex flex-col">
-              <div className="px-3.5 py-2 border-b border-[#242732] bg-[#0B0C10] flex items-center justify-between text-xs font-bold text-[#D4AF37]">
+            <section className="syn-plug-card syn-plug-list xl:col-span-7 rounded bg-[#111217] border border-[#242732] overflow-hidden flex flex-col">
+              <div className="syn-plug-list-head px-3.5 py-2 border-b border-[#242732] bg-[#0B0C10] flex items-center justify-between text-xs font-bold text-[#D4AF37]">
                 <span>DISCOVERED PLUGINS ({filteredPlugins.length})</span>
                 <span className="text-[11px] font-normal text-[#9CA3AF]">
                   Select a plugin to inspect metadata &amp; parameters
@@ -749,7 +750,8 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
                             setSelectedKey(key);
                           }
                         }}
-                        className={`px-3.5 py-2.5 flex items-center justify-between gap-3 cursor-pointer transition-colors ${
+                        data-selected={isSelected ? 'true' : 'false'}
+                        className={`syn-plug-row px-3.5 py-2.5 flex items-center justify-between gap-3 cursor-pointer transition-colors ${
                           isSelected
                             ? 'bg-[#D4AF37]/10 border-l-2 border-l-[#F2CA52]'
                             : 'hover:bg-[#161821]'
@@ -760,7 +762,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
                             <span className="text-xs font-bold text-[#F7F8FA] truncate">
                               {p.name}
                             </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono-tabular uppercase bg-[#181A22] text-[#D4AF37] border border-[#2B2E3A]">
+                            <span className="syn-plug-format px-1.5 py-0.5 rounded text-[10px] font-mono-tabular uppercase bg-[#181A22] text-[#D4AF37] border border-[#2B2E3A]">
                               {p.format}
                             </span>
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-mono-tabular bg-[#181A22] text-[#9CA3AF]">
@@ -781,13 +783,13 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
                                 e.stopPropagation();
                                 void onInsertInChain(p);
                               }}
-                              className="px-2 py-0.5 rounded bg-[#D4AF37] text-[#070709] text-[10px] font-bold hover:bg-[#F2CA52] flex items-center gap-1"
+                              className="px-2 py-0.5 rounded syn-plug-primary bg-[#D4AF37] text-[#070709] text-[10px] font-bold hover:bg-[#F2CA52] flex items-center gap-1"
                             >
                               <Plus className="w-3 h-3" />
                               Insert
                             </button>
                           )}
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${badge.classes}`}>
+                          <span data-plugin-status={p.disabledByUser ? 'disabled' : p.status} className={`syn-plug-badge px-2 py-0.5 rounded text-[10px] font-semibold border ${badge.classes}`}>
                             {badge.label}
                           </span>
                           <button
@@ -812,7 +814,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
             </section>
 
             {/* Detailed Inspector Panel */}
-            <section className="xl:col-span-5 rounded bg-[#111217] border border-[#242732] p-4 flex flex-col gap-3">
+            <section className="syn-plug-card syn-plug-inspector xl:col-span-5 rounded bg-[#111217] border border-[#242732] p-4 flex flex-col gap-3">
               {!selectedPlugin ? (
                 <div className="py-12 text-center text-xs text-[#6B7280]">
                   Select a discovered plugin to inspect binary architecture, I/O bus layouts, parameters, and compatibility diagnostics.
@@ -833,7 +835,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
                         <button
                           type="button"
                           onClick={() => void onInsertInChain(selectedPlugin)}
-                          className="px-2.5 py-1 rounded bg-[#D4AF37] text-[#070709] text-[11px] font-bold hover:bg-[#F2CA52] flex items-center gap-1"
+                          className="px-2.5 py-1 rounded syn-plug-primary bg-[#D4AF37] text-[#070709] text-[11px] font-bold hover:bg-[#F2CA52] flex items-center gap-1"
                         >
                           <Plus className="w-3 h-3" />
                           Insert in Rack
@@ -857,7 +859,7 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
                         <button
                           type="button"
                           onClick={() => void onRetryPlugin(selectedPlugin.uid, selectedPlugin.bundlePath)}
-                          className="px-2.5 py-1 rounded bg-[#D4AF37] text-[#070709] text-[11px] font-bold hover:bg-[#F2CA52] flex items-center gap-1"
+                          className="px-2.5 py-1 rounded syn-plug-primary bg-[#D4AF37] text-[#070709] text-[11px] font-bold hover:bg-[#F2CA52] flex items-center gap-1"
                         >
                           <RotateCcw className="w-3 h-3" />
                           Retry Scan
@@ -958,11 +960,12 @@ export const PluginManagerView: React.FC<PluginManagerViewProps> = ({
                         No parameters enumerated.
                       </div>
                     ) : (
-                      <div className="max-h-52 overflow-y-auto rounded bg-[#090A0E] border border-[#242732] divide-y divide-[#181A22]">
+                      <div className="syn-plug-params max-h-52 overflow-y-auto rounded bg-[#090A0E] border border-[#242732] divide-y divide-[#181A22]">
                         {selectedPlugin.parameters.map((param) => (
                           <div
                             key={param.id}
-                            className="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px]"
+                            className="syn-plug-param px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px]"
+                            style={{ '--param-default': `${Math.round(Math.max(0, Math.min(1, param.defaultValueNormalized)) * 100)}%` } as React.CSSProperties}
                           >
                             <div className="min-w-0">
                               <span className="font-mono-tabular text-[#6B7280] mr-1.5">

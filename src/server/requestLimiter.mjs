@@ -10,7 +10,7 @@ export function createRateLimiter({ limit = 20, windowMs = 60_000, now = Date.no
 
   const buckets = new Map();
 
-  return function allow(key) {
+  function allow(key) {
     const currentTime = now();
     const normalizedKey = String(key || 'unknown');
     let bucket = buckets.get(normalizedKey);
@@ -51,5 +51,26 @@ export function createRateLimiter({ limit = 20, windowMs = 60_000, now = Date.no
       remaining: limit - bucket.count,
       retryAfterMs: 0,
     };
+  }
+
+  /**
+   * Non-consuming check: reports whether the next allow(key) would pass, without
+   * creating a bucket or spending budget. Used to check several limits before
+   * committing any of them.
+   */
+  allow.peek = function peek(key) {
+    const currentTime = now();
+    const bucket = buckets.get(String(key || 'unknown'));
+    if (!bucket || currentTime - bucket.startedAt >= windowMs || currentTime < bucket.startedAt) {
+      return { allowed: true, remaining: limit, retryAfterMs: 0 };
+    }
+    if (bucket.count >= limit) {
+      return { allowed: false, remaining: 0, retryAfterMs: Math.max(0, windowMs - (currentTime - bucket.startedAt)) };
+    }
+    return { allowed: true, remaining: limit - bucket.count, retryAfterMs: 0 };
   };
+  allow.limit = limit;
+  allow.windowMs = windowMs;
+
+  return allow;
 }

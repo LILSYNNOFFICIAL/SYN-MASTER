@@ -19,7 +19,9 @@ export function fadeGain(t01: number, curve: FadeCurve): number {
   const t = Math.max(0, Math.min(1, t01));
   if (curve === 'linear') return t;
   if (curve === 'exp') return t * t * t;
-  return 0.5 - 0.5 * Math.cos(Math.PI * t);
+  // Quintic smootherstep: zero slope and curvature at both ends prevents a
+  // discontinuity-like onset/termination on rendered AI audio.
+  return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
 export function hasFades(f: FadeSettings | null | undefined): boolean {

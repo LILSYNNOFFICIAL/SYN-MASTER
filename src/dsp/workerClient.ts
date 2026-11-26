@@ -6,12 +6,32 @@ import {
   renderMixedChain,
   type ExternalPluginProcessCallback,
 } from './mixedChainRenderer.ts';
-import { processChainOffline, type ProcessorMeterTelemetry } from './offlineDsp.ts';
+import { processChainOffline, type DynamicEqTrace, type ProcessorMeterTelemetry } from './offlineDsp.ts';
 import type {
   DspWorkerErrorResponse,
+  DspWorkerMessage,
   DspWorkerRequest,
   DspWorkerSuccessResponse,
 } from './dspWorker.ts';
+import type { VocalRebalanceParams } from '../types/mastering.ts';
+import { fingerprintStereo, getRebalanceStems, rebalanceIsActive, type RebalanceStemSet } from './vocalRebalance.ts';
+
+/**
+ * The cached Vocal Rebalance stems a render needs, or null: an enabled rebalance with a stem
+ * away from 0 dB and a stem set registered for exactly this source audio.
+ */
+export function rebalanceStemsForRender(
+  chain: ProcessorModule[],
+  sourceChannels: Float32Array[],
+  sampleRate: number,
+): RebalanceStemSet | null {
+  const mod = chain.find((m) => m.type === 'vocal-rebalance' && m.enabled && !m.bypassed);
+  if (!mod || !sourceChannels[0]) return null;
+  if (!rebalanceIsActive(mod.params as VocalRebalanceParams, mod.intensity / 100)) return null;
+  const left = sourceChannels[0];
+  const right = sourceChannels[1] ?? sourceChannels[0];
+  return getRebalanceStems(fingerprintStereo(left, right, sampleRate));
+}
 
 export interface OffThreadRenderResult {
   channels: Float32Array[];
@@ -20,6 +40,16 @@ export interface OffThreadRenderResult {
   peaks?: number[];
   usedWorker: boolean;
   usedExternalHost: boolean;
+  /** Dynamic EQ detector / gain history (preview renders that asked for it). */
+  dynamicEqTraces?: DynamicEqTrace[];
+}
+
+/** Preview-only render options; export, Fix All and verification leave both off. */
+export interface PreviewRenderOptions {
+  /** Honour EQ / Dynamic EQ band solo (listen). */
+  audition?: boolean;
+  /** Record Dynamic EQ detector / gain traces for the meters and live curve. */
+  collectDynamicEqTraces?: boolean;
 }
 
 type DspWorkerResponse = DspWorkerSuccessResponse | DspWorkerErrorResponse;
@@ -28,7 +58,7 @@ interface DspWorkerLike {
   onmessage: ((event: MessageEvent<DspWorkerResponse>) => void) | null;
   onerror: ((event: ErrorEvent) => void) | null;
   onmessageerror: ((event: MessageEvent) => void) | null;
-  postMessage(message: DspWorkerRequest, transfer?: Transferable[]): void;
+  postMessage(message: DspWorkerMessage, transfer?: Transferable[]): void;
   terminate(): void;
 }
 
@@ -72,6 +102,8 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
   let worker: DspWorkerLike | null = null;
   let nextJobId = 1;
   const pendingJobs = new Map<number, PendingJob>();
+  /** Rebalance stem sets already resident in the current worker (reset with the worker). */
+  let workerStemFingerprints = new Set<string>();
 
   const clearPending = (id: number, error?: Error, response?: DspWorkerSuccessResponse) => {
     const pending = pendingJobs.get(id);
@@ -85,6 +117,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
   const failWorker = (reason: unknown) => {
     const failedWorker = worker;
     worker = null;
+    workerStemFingerprints = new Set<string>();
     try {
       failedWorker?.terminate();
     } catch {
@@ -100,6 +133,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       const created = workerFactory();
       if (!created) return null;
       worker = created;
+      workerStemFingerprints = new Set<string>();
       created.onmessage = (event) => {
         const message = event.data;
         if (!message || !Number.isInteger(message.id)) return;
@@ -127,9 +161,10 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
     includePeaks: boolean,
     peakBins: number,
     postFades: FadeSettings | null = null,
+    preview: PreviewRenderOptions = {},
   ): Promise<OffThreadRenderResult> => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const processed = processChainOffline(sourceChannels, sampleRate, chain, postFades);
+    const processed = processChainOffline(sourceChannels, sampleRate, chain, postFades, preview);
     const analysis = analyzeAudioBuffer(processed.channels, sampleRate);
     const peaks = includePeaks ? extractWaveformPeaks(processed.channels, peakBins) : undefined;
     return {
@@ -139,6 +174,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       peaks,
       usedWorker: false,
       usedExternalHost: false,
+      dynamicEqTraces: processed.dynamicEqTraces,
     };
   };
 
@@ -151,7 +187,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
     externalProcessor?: ExternalPluginProcessCallback;
     /** Timeline fades applied after the chain (post-limiter). */
     postFades?: FadeSettings | null;
-  }): Promise<OffThreadRenderResult> => {
+  } & PreviewRenderOptions): Promise<OffThreadRenderResult> => {
     const {
       sourceChannels,
       sampleRate,
@@ -161,6 +197,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       externalProcessor,
       postFades = null,
     } = opts;
+    const preview: PreviewRenderOptions = { audition: opts.audition === true, collectDynamicEqTraces: opts.collectDynamicEqTraces === true };
     const safePeakBins = Math.max(1, Math.min(8192, Math.floor(peakBins)));
     const durationSec = (sourceChannels[0]?.length ?? 0) / sampleRate;
     // Headless runs (scripts/headless-master.ts sets globalThis.__SYN_HEADLESS__) have no
@@ -178,7 +215,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
           `Off-thread DSP rendering failed for ${durationSec.toFixed(1)}s audio. Main-thread fallback was skipped to prevent the interface from freezing. ${detail}`,
         );
       }
-      return renderFallback(sourceChannels, sampleRate, chain, includePeaks, safePeakBins, postFades);
+      return renderFallback(sourceChannels, sampleRate, chain, includePeaks, safePeakBins, postFades, preview);
     };
 
     if (chainHasActiveExternalPlugins(chain)) {
@@ -215,7 +252,21 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
       chain,
       peakBins: safePeakBins,
       postFades,
+      ...preview,
     };
+
+    // Vocal Rebalance: copy the cached stems into the worker once (structured clone; the main
+    // thread keeps its copy for export / fallback renders).
+    const stems = rebalanceStemsForRender(chain, sourceChannels, sampleRate);
+    if (stems && !workerStemFingerprints.has(stems.fingerprint)) {
+      try {
+        currentWorker.postMessage({ kind: 'put-rebalance-stems', set: stems });
+        workerStemFingerprints.add(stems.fingerprint);
+      } catch (error) {
+        failWorker(error);
+        return fallbackOrThrow(error);
+      }
+    }
 
     try {
       const response = await new Promise<DspWorkerSuccessResponse>((resolve, reject) => {
@@ -238,6 +289,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
         peaks: response.peaks,
         usedWorker: true,
         usedExternalHost: false,
+        dynamicEqTraces: response.dynamicEqTraces,
       };
     } catch (error) {
       return fallbackOrThrow(error);
@@ -261,7 +313,7 @@ export function renderAndAnalyzeOffThread(opts: {
   peakBins?: number;
   externalProcessor?: ExternalPluginProcessCallback;
   postFades?: FadeSettings | null;
-}): Promise<OffThreadRenderResult> {
+} & PreviewRenderOptions): Promise<OffThreadRenderResult> {
   return defaultClient.renderAndAnalyzeOffThread(opts);
 }
 

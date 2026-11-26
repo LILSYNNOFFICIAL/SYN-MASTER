@@ -1,0 +1,15 @@
+SYN-MASTER
+Copyright (C) 2026 LIL SYNN / SYN-MASTER (contact@lilsynn.com)
+
+The whole repository (the SYN-MASTER web app, server, desktop shell and the
+native VST companion under native/) is licensed under the GNU Affero General
+Public License, version 3 only (SPDX: AGPL-3.0-only). The full text is in
+LICENSE.
+
+If you run a modified version of this software as a network service, the
+AGPL requires you to offer its complete source to its users.
+
+Third-party code keeps its own licence: see docs/THIRD_PARTY_NOTICES.md (web
+app) and native/companion-release/THIRD_PARTY_NOTICES.txt (companion). The
+companion uses JUCE under JUCE's AGPLv3 option. Assets such as the SYN-MASTER
+and LIL SYNN names and logos are not licensed for reuse as trademarks.

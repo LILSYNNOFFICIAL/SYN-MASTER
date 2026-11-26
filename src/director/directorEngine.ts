@@ -41,6 +41,7 @@ import type {
   MultiObjectiveDimension,
   MultiObjectiveEvaluation,
   PluginIntelligenceSummary,
+  PostFixVerificationReport,
   ProcessorModule,
   QCReport,
   QCTargetProfile,
@@ -50,6 +51,8 @@ import type {
   VocalBalanceVerification,
 } from '../types/mastering';
 import { validateChain } from '../dsp/chainValidation';
+import { directorMatchEqCommand, directorMatchEqPeakDb, hydrateMatchEqChain, type MatchEqProfile } from './matchEqDirector';
+import { learnMatchEqSpectrum } from '../dsp/matchEq';
 import type { StemInput, StemSetAnalysis } from '../dsp/stemAnalysis';
 import { renderStemBusMix } from '../dsp/stemBusRenderer';
 import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
@@ -62,6 +65,14 @@ import {
   isAnalysisMeasurementReliable,
 } from './analyzeIntelligence';
 import { MUD_CORRECTION_HZ, MUD_REGION_HZ } from '../dsp/bandMap';
+import {
+  REFINE_MUD_PROPORTIONAL_Q,
+  measureRumble,
+  mudBell,
+  planDynamicHighBand,
+  planRumbleHighPass,
+  planSideLowCut,
+} from './eqStrategy';
 import { applyStructuredChainCommands } from './chainCommands';
 import { inspectPluginInventory } from './pluginIntelligence';
 import { validateChainAgainstInventory } from './processorInventory';
@@ -297,6 +308,8 @@ export function buildExplainableMasterPlan(input: {
   externalPlugins?: ExternalPluginRecord[];
   hostConnected?: boolean;
   stemAnalysis?: StemSetAnalysis | null;
+  /** Learned source/reference spectra; enables one conservative Match EQ (reference only). */
+  matchEqProfile?: MatchEqProfile | null;
 }): ExplainableMasterPlan {
   const { analysis, objectiveId, customSpec, referenceAnalysis } = input;
   const objective = resolveObjectiveTarget(objectiveId, customSpec, referenceAnalysis);
@@ -395,9 +408,17 @@ export function buildExplainableMasterPlan(input: {
     hasGenuineNoiseFloor ||
     (analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 && analysis.resonances.some((r) => r.freqHz > 4500));
 
+  // Measured isolated upper resonance (Stage 3 below). When it is sibilance, a keyed dynamic
+  // high shelf de-esses it, so SYN-Restore's static de-esser drops to its light baseline
+  // instead of stacking a second de-esser on the same region.
+  const topRes = analysis.resonances.find((resonance) =>
+    resonance.freqHz >= 2000 && resonance.freqHz <= 12000 && resonance.excessDb >= 6.0,
+  );
+  const dynamicHighPlan = topRes ? planDynamicHighBand(analysis, topRes) : null;
+
   if (needsRestore) {
     const hiss = hasGenuineNoiseFloor ? Math.min(42, Math.round((nf + 55) * 2.2)) : 4;
-    const deEss = analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 ? 24 : 8;
+    const deEss = analysis.zoneEnergyDb.presence - analysis.zoneEnergyDb.mid > -2.5 && dynamicHighPlan?.kind !== 'sibilance' ? 24 : 8;
     const restoreParams = {
       dcOffset: analysis.dcOffset >= 0.004,
       humRemovalHz: 0 as const,
@@ -443,25 +464,36 @@ export function buildExplainableMasterPlan(input: {
     });
   }
 
+  // Stage 1b: Match EQ toward the reference (only with a learned reference; conservative).
+  const matchEqCommand = referenceAnalysis ? directorMatchEqCommand(input.matchEqProfile) : null;
+  if (matchEqCommand) {
+    recommendations.push({
+      id: 'rec-match-eq',
+      characteristic: 'Long-term tonal balance differs from the loaded reference',
+      supportingMeasurements: [
+        `Learned spectra: source vs ${input.matchEqProfile?.referenceName ?? 'reference'} (1/24-octave LTAS)`,
+        `Peak correction at 40 % / ±2.5 dB: ${directorMatchEqPeakDb(input.matchEqProfile).toFixed(1)} dB`,
+      ],
+      proposedCorrection: 'Apply 40 % of the 1/3-octave-smoothed reference match curve, limited to ±2.5 dB between 40 Hz and 16 kHz.',
+      selectedProcessor: 'match-eq',
+      proposedParamsSummary: 'Amount 40 % · Smoothing 1/3 oct · Max ±2.5 dB · 40 Hz-16 kHz · Stereo · Linear phase',
+      commands: [matchEqCommand],
+      expectedResult: 'Tonal shape moves part of the way toward the reference without copying its loudness or mix decisions.',
+      potentialTradeoffs: 'A reference with a different arrangement can pull the wrong way; kept at 40 % with tight limits and re-measured every pass.',
+      priority: 'optional',
+      statementType: 'hypothesis',
+    });
+  }
+
   // Stage 2: Surgical Parametric EQ (weighted by Objective + Reference; skipped on already balanced transparent/dynamic tracks)
-  const bands: Array<{
-    id: string;
-    enabled: boolean;
-    shape: 'highpass' | 'lowshelf' | 'bell' | 'highshelf' | 'lowpass' | 'notch';
-    freq: number;
-    gain: number;
-    q: number;
-  }> = [];
-  const eqReasons: string[] = [];
+  const bands: EQBand[] = [];
+  const eqTypeNotes: string[] = [];
   const hasValidReference = isAnalysisMeasurementReliable(referenceAnalysis);
   const referenceMatchBands = hasValidReference
     ? deriveReferenceMatchBands(analysis, referenceAnalysis)
     : [];
   if (referenceMatchBands.length > 0) {
     bands.push(...referenceMatchBands);
-    eqReasons.push(
-      `Reference spectral contour: ${referenceMatchBands.length} measured band(s), level-neutral and capped at ±2.5 dB`,
-    );
   }
 
   const needsSubHpf =
@@ -469,19 +501,25 @@ export function buildExplainableMasterPlan(input: {
     analysis.zoneEnergyDb.sub - analysis.zoneEnergyDb.bass > 2.5 ||
     objective.id === 'hip-hop' ||
     objective.id === 'electronic' ||
-    objective.id === 'commercial-loudness';
+    objective.id === 'commercial-loudness' ||
+    measureRumble(analysis).measured;
   if (needsSubHpf) {
-    bands.push({
-      id: 'b1',
-      enabled: true,
-      shape: 'highpass',
-      freq: objective.id === 'transparent' || objective.id === 'dynamic' || objective.id === 'acoustic' ? 24 : 28,
-      gain: 0,
-      q: 0.71,
-    });
+    // Flat 12 dB/oct (legacy) for headroom safety; Flat 18/24 dB/oct only for measured rumble.
+    const rumble = planRumbleHighPass(analysis, objective, 'b1');
+    bands.push(rumble.band);
+    eqTypeNotes.push(rumble.summary);
   }
 
+  // Mono bass: Side-channel low cut when the low end is measurably decorrelated.
+  const sideLowCut = planSideLowCut(analysis);
+  if (sideLowCut) {
+    bands.push(sideLowCut.band);
+    eqTypeNotes.push(sideLowCut.summary);
+  }
+
+  const eqReasons: string[] = [];
   let eqBassGain = 0;
+  let eqBassIsTilt = false;
   const eqBassLimit =
     objective.id === 'hip-hop' ||
     objective.id === 'electronic' ||
@@ -502,9 +540,18 @@ export function buildExplainableMasterPlan(input: {
   } else if (bassMidDiff < 2.0 && objective.id !== 'transparent' && objective.id !== 'dynamic' && objective.id !== 'acoustic') {
     eqBassGain = objective.id === 'hip-hop' || objective.id === 'electronic' ? 1.5 : 1.1;
     eqReasons.push(`Lean low-end (Bass-Mid ${bassMidDiff.toFixed(1)} dB)`);
+    eqBassIsTilt = true;
   }
   if (Math.abs(eqBassGain) >= 0.3 && referenceMatchBands.length === 0) {
-    bands.push({ id: 'b2', enabled: true, shape: 'lowshelf', freq: 88, gain: eqBassGain, q: 0.71 });
+    if (eqBassIsTilt) {
+      // A broad lift for a lean low end is a tilt move: Baxandall bass (two half-gain
+      // first-order shelves at 88 Hz and 22 Hz) rises gently instead of adding a shelf bump.
+      bands.push({ id: 'b2', enabled: true, shape: 'lowshelf', subtype: 'baxandall', freq: 88, gain: eqBassGain, q: 0.71 });
+      eqTypeNotes.push(`Baxandall low shelf +${eqBassGain} dB @ 88 Hz (broad tilt for a lean low end)`);
+    } else {
+      // Corrective / reference-matched shelf: Analog (the legacy RBJ shelf, unchanged).
+      bands.push({ id: 'b2', enabled: true, shape: 'lowshelf', freq: 88, gain: eqBassGain, q: 0.71 });
+    }
   }
 
   const mudThresholds = getDiagnosisThresholds(objective, referenceAnalysis);
@@ -521,11 +568,14 @@ export function buildExplainableMasterPlan(input: {
   let mudCut = lowMidBuildup > 3.8 ? Number(Math.max(-3.2, -(lowMidBuildup - 2.6) * 0.6).toFixed(1)) : 0;
   if (useDynamicMudControl) mudCut = Number(Math.max(-1.5, Math.min(mudCut, -0.5)).toFixed(1));
   if (mudCut <= -0.4) {
-    bands.push({ id: 'b3', enabled: true, shape: 'bell', freq: 300, gain: mudCut, q: 1.4 });
+    // Proportional Q: wide and gentle at a small cut, tighter if refinement deepens it.
+    bands.push(mudBell('b3', 300, mudCut));
     eqReasons.push(`Low-mid buildup (+${lowMidBuildup.toFixed(1)} dB) -> ${mudCut} dB @ 300 Hz`);
+    eqTypeNotes.push(`Proportional Q bell ${mudCut} dB @ 300 Hz (mud)`);
   }
 
   let highAirGain = 0;
+  let highAirIsTilt = false;
   if (hasValidReference && referenceMatchBands.length === 0) {
     // Match air relative to the midrange, not absolute dBFS. This preserves real
     // brightness differences while cancelling a uniform reference level offset.
@@ -535,13 +585,22 @@ export function buildExplainableMasterPlan(input: {
     highAirGain = Number(Math.max(-2.5, Math.min(3.0, levelMatchedAirDelta * 0.4)).toFixed(1));
   } else if (objective.tonalBias === 'bright' && analysis.spectralSlopeDbPerOct < -1.1) {
     highAirGain = analysis.spectralSlopeDbPerOct < -2.2 ? 1.8 : 0.9;
+    highAirIsTilt = true;
   } else if (objective.tonalBias === 'warm') {
     highAirGain = harshExcess > 1.5 ? -0.8 : 0;
   } else if (analysis.spectralSlopeDbPerOct < -3.8) {
     highAirGain = 1.1;
+    highAirIsTilt = true;
   }
   if (Math.abs(highAirGain) >= 0.3 && referenceMatchBands.length === 0) {
-    bands.push({ id: 'b4', enabled: true, shape: 'highshelf', freq: 11200, gain: highAirGain, q: 0.71 });
+    if (highAirIsTilt) {
+      // Measured dark spectral slope: a Baxandall treble shelf keeps rising into the top
+      // octave like a tone control, rather than a shelf plateau at 11.2 kHz.
+      bands.push({ id: 'b4', enabled: true, shape: 'highshelf', subtype: 'baxandall', freq: 8000, gain: highAirGain, q: 0.71 });
+      eqTypeNotes.push(`Baxandall high shelf ${highAirGain > 0 ? '+' : ''}${highAirGain} dB @ 8 kHz (slope ${analysis.spectralSlopeDbPerOct.toFixed(2)} dB/oct)`);
+    } else {
+      bands.push({ id: 'b4', enabled: true, shape: 'highshelf', freq: 11200, gain: highAirGain, q: 0.71 });
+    }
     eqReasons.push(`Tilt (${analysis.spectralSlopeDbPerOct.toFixed(2)} dB/oct) + ${objective.tonalBias} bias -> ${highAirGain > 0 ? '+' : ''}${highAirGain} dB @ 11.2 kHz`);
   }
 
@@ -567,13 +626,14 @@ export function buildExplainableMasterPlan(input: {
         `Centroid: ${analysis.spectralCentroidHz} Hz`,
         `Low-Mid/Mid: ${lowMidBuildup >= 0 ? '+' : ''}${lowMidBuildup.toFixed(1)} dB`,
         ...(eqReasons.length ? [eqReasons[0]] : []),
+        ...(sideLowCut ? [`Low-End Corr: ${analysis.lowEndCorrelation.toFixed(2)}`] : []),
       ],
       proposedCorrection:
         eqParams.bands.length > 1
           ? 'Shape tonal contour surgically while clearing subsonic rumble below 28 Hz.'
           : 'Insert linear/clean high-pass at 24–28 Hz without altering musical midrange timbre.',
       selectedProcessor: 'parametric-eq',
-      proposedParamsSummary: `${eqParams.phaseMode.toUpperCase()} phase · Tilt ${tiltDb >= 0 ? '+' : ''}${tiltDb} dB · ${eqParams.bands.length} band(s)`,
+      proposedParamsSummary: `${eqParams.phaseMode.toUpperCase()} phase · Tilt ${tiltDb >= 0 ? '+' : ''}${tiltDb} dB · ${eqParams.bands.length} band(s)${eqTypeNotes.length ? ` · ${eqTypeNotes.join(' · ')}` : ''}`,
       commands: [
         {
           op: 'add',
@@ -603,6 +663,9 @@ export function buildExplainableMasterPlan(input: {
         maxCutDb: mudMaxCut,
         attackMs: 15,
         releaseMs: 140,
+        // Proportional Q: light dips stay broad, the band narrows as it digs deeper.
+        type: 'proportional' as const,
+        kneeDb: 6,
       },
     ];
     recommendations.push({
@@ -616,7 +679,7 @@ export function buildExplainableMasterPlan(input: {
       ],
       proposedCorrection: `Attenuate 250 Hz dynamically (up to ${mudMaxCut} dB) only when the low-mids build up.`,
       selectedProcessor: 'dynamic-eq',
-      proposedParamsSummary: `Band @ 250 Hz (Q=1.0, maxCut=${mudMaxCut} dB, 15/140 ms)`,
+      proposedParamsSummary: `Proportional Q band @ 250 Hz (Q=1.0, maxCut=${mudMaxCut} dB, 15/140 ms, 6 dB knee)`,
       commands: [
         {
           op: 'add',
@@ -637,44 +700,39 @@ export function buildExplainableMasterPlan(input: {
   // Broad high-mid energy and coherent musical harmonics are not enough evidence to
   // trigger frequency-selective gain reduction; those are handled by the tonal plan
   // and auditioned rather than automatically treated as defects.
-  const topRes = analysis.resonances.find((resonance) =>
-    resonance.freqHz >= 2000 && resonance.freqHz <= 12000 && resonance.excessDb >= 6.0,
-  );
-  if (topRes) {
+  if (topRes && dynamicHighPlan) {
     const targetFreq = topRes.freqHz;
-    const dynBands = [
-      {
-        id: 'd1',
-        enabled: true,
-        freq: targetFreq,
-        q: topRes ? 2.8 : 1.8,
-        thresholdDb: Math.round(Math.max(-32, Math.min(-14, analysis.rmsDb + 1))),
-        maxCutDb: Number(Math.max(-5.5, -Math.min(4.5, (topRes?.excessDb ?? harshExcess) * 0.45)).toFixed(1)),
-        attackMs: 6,
-        releaseMs: 95,
-      },
-    ];
+    const dynBands = [dynamicHighPlan.band];
+    const sibilance = dynamicHighPlan.kind === 'sibilance';
     recommendations.push({
       id: 'rec-dyn-eq',
-      characteristic: 'Dynamic upper-mid harshness / localized resonance spike',
+      characteristic: sibilance
+        ? 'Sibilance: isolated resonance in the 4.5-10 kHz de-essing range'
+        : 'Dynamic upper-mid harshness / localized resonance spike',
       supportingMeasurements: [
         `High-Mid vs Mid: ${harshExcess >= 0 ? '+' : ''}${harshExcess.toFixed(1)} dB`,
-        ...(topRes ? [`Resonance: ${topRes.freqHz} Hz (+${topRes.excessDb} dB)`] : []),
+        ...dynamicHighPlan.evidence,
       ],
-      proposedCorrection: `Attenuate ${targetFreq} Hz dynamically only when transient peaks exceed threshold.`,
+      proposedCorrection: sibilance
+        ? `De-ess dynamically: a high shelf keyed at ${targetFreq} Hz dips only while sibilants exceed threshold.`
+        : `Attenuate ${targetFreq} Hz dynamically only when transient peaks exceed threshold.`,
       selectedProcessor: 'dynamic-eq',
-      proposedParamsSummary: `Band 1 @ ${targetFreq} Hz (Q=${dynBands[0].q}, maxCut=${dynBands[0].maxCutDb} dB)`,
+      proposedParamsSummary: dynamicHighPlan.summary,
       commands: [
         {
           op: 'add',
           processorType: 'dynamic-eq',
-          name: 'Dynamic Resonance Control',
+          name: sibilance ? 'Dynamic De-Esser' : 'Dynamic Resonance Control',
           params: { bands: dynBands },
-          rationale: `Tame ${targetFreq} Hz spikes dynamically without dulling quiet passages.`,
+          rationale: sibilance
+            ? `Tame sibilance keyed at ${targetFreq} Hz without dulling the top end between sibilants.`
+            : `Tame ${targetFreq} Hz spikes dynamically without dulling quiet passages.`,
         },
       ],
       expectedResult: 'Reduces listener fatigue while preserving average spectral brightness.',
-      potentialTradeoffs: 'Over-taming above 3 kHz can soften snare crack or vocal bite.',
+      potentialTradeoffs: sibilance
+        ? 'Too low a threshold can lisp vocals or soften hi-hats; capped and soft-kneed.'
+        : 'Over-taming above 3 kHz can soften snare crack or vocal bite.',
       priority: 'recommended',
       statementType: 'hypothesis',
     });
@@ -794,7 +852,9 @@ export function buildExplainableMasterPlan(input: {
       highWidth,
       lowCrossHz: 150,
       highCrossHz: 3500,
-      monoBassBelowHz: analysis.lowEndCorrelation < 0.5 ? 115 : 90,
+      // The EQ's Side-channel low cut already makes the low end mono; do not stack a second
+      // mono-bass crossover on top of it.
+      monoBassBelowHz: sideLowCut ? 0 : analysis.lowEndCorrelation < 0.5 ? 115 : 90,
       lrBalanceDb: Number((-analysis.lrBalanceDb * 0.75).toFixed(2)),
       midSideGainDb: objective.stereoPreference === 'wide' && analysis.phaseCorrelation > 0.4 ? 0.3 : 0,
     };
@@ -809,9 +869,11 @@ export function buildExplainableMasterPlan(input: {
         `Low-End Corr: ${analysis.lowEndCorrelation.toFixed(2)}`,
         `L/R Balance: ${analysis.lrBalanceDb.toFixed(2)} dB`,
       ],
-      proposedCorrection: 'Anchor sub-bass in mono and correct L/R balance bias cleanly.',
+      proposedCorrection: sideLowCut
+        ? 'Narrow the low band and correct L/R balance; mono bass comes from the EQ Side-channel low cut.'
+        : 'Anchor sub-bass in mono and correct L/R balance bias cleanly.',
       selectedProcessor: 'stereo-imager',
-      proposedParamsSummary: `MonoBass <${imgParams.monoBassBelowHz}Hz · L/R ${imgParams.lrBalanceDb >= 0 ? '+' : ''}${imgParams.lrBalanceDb} dB · Mid ${midWidth}% / High ${highWidth}%`,
+      proposedParamsSummary: `${imgParams.monoBassBelowHz > 0 ? `MonoBass <${imgParams.monoBassBelowHz}Hz` : 'MonoBass via EQ Side low cut'} · L/R ${imgParams.lrBalanceDb >= 0 ? '+' : ''}${imgParams.lrBalanceDb} dB · Mid ${midWidth}% / High ${highWidth}%`,
       commands: [
         {
           op: 'add',
@@ -1713,7 +1775,7 @@ export function deriveRefinementCommands(
         }
       } else {
         appliedGain = -stepDb;
-        bands.push({ id: 'refine-low-mid', enabled: true, shape: 'bell', freq: findMudCenterHz(post), gain: appliedGain, q: 1.2 });
+        bands.push(mudBell('refine-low-mid', findMudCenterHz(post), appliedGain, REFINE_MUD_PROPORTIONAL_Q));
       }
       const atLimit = bellIndex >= 0 && appliedGain <= -4;
       const rationale =
@@ -1785,9 +1847,20 @@ export interface RunAutonomousDirectorOptions {
   externalPlugins?: ExternalPluginRecord[];
   hostConnected?: boolean;
   initialChain?: ProcessorModule[];
+  /**
+   * Modules the caller has already gated to run before the planned chain when no initialChain
+   * is given (e.g. a Vocal Rebalance the local policy proposed because stems are cached).
+   * They are rendered, re-measured and judged by the objective gate like the rest of the pass.
+   */
+  leadModules?: ProcessorModule[];
   externalProcessor?: ExternalPluginProcessCallback;
   /** Timeline fades applied after the chain on every render the loop measures. */
   postFades?: FadeSettings | null;
+  /**
+   * Learned reference spectra (Match EQ). The loop learns the source side itself from the
+   * rendered source timeline. Without it, unlearned Match EQ stages are removed.
+   */
+  matchEqReference?: { spectra: MatchEqProfile['reference']; name?: string } | null;
   renderPassFn?: (
     channels: Float32Array[],
     sampleRate: number,
@@ -1801,6 +1874,7 @@ export interface RunAutonomousDirectorOptions {
     targetTruePeakDb: number;
     preserveDynamics: boolean;
     qcReport: QCReport;
+    targetGate: MasterTargetGate;
   }) => Promise<ProcessorModule[] | null | AiRefineSuggestion>;
   maxIterations?: number;
   maxCpuBudgetMs?: number;
@@ -1827,6 +1901,22 @@ export interface AiRefineSuggestion {
   chain: ProcessorModule[] | null;
   producedBy?: string | null;
   notices?: string[];
+}
+
+const SOURCE_LIMITATION_FINDING_IDS = new Set(['diag-clipping', 'diag-overcompressed', 'diag-thd']);
+
+function hasActionablePostFixFindings(report: PostFixVerificationReport): boolean {
+  return report.activeFindings.some((finding) => !SOURCE_LIMITATION_FINDING_IDS.has(finding.findingId)) ||
+    report.newlyIntroducedFindings.length > 0;
+}
+
+function summarizeActionablePostFixFindings(report: PostFixVerificationReport): string {
+  const active = report.activeFindings.filter((finding) => !SOURCE_LIMITATION_FINDING_IDS.has(finding.findingId));
+  const labels = [
+    ...active.map((finding) => `${finding.originalFinding.title} [${finding.status}]`),
+    ...report.newlyIntroducedFindings.map((finding) => `${finding.title} [NEW]`),
+  ];
+  return labels.length > 0 ? `${labels.length} actionable technical finding(s) remain: ${labels.join(', ')}.` : 'No actionable technical findings remain.';
 }
 
 function makeActivity(
@@ -2048,6 +2138,61 @@ export function preventUnverifiedConvergence(report: MasterFinalReport): void {
 }
 
 /**
+ * Preserve measured local corrections when a cloud AI seed chain is supplied.
+ * AI suggestions are a starting point, not permission to discard deterministic,
+ * evidence-backed Dynamic EQ / Match EQ stages or local stem-balance corrections.
+ */
+export function mergeAiChainWithMeasuredPlan(
+  aiChain: ProcessorModule[],
+  leadModules: ProcessorModule[],
+  measuredPlanChain: ProcessorModule[],
+): ProcessorModule[] {
+  const hasEffective = (chain: ProcessorModule[], type: 'dynamic-eq' | 'match-eq') =>
+    chain.some((module) => {
+      if (module.type !== type || !module.enabled || module.bypassed || module.wetDry <= 0 || module.intensity <= 0) return false;
+      const params = module.params as unknown as { bands?: Array<{ enabled?: boolean; maxCutDb?: number }>; amount?: number };
+      if (type === 'dynamic-eq') {
+        return (params.bands ?? []).some((band) => band.enabled !== false && Math.abs(band.maxCutDb ?? 0) > 0.05);
+      }
+      return (params.amount ?? 0) > 0;
+    });
+
+  // Do not validate/truncate the AI chain until required measured stages have been
+  // merged. validateChain caps chains at 12 modules, which could otherwise discard
+  // the final limiter when one or two evidence-backed EQ stages are added.
+  let merged = [...structuredClone(leadModules), ...structuredClone(aiChain)];
+  for (const type of ['dynamic-eq', 'match-eq'] as const) {
+    const measured = measuredPlanChain.find((module) =>
+      module.type === type && hasEffective([module], type),
+    );
+    if (!measured && hasEffective(merged, type)) continue;
+    // A measured local configuration takes precedence over an AI placeholder or
+    // generic setting. If no measured plan exists, retain a genuinely configured AI
+    // stage, but discard an empty/no-op stage rather than counting it as a correction.
+    merged = merged.filter((module) => module.type !== type);
+    if (!measured) continue;
+    // Place the measured processor before compression and loudness stages so its
+    // detector sees the intended source signal.
+    const beforeLoudnessTypes = new Set<string>([
+      'compressor', 'multiband-comp', 'clipper', 'limiter', 'maximizer', 'multiband-maximizer', 'dither',
+    ]);
+    const insertAt = merged.findIndex((module) => beforeLoudnessTypes.has(module.type));
+    const at = insertAt < 0 ? merged.length : insertAt;
+    merged.splice(at, 0, structuredClone(measured));
+  }
+  const protectedTypes = new Set<string>(['vocal-rebalance', 'dynamic-eq', 'match-eq', 'restore', 'limiter', 'maximizer', 'dither']);
+  while (merged.length > 12) {
+    let dropAt = -1;
+    for (let i = merged.length - 1; i >= 0; i--) {
+      if (!protectedTypes.has(merged[i].type)) { dropAt = i; break; }
+    }
+    if (dropAt < 0) break;
+    merged.splice(dropAt, 1);
+  }
+  return validateChain(merged);
+}
+
+/**
  * Closed-loop Autonomous Mastering Director (SYN-ITERATE + SYN-QC + Safeguards)
  */
 export async function runAutonomousDirectorLoop(
@@ -2141,11 +2286,21 @@ export async function runAutonomousDirectorLoop(
   const qcProfile: QCTargetProfile = alignQcProfileToObjective(opts.qcProfile ?? QC_TARGET_PROFILES[0], objective);
 
   emit('Planning', 0, undefined, undefined, undefined, 'Planning');
+  // Match EQ profile: reference spectra from the caller, source learned from this timeline.
+  let matchEqProfile: MatchEqProfile | null = null;
+  if (opts.matchEqReference && opts.referenceAnalysis) {
+    const learnedSource = learnMatchEqSpectrum(passSourceChannels, opts.sampleRate);
+    if (learnedSource) {
+      matchEqProfile = { source: learnedSource, reference: opts.matchEqReference.spectra, referenceName: opts.matchEqReference.name };
+    }
+  }
+
   const plan = buildExplainableMasterPlan({
     analysis: preAnalysis,
     objectiveId: opts.objectiveId,
     customSpec: opts.customSpec,
     referenceAnalysis: opts.referenceAnalysis,
+    matchEqProfile,
     stemAnalysis: resolvedStemAnalysis,
     externalPlugins: opts.externalPlugins,
     hostConnected: opts.hostConnected,
@@ -2246,10 +2401,16 @@ export async function runAutonomousDirectorLoop(
   }
 
   // Initial working chain: use validated Gemini or initialChain in Assisted if user wants refinement, else planned chain
+  // Match EQ stages proposed by the AI carry no spectra: hydrate them from the learned profile
+  // and hold them to the Director's conservative ceiling; without a reference, drop them.
+  const prepareChain = (c: ProcessorModule[], fromAi: boolean) =>
+    hydrateMatchEqChain(c, matchEqProfile, { dropUnlearned: true, conservative: fromAi });
   let workingChain: ProcessorModule[] =
     opts.initialChain && opts.initialChain.length > 0
-      ? validateChain(structuredClone(opts.initialChain))
-      : structuredClone(plan.chain);
+      ? prepareChain(mergeAiChainWithMeasuredPlan(opts.initialChain, opts.leadModules ?? [], plan.chain), true)
+      : opts.leadModules && opts.leadModules.length > 0
+        ? validateChain([...structuredClone(opts.leadModules), ...structuredClone(plan.chain)])
+        : structuredClone(plan.chain);
 
   emit(
     'Building chain',
@@ -2327,6 +2488,21 @@ export async function runAutonomousDirectorLoop(
     );
 
     const postDiagnosis = analyzeTrackIntelligence(post, objective, opts.referenceAnalysis);
+    // Independent post-fix verification is part of the convergence gate, not just a UI report.
+    // Source-integrity limits (pre-clipped, pre-compressed, or pre-distorted material) remain
+    // disclosed but are not mistaken for a correctable mastering-stage failure.
+    const passVerification = verifyPostFixAnalysis({
+      baselineAnalysis: preAnalysis,
+      baselineDiagnosis: plan.diagnosis,
+      postAnalysis: post,
+      objective,
+      referenceAnalysis: opts.referenceAnalysis,
+      baselineAnalysisId: 'baseline',
+      postAnalysisId: `pass-${pass}`,
+      currentChainFingerprint: computeChainFingerprint(workingChain),
+      postChainFingerprint: computeChainFingerprint(workingChain),
+      postProcessingStatus: 'ready',
+    });
     const baselineTechnicalFindings = plan.diagnosis.findings.filter(
       (finding) => finding.kind === 'technical-problem',
     );
@@ -2533,24 +2709,38 @@ export async function runAutonomousDirectorLoop(
     // while the chain actually delivered was an older pass that never met the targets.
     // Convergence is now judged only on the retained best pass, using the objective gate
     // measured on its rendered audio.
-    // STOP-ON-PASS: the loop stops on the first retained pass whose re-measured render
-    // meets every objective target. Advisory findings (e.g. open low-mid "mud") and the
-    // heuristic QC no longer keep it refining after the gate passes; continuing used to
-    // add passes that were then rejected, ending in "rolled back to best pass N".
+    // STOP-ON-PASS: a retained render is complete only when every blocking objective
+    // target AND every blocking QC check passes. Warnings remain non-blocking advisories;
+    // QC failures must never be relabelled as a clean master merely because LUFS/peak pass.
     const bestIsThisPass = bestCheckpoint === cp;
     const mudStillOpen = postDiagnosis.findings.some((f) => f.id === 'diag-mud');
-    if (bestIsThisPass && targetGate.passed) {
+    if (bestIsThisPass && targetGate.passed && qcReport.failCount === 0 && !hasActionablePostFixFindings(passVerification)) {
       if (cp.iterationSummary) cp.iterationSummary.outcome = 'converged';
       finalStatus = 'converged';
-      stopReason = `Converged on Pass ${pass}: re-measured render meets every objective target (LUFS ${post.integratedLufs.toFixed(1)}, True Peak ${post.truePeakDb.toFixed(2)} dBTP, clips ${post.clippedSamples}, clicks ${post.clickCount ?? 0}).${mudStillOpen ? ' Low-mid density remains as an advisory note.' : ''}${qcReport.overallStatus === 'fail' ? ' QC heuristics still list advisory items.' : ''}`;
+      stopReason = `Converged on Pass ${pass}: all objective targets, blocking QC checks, and actionable post-fix findings pass (LUFS ${post.integratedLufs.toFixed(1)}, True Peak ${post.truePeakDb.toFixed(2)} dBTP, clips ${post.clippedSamples}, clicks ${post.clickCount ?? 0}).${mudStillOpen ? ' Low-mid density remains as an advisory note.' : ''}${qcReport.warningCount > 0 ? ` ${qcReport.warningCount} non-blocking QC warning(s) remain.` : ''}`;
       emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
       break;
     }
 
     // A plateau is only a reason to stop once the retained pass already meets the gate;
     // otherwise keep iterating until the pass cap, the budget, or no safe command remains.
-    const bestGateNow = Boolean(bestCheckpoint.targetGate?.passed) && bestCheckpoint.passNumber > 0;
-    if (pass > 1 && bestGateNow && !mudStillOpen && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold && bestCheckpoint.qcReport.failCount === 0) {
+    const bestVerification = verifyPostFixAnalysis({
+      baselineAnalysis: preAnalysis,
+      baselineDiagnosis: plan.diagnosis,
+      postAnalysis: bestCheckpoint.analysis,
+      objective,
+      referenceAnalysis: opts.referenceAnalysis,
+      baselineAnalysisId: 'baseline',
+      postAnalysisId: `best-pass-${bestCheckpoint.passNumber}`,
+      currentChainFingerprint: computeChainFingerprint(bestCheckpoint.chain),
+      postChainFingerprint: computeChainFingerprint(bestCheckpoint.chain),
+      postProcessingStatus: 'ready',
+    });
+    const bestGateNow = Boolean(bestCheckpoint.targetGate?.passed) &&
+      bestCheckpoint.passNumber > 0 &&
+      bestCheckpoint.qcReport.failCount === 0 &&
+      !hasActionablePostFixFindings(bestVerification);
+    if (pass > 1 && bestGateNow && !mudStillOpen && Math.abs(multiObjective.engineeringFitIndex - lastFit) < convergenceThreshold) {
       finalStatus = 'completed';
       stopReason = `Stopped safely after Pass ${pass}: retained Pass ${bestCheckpoint.passNumber} meets the objective gate and further refinement reached a plateau (ΔFit ${(multiObjective.engineeringFitIndex - lastFit).toFixed(2)} < ${convergenceThreshold}).`;
       emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
@@ -2573,6 +2763,7 @@ export async function runAutonomousDirectorLoop(
             targetTruePeakDb: objective.maxTruePeakDb,
             preserveDynamics: objective.preserveTransients,
             qcReport,
+            targetGate,
           });
           const suggestion: AiRefineSuggestion = Array.isArray(rawSuggestion) || rawSuggestion === null
             ? { chain: rawSuggestion }
@@ -2587,7 +2778,7 @@ export async function runAutonomousDirectorLoop(
           if (candidateAiChain) {
             const invCheck = validateChainAgainstInventory(candidateAiChain);
             if (invCheck.valid) {
-              nextChainFromAi = invCheck.sanitizedChain;
+              nextChainFromAi = prepareChain(invCheck.sanitizedChain, true);
             } else {
               emit(
                 'Optimizing',
@@ -2622,6 +2813,40 @@ export async function runAutonomousDirectorLoop(
       }
 
       if (nextChainFromAi && nextChainFromAi.length > 0) {
+        // AI is allowed to propose the complete chain, but it cannot bypass deterministic
+        // repairs for measured blocking gates. Merge those repairs into the AI candidate,
+        // then let the next real render and measurement decide whether they worked.
+        const gateFix = deriveGateRepairCommands(targetGate, nextChainFromAi, post);
+        if (gateFix.commands.length > 0) {
+          const repaired = applyStructuredChainCommands(nextChainFromAi, gateFix.commands);
+          if (repaired.appliedCount > 0) {
+            nextChainFromAi = repaired.chain;
+            emit(
+              'Optimizing',
+              pass,
+              makeActivity(
+                pass,
+                'refine',
+                'command',
+                `Applied ${repaired.appliedCount} deterministic objective-gate repair(s) alongside the AI refinement.`,
+                gateFix.reasons.join(' · '),
+              ),
+              undefined,
+              nextChainFromAi,
+              'Optimizing',
+            );
+          }
+        }
+        if (renderedChainKeys.has(chainRenderKey(nextChainFromAi))) {
+          finalStatus = 'completed';
+          const remainingQcFailures = qcReport.checks.filter((check) => check.status === 'fail');
+          const qcDetail = remainingQcFailures.length > 0
+            ? ` ${remainingQcFailures.length} blocking QC failure(s) remain: ${remainingQcFailures.map((check) => check.label).join(', ')}. The master is NOT fully verified.`
+            : ' No blocking QC failures remain.';
+          stopReason = `Stopped after Pass ${pass}: AI refinement plus deterministic gate repairs produced no new measurable chain.${targetGate.passed ? ' Objective targets pass.' : ` Objective targets still fail: ${targetGate.failed.map((check) => check.label).join(', ')}.`}${qcDetail}`;
+          emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
+          break;
+        }
         workingChain = nextChainFromAi;
         emit(
           'Optimizing',
@@ -2752,11 +2977,39 @@ export async function runAutonomousDirectorLoop(
   const finalGate =
     bestCheckpoint.targetGate ??
     evaluateMasterTargets(bestCheckpoint.analysis, objective, { preAnalysis, referenceAnalysis: opts.referenceAnalysis });
-  if (finalStatus === 'converged' && !finalGate.passed) finalStatus = 'completed';
+  const finalQcFailures = bestCheckpoint.qcReport.checks.filter((check) => check.status === 'fail');
+  const finalPostFixVerification = verifyPostFixAnalysis({
+    baselineAnalysis: preAnalysis,
+    baselineDiagnosis: plan.diagnosis,
+    postAnalysis: bestCheckpoint.passNumber > 0 ? bestCheckpoint.analysis : null,
+    objective,
+    referenceAnalysis: opts.referenceAnalysis,
+    baselineAnalysisId: 'baseline',
+    postAnalysisId: bestCheckpoint.passNumber > 0 ? `best-pass-${bestCheckpoint.passNumber}` : 'baseline',
+    currentChainFingerprint: computeChainFingerprint(bestCheckpoint.chain),
+    postChainFingerprint: bestCheckpoint.passNumber > 0 ? computeChainFingerprint(bestCheckpoint.chain) : undefined,
+    postProcessingStatus: bestCheckpoint.passNumber > 0 ? 'ready' : 'idle',
+  });
+  if (finalStatus === 'converged' && (
+    !finalGate.passed ||
+    finalQcFailures.length > 0 ||
+    hasActionablePostFixFindings(finalPostFixVerification)
+  )) finalStatus = 'completed';
   if (finalStatus !== 'stopped-by-user') {
-    stopReason = finalGate.passed
-      ? `${stopReason} Final verification: all objective targets met on the delivered render.`
-      : `${stopReason} Final verification: NOT all targets met. ${finalGate.summary}`;
+    const objectiveSummary = finalGate.passed
+      ? 'all objective targets met on the delivered render'
+      : `NOT all objective targets met. ${finalGate.summary}`;
+    const qcSummary = finalQcFailures.length > 0
+      ? `NOT fully verified: ${finalQcFailures.length} blocking QC failure(s) remain (${finalQcFailures.map((check) => check.label).join(', ')}).`
+      : `no blocking QC failures remain.${bestCheckpoint.qcReport.warningCount > 0 ? ` ${bestCheckpoint.qcReport.warningCount} non-blocking QC warning(s) remain.` : ''}`;
+    const technicalSummary = summarizeActionablePostFixFindings(finalPostFixVerification);
+    const sourceLimitations = finalPostFixVerification.activeFindings.filter((finding) =>
+      SOURCE_LIMITATION_FINDING_IDS.has(finding.findingId),
+    );
+    const sourceSummary = sourceLimitations.length > 0
+      ? ` ${sourceLimitations.length} pre-existing source limitation(s) remain visible; they cannot be reconstructed by this mastering chain.`
+      : '';
+    stopReason = `${stopReason} Final verification: ${objectiveSummary}; ${qcSummary}; ${technicalSummary}${sourceSummary}`;
   }
 
   emit(
@@ -2852,7 +3105,9 @@ export function deriveGateRepairCommands(
 
   if (wantsSubExcess) {
     const subBassExcessDb = post.zoneEnergyDb.sub - post.zoneEnergyDb.bass;
-    const reductionStepDb = Math.min(1.5, Math.max(0.15, subBassExcessDb * 0.5));
+    const subBassLimitDb = gate.failed.find((check) => check.id === 'sub-excess')?.targetValueDb ?? 0;
+    const excessAboveLimitDb = Math.max(0, subBassExcessDb - subBassLimitDb);
+    const reductionStepDb = Math.min(1.5, Math.max(0.15, excessAboveLimitDb * 0.5));
     const eqMod = chain.find((m) => m.type === 'parametric-eq' && m.enabled && !m.bypassed);
     const eqBands = eqMod ? ((eqMod.params as { bands?: EQBand[] }).bands ?? []) : [];
     const controlBandIndex = eqBands.findIndex((band) => band.id === 'syn-sub-excess');
@@ -2875,7 +3130,7 @@ export function deriveGateRepairCommands(
           enabled: true,
           shape: 'bell',
           freq: correctionFreqHz,
-          gain: -Math.min(8, Math.max(0.5, subBassExcessDb * 0.75)),
+          gain: -Math.min(8, Math.max(0.25, excessAboveLimitDb * 0.75)),
           q: 1.0,
         };
 
@@ -2888,9 +3143,9 @@ export function deriveGateRepairCommands(
         targetId: eqMod.id,
         processorType: 'parametric-eq',
         paramsPatch: { bands },
-        rationale: `Apply measured Sub/Bass correction with a ${nextBand.freq} Hz spectrum-centered bell at ${nextBand.gain.toFixed(1)} dB.`,
+        rationale: `Reduce measured Sub/Bass excess above the +${subBassLimitDb.toFixed(1)} dB objective limit with a ${nextBand.freq} Hz spectrum-centered bell at ${nextBand.gain.toFixed(1)} dB.`,
       });
-      reasons.push(`${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
+      reasons.push(`${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured +${subBassExcessDb.toFixed(1)} dB; objective limit +${subBassLimitDb.toFixed(1)} dB)`);
     } else {
       const dynamicsIndex = chain.findIndex((m) =>
         m.type === 'compressor' || m.type === 'multiband-comp' || m.type === 'limiter' ||
@@ -2902,9 +3157,9 @@ export function deriveGateRepairCommands(
         position: dynamicsIndex >= 0 ? dynamicsIndex : chain.length,
         name: 'Sub/Bass Excess Control',
         params: { phaseMode: 'minimum', msMode: 'stereo', tiltDb: 0, bands: [nextBand] },
-        rationale: `Reduce measured 20-60 Hz Sub/Bass excess with a spectrum-centered ${nextBand.freq} Hz bell, before dynamics.`,
+        rationale: `Reduce measured 20-60 Hz Sub/Bass excess above the +${subBassLimitDb.toFixed(1)} dB objective limit with a spectrum-centered ${nextBand.freq} Hz bell, before dynamics.`,
       });
-      reasons.push(`Add ${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured excess +${subBassExcessDb.toFixed(1)} dB)`);
+      reasons.push(`Add ${nextBand.freq} Hz Sub/Bass bell ${nextBand.gain.toFixed(1)} dB (measured +${subBassExcessDb.toFixed(1)} dB; objective limit +${subBassLimitDb.toFixed(1)} dB)`);
     }
 
     const bassEnhancer = chain.find((m) => m.type === 'bass-enhancer' && m.enabled && !m.bypassed);

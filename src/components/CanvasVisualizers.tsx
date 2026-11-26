@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { AudioAnalysis, ParametricEQParams, ProcessorModule } from '../types/mastering';
+import { channelGroups, computeAutoGainDb, sectionsMagnitudeDb } from '../dsp/eqDesign';
 import {
   designHighPass,
   designHighShelf,
@@ -705,24 +706,17 @@ export const SpectrumAndEQCanvas: React.FC<SpectrumCanvasProps> = React.memo(
           const eqZeroY = padT + plotH * 0.38;
           ctx.beginPath();
           const steps = 120;
+          // Same section designs (subtypes, slopes, auto-gain) as the renderer; mid/mono curve.
+          const eqCurves = activeEqs.map((mod) => {
+            const p = mod.params as ParametricEQParams;
+            const scale = (mod.intensity / 100) * (mod.wetDry / 100);
+            const g = channelGroups(p, sampleRate, scale);
+            return { sections: [...g.stereo, ...g.mid], trim: p.autoGain ? computeAutoGainDb(p, sampleRate, scale) : 0 };
+          });
           for (let i = 0; i <= steps; i++) {
             const freq = minF * Math.pow(maxF / minF, i / steps);
             let totalDb = 0;
-            for (const mod of activeEqs) {
-              const p = mod.params as ParametricEQParams;
-              const scale = (mod.intensity / 100) * (mod.wetDry / 100);
-              for (const b of p.bands) {
-                if (!b.enabled) continue;
-                let c;
-                if (b.shape === 'highpass') c = designHighPass(b.freq, b.q, sampleRate);
-                else if (b.shape === 'lowpass') c = designLowPass(b.freq, b.q, sampleRate);
-                else if (b.shape === 'lowshelf') c = designLowShelf(b.freq, b.gain * scale, b.q, sampleRate);
-                else if (b.shape === 'highshelf') c = designHighShelf(b.freq, b.gain * scale, b.q, sampleRate);
-                else if (b.shape === 'notch') c = designNotch(b.freq, b.q, sampleRate);
-                else c = designPeakingEQ(b.freq, b.gain * scale, b.q, sampleRate);
-                totalDb += evaluateBiquadMagnitudeDb(c, freq, sampleRate);
-              }
-            }
+            for (const c of eqCurves) totalDb += sectionsMagnitudeDb(c.sections, freq, sampleRate) + c.trim;
             const x = freqToX(freq);
             const y = Math.max(padT, Math.min(padT + plotH, eqZeroY - totalDb * 4.5));
             if (i === 0) ctx.moveTo(x, y);

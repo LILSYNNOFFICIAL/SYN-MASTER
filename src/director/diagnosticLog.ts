@@ -25,7 +25,7 @@ export interface DiagnosticLogEntry {
   tools: ProcessorType[];
   /** Exact settings of the matching modules in the chain, e.g. "SYN-Restore: declick=55, ..." */
   settings: string[];
-  status: 'open' | 'fixed' | 'not-fixed' | 'unverified' | 'advisory';
+  status: 'open' | 'fixed' | 'not-fixed' | 'improved' | 'partially-resolved' | 'unverified' | 'advisory';
 }
 
 export interface DiagnosticLog {
@@ -40,6 +40,28 @@ export interface DiagnosticLog {
   entries: DiagnosticLogEntry[];
   chain: Array<{ name: string; type: ProcessorType; bypassed: boolean; settings: string }>;
   verdict: string;
+}
+
+/** Map verification evidence to a display status. Missing evidence is never a successful fix. */
+export function diagnosticStatusForFinding(
+  report: Pick<MasterFinalReport, 'postFixVerification'> | null | undefined,
+  findingId: string,
+): DiagnosticLogEntry['status'] {
+  const verification = report?.postFixVerification;
+  if (!verification || !verification.analysisFresh || !verification.postAnalysis) return report ? 'unverified' : 'open';
+  if (verification.resolvedFindings.some((f) => f.originalFinding.id === findingId && f.status === 'RESOLVED' && f.measurementReliable)) {
+    return 'fixed';
+  }
+  const active = verification.activeFindings.find((f) => f.originalFinding.id === findingId);
+  if (!active) return 'unverified';
+  switch (active.status) {
+    case 'IMPROVED': return 'improved';
+    case 'PARTIALLY_RESOLVED': return 'partially-resolved';
+    case 'UNVERIFIED': return 'unverified';
+    case 'ACTIVE':
+    case 'UNRESOLVED':
+    default: return 'not-fixed';
+  }
 }
 
 const FINDING_TOOLS: Record<string, ProcessorType[]> = {
@@ -175,12 +197,6 @@ export function buildDiagnosticLog(input: {
   }
 
   // Engineering findings (harshness, mud, sibilance, phase, noise, distortion, ...)
-  const postFindingIds = new Set(
-    (report?.postFixVerification?.activeFindings ?? []).map((f) => f.originalFinding.id),
-  );
-  const resolvedIds = new Set(
-    (report?.postFixVerification?.resolvedFindings ?? []).map((f) => f.originalFinding.id),
-  );
   for (const f of input.findings) {
     if (f.kind !== 'technical-problem') continue;
     if (entries.some((e) => e.id === `finding-${f.id}`)) continue;
@@ -194,15 +210,7 @@ export function buildDiagnosticLog(input: {
       target: f.recommendedAction ?? '-',
       tools,
       settings: settingsFor(chain, tools),
-      status: !report
-        ? 'open'
-        : !isFresh
-          ? 'unverified'
-          : resolvedIds.has(f.id)
-            ? 'fixed'
-            : postFindingIds.has(f.id)
-              ? 'not-fixed'
-              : 'unverified',
+  status: !report ? 'open' : !isFresh ? 'unverified' : diagnosticStatusForFinding(report, f.id),
     });
   }
 
@@ -218,7 +226,15 @@ export function buildDiagnosticLog(input: {
       target: '≤ -4 dB vs mid (genre dependent)',
       tools: ['restore', 'dynamic-eq'],
       settings: settingsFor(chain, ['restore', 'dynamic-eq']),
-      status: !report ? 'open' : !isFresh ? 'unverified' : master && master.zoneEnergyDb.presence - master.zoneEnergyDb.mid <= -4 ? 'fixed' : 'not-fixed',
+      status: !report
+        ? 'open'
+        : !isFresh || !master
+          ? 'unverified'
+          : master.zoneEnergyDb.presence - master.zoneEnergyDb.mid <= -4
+            ? 'fixed'
+            : master.zoneEnergyDb.presence - master.zoneEnergyDb.mid <= sib - 0.5
+              ? 'improved'
+              : 'not-fixed',
     });
   }
 
@@ -237,7 +253,17 @@ export function buildDiagnosticLog(input: {
       target: 'confidence < 0.60, or side HF reduced ≥ 1 dB after de-shimmer',
       tools: ['restore'],
       settings: [...settingsFor(chain, ['restore']), sh.confidence >= 0.6 ? 'Auto: SYN-Restore deShimmer on (30–80% by confidence)' : 'Suggested if audible: SYN-Restore deShimmer 30–50%'],
-      status: !report ? 'open' : !isFresh ? 'unverified' : master && (msh?.confidence ?? 1) < 0.6 || (reducedDb !== null && reducedDb <= -1) ? 'fixed' : 'advisory',
+      status: !report
+        ? 'open'
+        : !isFresh || !master
+          ? 'unverified'
+          : reducedDb !== null && reducedDb <= -1
+            ? 'fixed'
+            : reducedDb !== null && reducedDb < 0
+              ? 'improved'
+              : reducedDb !== null
+                ? 'not-fixed'
+                : 'unverified',
     });
   } else if (!sh) {
     const hiCorr = source.stereoBandCorrelation?.high;
@@ -291,12 +317,14 @@ export function buildDiagnosticLog(input: {
     outcome: cp.iterationSummary?.outcome ?? '',
   }));
 
-  const unresolvedEntries = entries.some((entry) => entry.status === 'not-fixed' || entry.status === 'unverified');
+  const outstanding = entries.filter((entry) => !['fixed', 'advisory'].includes(entry.status)).length;
   const verdict = !report
     ? `${entries.length} issue(s) measured. Press FIX IT ALL WITH AI to correct and verify.`
-    : isMasterFullyVerified(report) && !unresolvedEntries
+    : isMasterFullyVerified(report) && outstanding === 0
       ? `PASSED: the delivered master was re-measured and meets every objective target (pass ${report.bestPassNumber} of ${report.iterationsExecuted}).`
-      : `NOT FULLY VERIFIED: ${gate?.summary ?? report.postFixVerification?.verificationError ?? 'no fresh verified render'} — see unresolved or unverified entries.`;
+      : gate?.passed && outstanding > 0
+        ? `NOT FULLY VERIFIED: OBJECTIVE TARGETS MET, BUT ${outstanding} technical issue(s) remain unresolved or unverified. Review the individual evidence below (pass ${report.bestPassNumber} of ${report.iterationsExecuted}).`
+        : `NOT FULLY VERIFIED: ${gate?.summary ?? report.postFixVerification?.verificationError ?? 'no fresh verified render'} — see unresolved or unverified entries.`;
 
   return {
     createdAt: new Date().toISOString(),

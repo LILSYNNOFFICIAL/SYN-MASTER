@@ -1,8 +1,14 @@
 import type {
   BassEnhancerParams,
   CompressorParams,
+  DynamicEQBand,
+  DynamicEQBandType,
   DynamicEQParams,
   EQBand,
+  EQBandShape,
+  EQBandSubtype,
+  EQChannel,
+  EQSlope,
   ExternalPluginParamValue,
   ExternalVST3Params,
   LimiterParams,
@@ -13,6 +19,7 @@ import type {
   TransientShaperParams,
   ClipperParams,
   DitherParams,
+  MatchEqParams,
   MultibandCompParams,
   ParametricEQParams,
   ProcessorModule,
@@ -21,6 +28,14 @@ import type {
   SaturationParams,
   StereoImagerParams,
 } from '../types/mastering';
+import { EQ_CHANNELS, EQ_SUBTYPES, DYNAMIC_EQ_TYPES, allowedSlopes, resolveSubtype } from './eqDesign.ts';
+import { MATCH_EQ_CHANNELS, MATCH_EQ_LIMITS, MATCH_EQ_SMOOTHING_OPTIONS, isValidSpectrumSet } from './matchEq.ts';
+import { DEFAULT_VOCAL_REBALANCE_PARAMS, sanitizeVocalRebalanceParams } from './vocalRebalance.ts';
+
+/** Band limits shared by the editors and AI validation. */
+export const MAX_EQ_BANDS = 8;
+export const MAX_DYNAMIC_EQ_BANDS = 8;
+const EQ_SHAPES: EQBandShape[] = ['highpass', 'lowshelf', 'bell', 'highshelf', 'lowpass', 'notch', 'bandpass', 'tilt'];
 
 function clamp(v: number, min: number, max: number, fallback: number): number {
   if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
@@ -42,6 +57,8 @@ export const PROCESSOR_DEFAULT_NAMES: Record<ProcessorType, string> = {
   clipper: 'Peak Clipper',
   'multiband-maximizer': 'Multiband Maximizer (Maximus-style)',
   dither: 'Dither',
+  'match-eq': 'Match EQ',
+  'vocal-rebalance': 'Vocal Rebalance',
   'external-vst3': 'External VST3 Plugin',
 };
 
@@ -148,6 +165,19 @@ export function createDefaultParams(type: ProcessorType): ProcessorModule['param
       return { attackDb: 2, sustainDb: 0, speedMs: 15, lowCutHz: 80 } satisfies TransientShaperParams;
     case 'dither':
       return { bitDepth: 24, shape: 'tpdf', autoBlank: true } satisfies DitherParams;
+    case 'match-eq':
+      return {
+        amount: 75,
+        smoothing: 3,
+        maxBoostDb: 6,
+        maxCutDb: 6,
+        lowHz: 30,
+        highHz: 18000,
+        channel: 'stereo',
+        phase: 'linear',
+      } satisfies MatchEqParams;
+    case 'vocal-rebalance':
+      return { ...DEFAULT_VOCAL_REBALANCE_PARAMS };
     case 'clipper':
       return { ceilingDb: -0.8, driveDb: 1.5, softness: 60, oversampling: 4 } satisfies ClipperParams;
     case 'multiband-maximizer':
@@ -213,14 +243,12 @@ export function validateProcessorParams(
     case 'parametric-eq': {
       const def = defaults as ParametricEQParams;
       const rawBands = Array.isArray(src.bands) ? src.bands : def.bands;
-      const bands: EQBand[] = rawBands.slice(0, 8).map((b, idx) => {
+      const bands: EQBand[] = rawBands.slice(0, MAX_EQ_BANDS).map((b, idx) => {
         const bo = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
-        const shape = ['highpass', 'lowshelf', 'bell', 'highshelf', 'lowpass', 'notch'].includes(
-          String(bo.shape),
-        )
+        const shape = (EQ_SHAPES as string[]).includes(String(bo.shape))
           ? (bo.shape as EQBand['shape'])
           : 'bell';
-        return {
+        const band: EQBand = {
           id: typeof bo.id === 'string' && bo.id ? bo.id : `b${idx + 1}`,
           enabled: bo.enabled !== false,
           shape,
@@ -228,22 +256,37 @@ export function validateProcessorParams(
           gain: clamp(Number(bo.gain), -12, 12, 0),
           q: clamp(Number(bo.q), 0.25, 12, 1.0),
         };
+        // New fields are only written when present and valid, so legacy bands keep their exact shape.
+        if (typeof bo.subtype === 'string' && EQ_SUBTYPES[shape].includes(bo.subtype as EQBandSubtype)) {
+          band.subtype = bo.subtype as EQBandSubtype;
+        }
+        const slope = Number(bo.slope);
+        if (bo.slope !== undefined && allowedSlopes(shape, resolveSubtype(band)).includes(slope as EQSlope)) {
+          band.slope = slope as EQSlope;
+        }
+        if (typeof bo.channel === 'string' && (EQ_CHANNELS as string[]).includes(bo.channel)) {
+          band.channel = bo.channel as EQChannel;
+        }
+        if (bo.solo === true) band.solo = true;
+        return band;
       });
-      return {
+      const out: ParametricEQParams = {
         phaseMode: src.phaseMode === 'linear' ? 'linear' : 'minimum',
         msMode: src.msMode === 'mid-side' ? 'mid-side' : 'stereo',
         tiltDb: clamp(Number(src.tiltDb), -6, 6, 0),
         bands: bands.length > 0 ? bands : def.bands,
       };
+      if (src.autoGain === true) out.autoGain = true;
+      return out;
     }
     case 'dynamic-eq': {
       const def = defaults as DynamicEQParams;
       const rawBands = Array.isArray(src.bands) ? src.bands : def.bands;
       return {
-        bands: rawBands.slice(0, 4).map((b, idx): DynamicEQParams['bands'][number] => {
+        bands: rawBands.slice(0, MAX_DYNAMIC_EQ_BANDS).map((b, idx): DynamicEQBand => {
           const bo = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
           const mode: 'cut' | 'boost' = bo.mode === 'boost' ? 'boost' : 'cut';
-          return {
+          const band: DynamicEQBand = {
             id: typeof bo.id === 'string' && bo.id ? bo.id : `d${idx + 1}`,
             enabled: bo.enabled !== false,
             freq: clamp(Number(bo.freq), 30, 16000, 500),
@@ -257,6 +300,26 @@ export function validateProcessorParams(
             attackMs: clamp(Number(bo.attackMs), 1, 100, 10),
             releaseMs: clamp(Number(bo.releaseMs), 20, 600, 110),
           };
+          if (typeof bo.type === 'string' && (DYNAMIC_EQ_TYPES as string[]).includes(bo.type)) {
+            band.type = bo.type as DynamicEQBandType;
+          }
+          if (bo.kneeDb !== undefined && Number.isFinite(Number(bo.kneeDb))) band.kneeDb = clamp(Number(bo.kneeDb), 0, 24, 0);
+          if (typeof bo.channel === 'string' && (EQ_CHANNELS as string[]).includes(bo.channel)) {
+            band.channel = bo.channel as EQChannel;
+          }
+          if (bo.sidechain && typeof bo.sidechain === 'object') {
+            const sc = bo.sidechain as Record<string, unknown>;
+            band.sidechain = {
+              mode: sc.mode === 'custom' ? 'custom' : 'band',
+              freq: clamp(Number(sc.freq), 20, 20000, band.freq),
+              q: clamp(Number(sc.q), 0.3, 12, band.q),
+            };
+          }
+          if (bo.lookaheadMs !== undefined && Number.isFinite(Number(bo.lookaheadMs))) {
+            band.lookaheadMs = clamp(Number(bo.lookaheadMs), 0, 10, 0);
+          }
+          if (bo.solo === true) band.solo = true;
+          return band;
         }),
       };
     }
@@ -400,6 +463,30 @@ export function validateProcessorParams(
         autoBlank: typeof src.autoBlank === 'boolean' ? src.autoBlank : def.autoBlank,
       };
     }
+    case 'match-eq': {
+      const def = defaults as MatchEqParams;
+      const sm = Number(src.smoothing);
+      const lowHz = clamp(Number(src.lowHz), MATCH_EQ_LIMITS.lowHz[0], MATCH_EQ_LIMITS.lowHz[1], def.lowHz);
+      const out: MatchEqParams = {
+        amount: clamp(Number(src.amount), MATCH_EQ_LIMITS.amount[0], MATCH_EQ_LIMITS.amount[1], def.amount),
+        smoothing: (MATCH_EQ_SMOOTHING_OPTIONS as number[]).includes(sm) ? (sm as MatchEqParams['smoothing']) : def.smoothing,
+        maxBoostDb: clamp(Number(src.maxBoostDb), MATCH_EQ_LIMITS.maxBoostDb[0], MATCH_EQ_LIMITS.maxBoostDb[1], def.maxBoostDb),
+        maxCutDb: clamp(Math.abs(Number(src.maxCutDb)), MATCH_EQ_LIMITS.maxCutDb[0], MATCH_EQ_LIMITS.maxCutDb[1], def.maxCutDb),
+        lowHz,
+        highHz: clamp(Number(src.highHz), Math.max(MATCH_EQ_LIMITS.highHz[0], lowHz * 2), MATCH_EQ_LIMITS.highHz[1], Math.max(def.highHz, lowHz * 2)),
+        channel: (MATCH_EQ_CHANNELS as string[]).includes(String(src.channel)) ? (src.channel as MatchEqParams['channel']) : def.channel,
+        phase: src.phase === 'minimum' ? 'minimum' : 'linear',
+      };
+      // Learned spectra are kept only when complete and finite (fixed 1/24-octave grid).
+      if (isValidSpectrumSet(src.source) && isValidSpectrumSet(src.reference)) {
+        out.source = { stereo: [...src.source.stereo], mid: [...src.source.mid], side: [...src.source.side] };
+        out.reference = { stereo: [...src.reference.stereo], mid: [...src.reference.mid], side: [...src.reference.side] };
+        if (typeof src.referenceName === 'string' && src.referenceName) out.referenceName = src.referenceName.slice(0, 160);
+      }
+      return out;
+    }
+    case 'vocal-rebalance':
+      return sanitizeVocalRebalanceParams(src);
     case 'clipper': {
       const def = defaults as ClipperParams;
       const os = Number(src.oversampling);
@@ -496,6 +583,8 @@ const VALID_TYPES = new Set<ProcessorType>([
   'clipper',
   'multiband-maximizer',
   'dither',
+  'match-eq',
+  'vocal-rebalance',
   'external-vst3',
 ]);
 
@@ -523,5 +612,17 @@ export function validateChain(rawChain: unknown): ProcessorModule[] {
       }),
     );
   }
-  return validated;
+  return hoistVocalRebalance(validated);
+}
+
+/**
+ * Vocal Rebalance works on stems of the SOURCE, so it must see the unprocessed track: keep a
+ * single instance and move it to the head of the chain. Chains without it are returned as-is.
+ */
+export function hoistVocalRebalance(chain: ProcessorModule[]): ProcessorModule[] {
+  const first = chain.findIndex((m) => m.type === 'vocal-rebalance');
+  if (first < 0) return chain;
+  const rest = chain.filter((m) => m.type !== 'vocal-rebalance');
+  if (first === 0 && rest.length === chain.length - 1) return chain;
+  return [chain[first], ...rest];
 }

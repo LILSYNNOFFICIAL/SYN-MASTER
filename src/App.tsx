@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Maximize2,
   Menu,
@@ -43,14 +43,17 @@ import type {
   VocalBalanceVerification,
 } from './types/mastering';
 import { analyzeAudioBuffer, extractWaveformPeaks } from './dsp/analyzer';
-import { createProcessorModule, validateChain } from './dsp/chainValidation';
+import { createProcessorModule, hoistVocalRebalance, validateChain } from './dsp/chainValidation';
 import { generateDemoMasterStem } from './dsp/demoAudio';
 import {
   renderMixedChain,
   type ExternalPluginProcessCallback,
 } from './dsp/mixedChainRenderer';
-import { type ProcessorMeterTelemetry } from './dsp/offlineDsp';
+import { type DynamicEqTrace, type ProcessorMeterTelemetry } from './dsp/offlineDsp';
+import { chainHasSoloedBand } from './dsp/eqDesign';
 import { renderAndAnalyzeOffThread } from './dsp/workerClient';
+import { getActiveRebalanceStems, getRebalanceStemState, separateActiveRebalanceStems, setActiveRebalanceSource, subscribeRebalanceStems } from './services/rebalanceStemStore';
+import type { VocalBalanceContext } from './ai/vocalBalancePrompt';
 import { filterSourceTransientClickAnalysis } from './dsp/clickDetect';
 import { MASTERING_PRESETS } from './dsp/presets';
 import { QC_TARGET_PROFILES, runQualityControl } from './dsp/qc';
@@ -85,6 +88,7 @@ import {
 } from './director/tempMasteringWorkspace';
 import { SynAudioEngine, type AuditionTarget, type AudioEngineInfo } from './engine/audioEngine';
 import { telemetryStore } from './engine/telemetryStore';
+import { matchEqStore } from './engine/matchEqStore';
 import { SynHostBridge, type HostBridgeSnapshot } from './services/hostBridge';
 import {
   listProjects,
@@ -97,9 +101,14 @@ import {
   saveProject,
 } from './storage/projectDb';
 import { LeftLibraryPanel } from './components/LeftLibraryPanel';
-import { MasteringRack } from './components/MasteringRack';
-import { MeterBridge } from './components/MeterBridge';
-import { SpectrumAndEQCanvas, WaveformTimelineCanvas } from './components/CanvasVisualizers';
+// Rack UIs are split out of the initial bundle (budget); the in-page rack is prefetched on mount
+// so it is ready by the time a track is loaded, and the floating window loads when first opened.
+const loadMasteringRack = () => import('./components/MasteringRack');
+const MasteringRack = React.lazy(() => loadMasteringRack().then(({ MasteringRack }) => ({ default: MasteringRack })));
+const MeterBridge = React.lazy(() => import('./components/MeterBridge').then(({ MeterBridge }) => ({ default: MeterBridge })));
+const WaveformTimelineCanvas = React.lazy(() => import('./components/CanvasVisualizers').then(({ WaveformTimelineCanvas }) => ({ default: WaveformTimelineCanvas })));
+const SpectrumAndEQCanvas = React.lazy(() => import('./components/CanvasVisualizers').then(({ SpectrumAndEQCanvas }) => ({ default: SpectrumAndEQCanvas })));
+
 const SynLabView = React.lazy(() =>
   import('./components/SynLabView').then(({ SynLabView }) => ({ default: SynLabView })),
 );
@@ -118,6 +127,7 @@ const ReferenceMatchView = React.lazy(() =>
 const QualityControlView = React.lazy(() =>
   import('./components/ReferenceAndQcViews').then(({ QualityControlView }) => ({ default: QualityControlView })),
 );
+const PlatformPreviewPanel = React.lazy(() => import('./components/platform/PlatformPreviewPanel'));
 const PluginManagerView = React.lazy(() =>
   import('./components/PluginManagerView').then(({ PluginManagerView }) => ({ default: PluginManagerView })),
 );
@@ -129,8 +139,12 @@ import { ImportScreen } from './components/studio/ImportScreen';
 import { MasterConsole } from './components/console/MasterConsole';
 import { Portal } from './ui/Portal';
 import { FixItStage } from './components/studio/FixItStage';
-import { FxRackWindow } from './components/studio/FxRackWindow';
+const WhatAiChangedPanel = React.lazy(() => import('./components/studio/WhatAiChangedPanel').then(({ WhatAiChangedPanel }) => ({ default: WhatAiChangedPanel })));
+const FxRackWindow = React.lazy(() => import('./components/studio/FxRackWindow').then(({ FxRackWindow }) => ({ default: FxRackWindow })));
 import { TimelinePlayer } from './components/studio/TimelinePlayer';
+import { usePlatformPreviewSelection } from './components/platform/usePlatformPreviewSelection';
+const PlatformPreviewSelector = React.lazy(() => import('./components/platform/PlatformPreviewSelector'));
+import { compressorMakeupDb, getPlatformRule, predictForPlatform, type MasterLevels } from './dsp/platformRules';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
 import { buildDiagnosticLog } from './director/diagnosticLog';
@@ -144,6 +158,7 @@ import {
   requiresVocalBalancePreparation,
   type VocalBalancePreparation,
 } from './director/vocalBalance';
+import { CloudAiRateLimitError, assertCloudAiAvailable, friendlyCloudAiLimitNotice, readBuiltinAiResponse } from './ai/cloudRateLimit';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -232,6 +247,13 @@ export default function App() {
   const [postPeaksHi, setPostPeaksHi] = useState<number[] | null>(null);
   const [rackWindowOpen, setRackWindowOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  // Esc closes the drawer wherever focus is (the toggle keeps focus after opening it).
+  useEffect(() => {
+    if (!libraryOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLibraryOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [libraryOpen]);
 
   const [projectId, setProjectId] = useState(() => `proj-${Date.now()}`);
   const [projectName, setProjectName] = useState('Untitled Mastering Session');
@@ -264,6 +286,7 @@ export default function App() {
   const [appliedCorrections, setAppliedCorrections] = useState<AppliedCorrectionRecord[]>([]);
   const [postPeaks, setPostPeaks] = useState<number[] | null>(null);
   const [stageTelemetry, setStageTelemetry] = useState<ProcessorMeterTelemetry[]>([]);
+  const [dynamicEqTraces, setDynamicEqTraces] = useState<DynamicEqTrace[]>([]);
 
   // Chain & Undo/Redo history
   const [chain, setChain] = useState<ProcessorModule[]>(createStarterChain);
@@ -291,7 +314,20 @@ export default function App() {
     stereoPreference: 'preserve',
     preserveTransients: true,
   });
-  const [useGeminiCloud, setUseGeminiCloud] = useState(false);
+  // Cloud AI reasoning is on by default (owner decision 2026-11-25); the user's own choice in
+  // AI Director → Safeguards & Cloud is remembered. Failures fall back to the local DSP planner.
+  const [useGeminiCloud, setUseGeminiCloudState] = useState<boolean>(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('syn.useCloudAi') : null;
+      return saved === null ? true : saved === '1';
+    } catch {
+      return true;
+    }
+  });
+  const setUseGeminiCloud = useCallback((value: boolean) => {
+    setUseGeminiCloudState(value);
+    try { localStorage.setItem('syn.useCloudAi', value ? '1' : '0'); } catch { /* storage unavailable */ }
+  }, []);
   const [maxIterations, setMaxIterations] = useState(10);
   const [convergenceThreshold, setConvergenceThreshold] = useState(0.8);
   const [directorPlan, setDirectorPlan] = useState<ExplainableMasterPlan | null>(null);
@@ -304,6 +340,8 @@ export default function App() {
   const [directorPass, setDirectorPass] = useState(0);
   const [aiLifecycleState, setAiLifecycleState] = useState<AiChainLifecycleState>('Ready');
   const [preAiChainSnapshot, setPreAiChainSnapshot] = useState<ProcessorModule[] | null>(null);
+  /** Before/after chains of the last AI run that delivered a chain: drives the "What AI changed" list. */
+  const [aiChangeBase, setAiChangeBase] = useState<{ before: ProcessorModule[]; after: ProcessorModule[] } | null>(null);
   const [aiChainAccepted, setAiChainAccepted] = useState<boolean | null>(null);
   const directorPauseRef = useRef(false);
   const directorStopRef = useRef(false);
@@ -315,6 +353,8 @@ export default function App() {
   const [aiStrategy, setAiStrategy] = useState<AIMasteringStrategy | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  // Friendly, non-error notice (for example the cloud AI spend limit: FIX ALL fell back to the local planner).
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
   const [iterations, setIterations] = useState<IterationPass[]>([]);
   const [battleCandidates, setBattleCandidates] = useState<BattleCandidate[]>([]);
   const [battleGenerating, setBattleGenerating] = useState(false);
@@ -452,6 +492,18 @@ export default function App() {
     [activeTrack],
   );
 
+  // Vocal Rebalance stem cache follows the active source; a new stem set re-runs the preview render.
+  const rebalanceStemState = useSyncExternalStore(subscribeRebalanceStems, getRebalanceStemState, getRebalanceStemState);
+  useEffect(() => {
+    setActiveRebalanceSource(activeTrack ? sourceChannelsRef.current : null, activeTrack?.sampleRate ?? 0);
+  }, [activeTrack]);
+
+  // Prefetch the split-out rack UI right after first paint.
+  useEffect(() => {
+    const t = window.setTimeout(() => { void loadMasteringRack(); }, 0);
+    return () => window.clearTimeout(t);
+  }, []);
+
   // Recompute offline DSP analysis off the main UI thread (debounced 60ms; the EQ blanket holds the prior completed render meanwhile)
   useEffect(() => {
     const src = getRenderSource();
@@ -479,6 +531,9 @@ export default function App() {
             peakBins: 400,
             externalProcessor: processExternalStage,
             postFades: getPostFades(),
+            // Preview only: band solo (listen) and Dynamic EQ traces. Export / Fix All never set these.
+            audition: chainHasSoloedBand(effectiveChain),
+            collectDynamicEqTraces: effectiveChain.some((m) => m.type === 'dynamic-eq' && m.enabled && !m.bypassed),
           });
           if (cancelled || offlineRenderSeqRef.current !== seq) return;
           const displayedAnalysis = filterSourceTransientClickAnalysis(
@@ -491,6 +546,7 @@ export default function App() {
           postChannelsRef.current = result.channels;
           setPostPeaksHi(extractWaveformPeaks(result.channels, 1600));
           setStageTelemetry(result.telemetry);
+          setDynamicEqTraces(result.dynamicEqTraces ?? []);
           setPostPeaks(result.peaks ?? null);
           setPostAnalysis(displayedAnalysis);
           setPostAnalysisState({
@@ -531,7 +587,7 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [chain, chainBypassed, activeTrack, hostSnapshot.status, processExternalStage, fades, getRenderSource]);
+  }, [chain, chainBypassed, activeTrack, hostSnapshot.status, processExternalStage, fades, getRenderSource, rebalanceStemState.version]);
 
   // Sync live Web Audio chain
   useEffect(() => {
@@ -636,9 +692,11 @@ export default function App() {
       );
       setUndoStack((u) => [...u.slice(-24), undoSnapshot]);
       setRedoStack([]);
-      setChain(nextChain);
+      // Vocal Rebalance works on source stems, so it always stays first (no-op for other chains).
+      const ordered = hoistVocalRebalance(nextChain);
+      setChain(ordered);
       if (correctionLabel) {
-        recordCorrection(correctionLabel, nextChain);
+        recordCorrection(correctionLabel, ordered);
       }
     },
     [chain, recordCorrection],
@@ -1058,11 +1116,13 @@ export default function App() {
       setAiStrategy(null);
       setAiLifecycleState('Ready');
       setPreAiChainSnapshot(null);
+      setAiChangeBase(null);
       setAiChainAccepted(null);
 
       const engine = engineRef.current!;
       sourceChannelsRef.current = channels;
       sourceRateRef.current = sampleRate;
+      matchEqStore.setSource(channels, sampleRate);
       setFades(NO_FADES);
       setPostPeaksHi(null);
       engine.setSourceChannels(channels, sampleRate);
@@ -1144,6 +1204,7 @@ export default function App() {
     setSourceRenderRevision((revision) => revision + 1);
     referenceChannelsRef.current = stem.channels;
     engineRef.current!.setReferenceChannels(stem.channels, stem.sampleRate);
+    matchEqStore.setReference(stem.channels, stem.sampleRate, stem.name);
     const analysis = analyzeAudioBuffer(stem.channels, stem.sampleRate);
     const referenceId = `ref-${Date.now()}`;
     referenceTrackIdRef.current = referenceId;
@@ -1173,6 +1234,7 @@ export default function App() {
       setSourceRenderRevision((revision) => revision + 1);
       referenceChannelsRef.current = decoded.channels;
       engineRef.current!.setReferenceChannels(decoded.channels, decoded.sampleRate);
+      matchEqStore.setReference(decoded.channels, decoded.sampleRate, file.name);
       const analysis = analyzeAudioBuffer(decoded.channels, decoded.sampleRate);
       const referenceId = `ref-${Date.now()}`;
       referenceTrackIdRef.current = referenceId;
@@ -1312,6 +1374,35 @@ export default function App() {
     return runQualityControl(activeTrack.analysis, activeTrack.analysis, activeQcProfile, exportConfig);
   }, [qcReport, activeTrack, activeQcProfile, exportConfig]);
 
+  // Platform Preview (monitoring only): the playback gain a streaming platform would apply to the
+  // master. It sits on the playback bus after the chain and never touches render, Fix All or export.
+  const platformSelection = usePlatformPreviewSelection();
+  const platformLevels = useMemo<MasterLevels | null>(() => {
+    const a = postAnalysisState.status === 'ready' && postAnalysis ? postAnalysis : activeTrack?.analysis ?? null;
+    return a ? { integratedLufs: a.integratedLufs, truePeakDb: a.truePeakDb, samplePeakDb: a.samplePeakDb } : null;
+  }, [postAnalysis, postAnalysisState.status, activeTrack]);
+  useEffect(() => {
+    const prediction = platformLevels
+      ? predictForPlatform(platformLevels, platformSelection.platformId, platformSelection.spotifyLevel)
+      : null;
+    const rule = getPlatformRule(platformSelection.platformId, platformSelection.spotifyLevel);
+    engineRef.current?.setPlatformPreview(
+      prediction?.gainDb ?? 0,
+      rule.limiter && prediction?.limiterEngaged
+        ? {
+            thresholdDb: rule.limiter.thresholdDbfs,
+            attackMs: rule.limiter.attackMs,
+            releaseMs: rule.limiter.releaseMs,
+            makeupDb: compressorMakeupDb(rule.limiter.thresholdDbfs, 20),
+          }
+        : null,
+    );
+  }, [platformLevels, platformSelection]);
+  const getPlatformMasterAudio = useCallback(() => {
+    const channels = postChannelsRef.current ?? sourceChannelsRef.current;
+    return channels && activeTrack ? { channels, sampleRate: activeTrack.sampleRate } : null;
+  }, [activeTrack]);
+
   const currentChainFingerprint = useMemo(
     () => computeChainFingerprint(chain, chainBypassed),
     [chain, chainBypassed],
@@ -1379,6 +1470,7 @@ export default function App() {
       objectiveId,
       customSpec: customObjective,
       referenceAnalysis: referenceTrack?.analysis ?? null,
+      matchEqProfile: referenceTrack ? matchEqStore.getProfile() : null,
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });
@@ -1472,8 +1564,10 @@ export default function App() {
 
     directorRunningRef.current = true;
     setAiError(null);
+    setAiNotice(null);
     setAiChainAccepted(null);
-    setPreAiChainSnapshot(structuredClone(chain));
+    const preRunChain = structuredClone(chain);
+    setPreAiChainSnapshot(preRunChain);
     setDirectorRunning(true);
     setDiagnosticArchiveStatus('saving');
     setDirectorPaused(false);
@@ -1601,6 +1695,7 @@ export default function App() {
       objectiveId,
       customSpec: customObjective,
       referenceAnalysis: referenceTrack?.analysis ?? null,
+      matchEqProfile: referenceTrack ? matchEqStore.getProfile() : null,
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });
@@ -1608,10 +1703,59 @@ export default function App() {
     setDirectorPlan(plan);
     setAiStrategy(plan.strategy);
 
+    // Vocal Rebalance: AI may use it (and the local Director may add a small vocal move) only
+    // when stems are already cached for this track; every proposal passes the policy gate.
+    // Loaded on demand (keeps the initial bundle in budget).
+    const { gateVocalRebalanceChain, measureVocalBalance, planLocalVocalRebalance, vocalBalanceRange } =
+      await import('./director/vocalRebalancePolicy');
+    if (isStale()) return;
+    const rebalanceStemSet = getActiveRebalanceStems();
+    let vocalBalance: VocalBalanceContext = {
+      stemsCached: Boolean(rebalanceStemSet),
+      measurement: rebalanceStemSet ? measureVocalBalance(rebalanceStemSet, src[0], src[1] ?? src[0]) : null,
+      range: vocalBalanceRange(objectiveId),
+    };
+    const rebalanceNotes: string[] = [];
+    const gateRebalance = (proposed: ProcessorModule[]): ProcessorModule[] => {
+      const gated = gateVocalRebalanceChain(proposed, vocalBalance);
+      rebalanceNotes.push(...gated.notes);
+      return gated.chain;
+    };
+
     // Optional cloud AI (active provider; built-in Gemini by default) initial strategy in Autonomous/Assisted when user opted in
     const aiProviderLog: string[] = [];
     const aiProviderUsed = describeProvider(getActiveProviderConfig());
     let geminiInitialChain: ProcessorModule[] | undefined;
+
+    // The local diagnosis can warrant stem-level balance correction even when cloud AI
+    // reasoning is disabled. Vocal-focused mastering or an explicit vocal-level finding
+    // is sufficient; mere midrange energy is not treated as proof of a vocal.
+    const diagnosisRequestsVocalBalance = objectiveId === 'vocal-focused' || plan.diagnosis.findings.some((finding) =>
+      /vocal.*(balance|level|quiet|loud|buried|forward)|(?:balance|level).*(vocal|lead)/i.test(
+        `${finding.title} ${finding.explanation} ${finding.recommendedAction ?? ''}`,
+      ),
+    );
+    if (diagnosisRequestsVocalBalance && !vocalBalance.stemsCached) {
+      aiProviderLog.push('Vocal Rebalance: the local diagnosis warrants stem-level vocal balance analysis; starting resource-gated separation.');
+      try {
+        await separateActiveRebalanceStems();
+      } catch (separationError) {
+        aiProviderLog.push(`Vocal Rebalance: automatic stem separation failed: ${separationError instanceof Error ? separationError.message : 'unknown separation error'}.`);
+      }
+      if (isStale()) return;
+      const separatedStems = getActiveRebalanceStems();
+      if (separatedStems) {
+        vocalBalance = {
+          stemsCached: true,
+          measurement: measureVocalBalance(separatedStems, src[0], src[1] ?? src[0]),
+          range: vocalBalanceRange(objectiveId),
+        };
+        aiProviderLog.push('Vocal Rebalance: stem analysis is ready; local and AI proposals will be gated against measured vocal balance.');
+      } else {
+        const separationState = getRebalanceStemState();
+        aiProviderLog.push(`Vocal Rebalance unavailable: ${separationState.error ?? separationState.assessment?.message ?? 'stem separation did not produce usable stems'}; no vocal correction will be claimed.`);
+      }
+    }
     if (useGeminiCloud && runOperatingMode !== 'manual') {
       setAiLoading(true);
       setAiLifecycleState('Planning');
@@ -1635,17 +1779,20 @@ export default function App() {
             role: m.role,
             manufacturer: m.manufacturer,
           })),
+          // Only sent when stems are cached, so prompts for tracks without stems are unchanged.
+          ...(vocalBalance.stemsCached ? { vocalBalance } : {}),
         };
         // Built-in Gemini (default): exactly the existing server call.
         const builtinStrategy = async () => {
+          // While the server's spend limit cooldown runs, skip the request entirely.
+          assertCloudAiAvailable();
           const res = await fetch('/api/ai/master', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() },
             signal: AbortSignal.timeout(12_000),
             body: JSON.stringify(strategyInput),
           });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || `Server responded ${res.status}`);
+          const data = await readBuiltinAiResponse(res);
           return data.strategy;
         };
         const providerRun = await runProviderCall('strategy', (opts) =>
@@ -1656,9 +1803,34 @@ export default function App() {
         if (providerRun.producedBy) aiProviderLog.push(`Plan: initial strategy produced by ${providerRun.producedBy}.`);
         if (!providerRun.result) throw new Error(providerRun.notices[0] ?? 'AI strategy skipped.');
         const strat = providerRun.result as unknown as AIMasteringStrategy;
+        // If the AI diagnosis explicitly selects Vocal Rebalance, create the missing source
+        // stems now rather than silently dropping the requested processor. Separation is
+        // resource-gated by the stem store and only runs for this warranted case.
+        const aiRequestsVocalBalance = Array.isArray(strat.chain) && strat.chain.some((m) => m.type === 'vocal-rebalance') || (strat.issuesDetected ?? []).some((issue) => /vocal.*(balance|level|quiet|loud|buried|forward)|(?:balance|level).*(vocal|lead)/i.test(issue));
+        if (aiRequestsVocalBalance && !vocalBalance.stemsCached) {
+          aiProviderLog.push('Vocal Rebalance: AI selected stem-level vocal correction; starting automatic stem separation.');
+          try {
+            await separateActiveRebalanceStems();
+          } catch (separationError) {
+            aiProviderLog.push(`Vocal Rebalance: automatic stem separation failed: ${separationError instanceof Error ? separationError.message : 'unknown separation error'}.`);
+          }
+          if (isStale()) return;
+          const separatedStems = getActiveRebalanceStems();
+          if (separatedStems) {
+            vocalBalance = {
+              stemsCached: true,
+              measurement: measureVocalBalance(separatedStems, src[0], src[1] ?? src[0]),
+              range: vocalBalanceRange(objectiveId),
+            };
+            aiProviderLog.push('Vocal Rebalance: stems are ready; the proposed correction will be checked against measured vocal balance.');
+          } else {
+            const separationState = getRebalanceStemState();
+            aiProviderLog.push(`Vocal Rebalance unavailable: ${separationState.error ?? separationState.assessment?.message ?? 'stem separation did not produce usable stems'}; the vocal processor will be withheld.`);
+          }
+        }
         const invCheck = validateChainAgainstInventory(strat.chain);
         if (invCheck.valid && invCheck.sanitizedChain.length > 0) {
-          strat.chain = invCheck.sanitizedChain;
+          strat.chain = gateRebalance(invCheck.sanitizedChain);
           geminiInitialChain = strat.chain;
           setAiStrategy(strat);
         } else {
@@ -1668,12 +1840,31 @@ export default function App() {
         }
       } catch (err) {
         if (!isStale()) {
-          setAiError(err instanceof Error ? err.message : 'Cloud Gemini request failed');
+          if (err instanceof CloudAiRateLimitError) {
+            // Not an error for the user: the run continues on the local DSP planner.
+            const notice = friendlyCloudAiLimitNotice(err);
+            setAiNotice(notice);
+            aiProviderLog.push(`Plan: ${notice}`);
+          } else {
+            setAiError(err instanceof Error ? err.message : 'Cloud Gemini request failed');
+          }
         }
       } finally {
         if (!isStale()) setAiLoading(false);
       }
     }
+
+    // Local Director: a conservative vocal-only move when stems are cached and the measured
+    // balance is clearly outside the objective range (never used when the AI planned the chain).
+    const aiAlreadyRebalancesVocals = Boolean(geminiInitialChain?.some((m) => m.type === 'vocal-rebalance'));
+    const localRebalance = !aiAlreadyRebalancesVocals && runOperatingMode !== 'assisted' ? planLocalVocalRebalance(vocalBalance) : null;
+    const leadModules = localRebalance
+      ? gateRebalance([createProcessorModule('vocal-rebalance', { params: localRebalance })]).filter((m) => m.type === 'vocal-rebalance')
+      : [];
+    if (localRebalance && leadModules.length > 0) {
+      aiProviderLog.push(`Vocal Rebalance: measured vocal-to-music ${vocalBalance.measurement?.vocalToMusicDb} dB vs range ${vocalBalance.range.low}..${vocalBalance.range.high} dB; local Director proposes ${localRebalance.vocalGainDb > 0 ? '+' : ''}${localRebalance.vocalGainDb} dB on the vocal stem.`);
+    }
+    aiProviderLog.push(...rebalanceNotes.splice(0));
 
     if (aiProviderLog.length > 0 && !isStale()) {
       const planEntries: DirectorActivityEntry[] = aiProviderLog.map((message, idx) => ({
@@ -1727,9 +1918,13 @@ export default function App() {
         verificationBaselineAnalysis: runSourceAnalysis,
         verificationBaselineDiagnosis: plan.diagnosis,
         vocalBalanceVerification,
+        matchEqReference: referenceTrack && matchEqStore.getSnapshot().reference
+          ? { spectra: matchEqStore.getSnapshot().reference!, name: referenceTrack.name }
+          : null,
         externalPlugins: hostSnapshot.plugins,
         hostConnected: hostSnapshot.status === 'connected',
         initialChain: geminiInitialChain ?? (runOperatingMode === 'assisted' ? chain : undefined),
+        leadModules,
         externalProcessor: processExternalStage,
         postFades: getPostFades(),
         maxIterations: forceAutonomous ? 10 : maxIterations,
@@ -1740,23 +1935,35 @@ export default function App() {
         aiRefineCallback:
           useGeminiCloud && runOperatingMode === 'autonomous'
             ? async (ctx) => {
+                const refineCtx = vocalBalance.stemsCached ? { ...ctx, vocalBalance } : ctx;
                 const builtinRefine = async () => {
+                  assertCloudAiAvailable();
                   const res = await fetch('/api/ai/refine', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() },
                     signal: AbortSignal.timeout(12_000),
-                    body: JSON.stringify(ctx),
+                    body: JSON.stringify(refineCtx),
                   });
-                  const data = await res.json();
-                  if (!res.ok) throw new Error(data.error || `Refine error ${res.status}`);
+                  const data = await readBuiltinAiResponse(res);
                   return data.refined;
                 };
-                const run = await runProviderCall('refine', (opts) =>
-                  requestRefine(getActiveProviderConfig(), ctx, builtinRefine, opts),
-                );
+                let run: Awaited<ReturnType<typeof requestRefine>>;
+                try {
+                  run = await runProviderCall('refine', (opts) =>
+                    requestRefine(getActiveProviderConfig(), refineCtx, builtinRefine, opts),
+                  );
+                } catch (err) {
+                  if (!(err instanceof CloudAiRateLimitError)) throw err;
+                  // Spend limit reached mid-run: this pass is refined by the deterministic director.
+                  const notice = friendlyCloudAiLimitNotice(err);
+                  if (!isStale()) setAiNotice(notice);
+                  return { chain: null, producedBy: null, notices: [notice] };
+                }
                 aiProviderLog.push(...run.notices.map((n) => `Refine: ${n}`));
                 if (run.producedBy) aiProviderLog.push(`Refine: suggestion produced by ${run.producedBy}.`);
-                return { chain: run.result?.chain ?? null, producedBy: run.producedBy, notices: run.notices };
+                const refinedChain = run.result?.chain ? gateRebalance(run.result.chain) : null;
+                const gateNotices = rebalanceNotes.splice(0);
+                return { chain: refinedChain, producedBy: run.producedBy, notices: [...run.notices, ...gateNotices] };
               }
             : undefined,
         onProgress: (upd) => {
@@ -1874,6 +2081,7 @@ export default function App() {
         // The delivered chain must be audible and re-measured exactly as the loop verified it.
         setChainBypassed(false);
         updateChainWithHistory(structuredClone(report.finalChain));
+        setAiChangeBase({ before: preRunChain, after: structuredClone(report.finalChain) });
         recordCorrection(
           `CHAIN WITH AI (${report.objective.label} · Pass #${report.bestPassNumber})`,
           report.finalChain,
@@ -2072,6 +2280,7 @@ export default function App() {
         targetLufs: Math.max(-18, Math.min(-8, referenceTrack.analysis.integratedLufs)),
       },
       referenceAnalysis: referenceTrack.analysis,
+      matchEqProfile: matchEqStore.getProfile(),
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });
@@ -2546,10 +2755,29 @@ export default function App() {
     }
   };
 
+  const renderAiChanges = (idPrefix: string) =>
+    aiChangeBase && !directorRunning ? (
+      <React.Suspense fallback={null}>
+        <WhatAiChangedPanel
+          idPrefix={idPrefix}
+          before={aiChangeBase.before}
+          after={aiChangeBase.after}
+          current={chain}
+          disabled={directorRunning}
+          onApplyChain={(next, label) => {
+            updateChainWithHistory(next, label);
+            recordCorrection(label, next);
+            setStatusNotice(`${label}. Reanalyzing resulting audio...`);
+          }}
+        />
+      </React.Suspense>
+    ) : null;
+
   const masterConsole = (
     <MasterConsole
       chain={chain}
       stageTelemetry={stageTelemetry}
+      dynamicEqTraces={dynamicEqTraces}
       chainBypassed={chainBypassed}
       onChangeChain={(next) => {
         updateChainWithHistory(next);
@@ -2585,6 +2813,8 @@ export default function App() {
       onOpenRack={() => setRackWindowOpen(true)}
       onOpenStereoLab={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
       notice={statusNotice}
+      aiNotice={aiNotice}
+      aiChanges={renderAiChanges('console')}
       onAskAi={() => setActiveTab('ai')}
       onExport={() => setExportModalOpen(true)}
       onSeek={seekTo}
@@ -2598,6 +2828,22 @@ export default function App() {
         setStatusNotice(`Custom loudness target: ${lufs} LUFS.`);
       }}
       blanketPeaks={chainBypassed || auditionTarget === 'original' ? prePeaksHi : postPeaksHi ?? prePeaksHi}
+      timelineTransport={
+        <TimelinePlayer
+          prePeaks={prePeaksHi}
+          postPeaks={postPeaksHi}
+          durationSec={activeTrack?.durationSec ?? 0}
+          showPost={auditionTarget !== 'original'}
+          isPlaying={isPlaying}
+          fades={fades}
+          onFadesChange={setFades}
+          onSeek={seekTo}
+          onTogglePlay={togglePlay}
+          onImport={handleUploadSourceFile}
+          integrated
+          transportOnly
+        />
+      }
       timeline={
         <TimelinePlayer
           prePeaks={prePeaksHi}
@@ -2610,6 +2856,9 @@ export default function App() {
           onSeek={seekTo}
           onTogglePlay={togglePlay}
           onImport={handleUploadSourceFile}
+          integrated
+          hideTransport
+          extra={<React.Suspense fallback={null}><PlatformPreviewSelector levels={platformLevels} onOpenPanel={() => setActiveTab('qc')} /></React.Suspense>}
         />
       }
     />
@@ -2986,7 +3235,7 @@ export default function App() {
                 </div>
               </div>
 
-              <WaveformTimelineCanvas
+              <React.Suspense fallback={null}><WaveformTimelineCanvas
                 prePeaks={activeTrack.peaks}
                 postPeaks={postPeaks}
                 durationSec={activeTrack.durationSec}
@@ -2998,7 +3247,7 @@ export default function App() {
                   engineRef.current!.seek(sec);
                   telemetryStore.publish({ currentTimeSec: sec });
                 }}
-              />
+              /></React.Suspense>
 
               {/* Transport Controls */}
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3230,6 +3479,7 @@ export default function App() {
                 <h2 className="text-[11px] font-black uppercase tracking-[.16em] text-[#F2CA52]">Effects Rack / Processing Chain</h2>
                 <span className="text-[9px] font-mono-tabular uppercase tracking-wider text-[#A99A74]">Visible rack · Offline DSP / VST3</span>
               </div>
+              <React.Suspense fallback={<div className="p-3 text-[11px] text-[#A99A74]" role="status">Loading rack…</div>}>
               <MasteringRack
                 chain={chain}
                 chainBypassed={chainBypassed}
@@ -3254,6 +3504,7 @@ export default function App() {
                 onToggleExternalEditor={handleToggleExternalEditor}
                 onToggleExternalBypass={handleToggleExternalBypass}
               />
+              </React.Suspense>
             </section>
           )}
 
@@ -3310,6 +3561,8 @@ export default function App() {
               convergenceThreshold={convergenceThreshold}
               aiLoading={aiLoading}
               aiError={aiError}
+              aiNotice={aiNotice}
+              aiChanges={renderAiChanges('assistant')}
               onChangeOperatingMode={setOperatingMode}
               onChangeObjectiveId={setObjectiveId}
               onChangeCustomObjective={setCustomObjective}
@@ -3430,6 +3683,22 @@ export default function App() {
               selectedProfileId={qcTargetId}
               onSelectProfile={setQcTargetId}
               onAutoFixQc={handleAutoFixQc}
+              platformPanel={
+                <React.Suspense fallback={null}>
+                  <PlatformPreviewPanel
+                    levels={platformLevels}
+                    getMasterAudio={getPlatformMasterAudio}
+                    engine={engineRef.current}
+                    onPauseMain={() => {
+                      if (isPlaying) {
+                        engineRef.current?.pause();
+                        setIsPlaying(false);
+                        telemetryStore.publish({ isPlaying: false });
+                      }
+                    }}
+                  />
+                </React.Suspense>
+              }
             />
           )}
 
@@ -3476,15 +3745,17 @@ export default function App() {
       </div>
 
       {/* Bottom Meter Bridge */}
-      <MeterBridge
+      <React.Suspense fallback={null}><MeterBridge
         postAnalysis={auditionTarget === 'original' ? activeTrack?.analysis ?? null : postAnalysis}
         qcReport={qcReport}
         monitorVolume={monitorVolume}
         auditionLabel={auditionTarget.toUpperCase()}
         onChangeMonitorVolume={handleChangeMonitorVolume}
-      />
+      /></React.Suspense>
 
       {/* Export & Settings Modals */}
+      {rackWindowOpen && Boolean(activeTrack) && (
+      <React.Suspense fallback={null}>
       <FxRackWindow
         open={rackWindowOpen && Boolean(activeTrack)}
         onClose={() => setRackWindowOpen(false)}
@@ -3501,6 +3772,8 @@ export default function App() {
         sampleRate={activeTrack?.sampleRate ?? 48000}
         spectrum={postAnalysisState.status === 'ready' ? postAnalysis : activeTrack?.analysis ?? null}
       />
+      </React.Suspense>
+      )}
       {exportModalOpen && (
         <React.Suspense fallback={null}>
           <ExportModal

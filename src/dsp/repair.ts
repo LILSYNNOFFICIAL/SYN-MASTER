@@ -126,6 +126,7 @@ function repairStereoClicks(
     if (a < 5 || b > left.length - 6) continue;
     bridgeHermite(left, a, b);
     bridgeHermite(right, a, b);
+    for (let k = a; k <= b; k++) right[k] = left[k];
     repairs++;
   }
   return repairs;
@@ -155,21 +156,28 @@ function bridgeHermite(ch: Float32Array, a: number, b: number): void {
     const h10 = t3 - 2 * t2 + t;
     const h01 = -2 * t3 + 3 * t2;
     const h11 = t3 - t2;
-    const v = h00 * p0 + h10 * m0 * len + h01 * p1 + h11 * m1 * len;
-    ch[a + k] = Math.max(lo, Math.min(hi, v));
+    const reconstructed = h00 * p0 + h10 * m0 * len + h01 * p1 + h11 * m1 * len;
+    // Blend into the reconstruction with a raised-cosine microfade. The original
+    // samples are retained at both window edges, while the centre of the isolated
+    // discontinuity is fully replaced. This avoids creating a second click at either
+    // splice boundary and preserves the surrounding musical waveform.
+    const microfade = 0.5 - 0.5 * Math.cos(2 * Math.PI * t);
+    const original = ch[a + k];
+    const blended = original * (1 - microfade) + reconstructed * microfade;
+    ch[a + k] = Math.max(lo, Math.min(hi, blended));
   }
 }
 
 /**
  * Repairs a click in the first/last ~3 ms (where the Hermite bridge has no audio on one
  * side): everything up to just past the click is silenced and the audio is faded back in
- * (or out, at the end) with a 2 ms raised cosine. Returns 1 per repaired edge.
+ * (or out, at the end) with an 8 ms raised-cosine microfade. Returns 1 per repaired edge.
  */
 export function repairEdgeClicksChannel(ch: Float32Array, sampleRate: number, ratio = 10): number {
   const n = ch.length;
   if (n < 64) return 0;
   const pad = Math.max(2, Math.round(sampleRate * 0.0005));
-  const fade = Math.max(8, Math.round(sampleRate * 0.002));
+  const fade = Math.max(8, Math.round(sampleRate * 0.008));
   let repairs = 0;
   for (const reverse of [false, true]) {
     const hit = findEdgeClick(ch, sampleRate, reverse, ratio);
@@ -183,33 +191,28 @@ export function repairEdgeClicksChannel(ch: Float32Array, sampleRate: number, ra
   return repairs;
 }
 
-function repairStereoEdgeClicks(
-  left: Float32Array,
-  right: Float32Array,
-  sampleRate: number,
-  ratio: number,
-): number {
-  if (left.length !== right.length) throw new RangeError('Stereo repair requires equal-length channels.');
-  const n = left.length;
+/** Repair stereo file-edge clicks with one shared fade envelope. */
+export function repairEdgeClicksStereo(left: Float32Array, right: Float32Array, sampleRate: number, ratio = 10): number {
+  const n = Math.min(left.length, right.length);
   if (n < 64) return 0;
   const pad = Math.max(2, Math.round(sampleRate * 0.0005));
-  const fade = Math.max(8, Math.round(sampleRate * 0.002));
+  const fade = Math.max(8, Math.round(sampleRate * 0.008));
   let repairs = 0;
   for (const reverse of [false, true]) {
-    const leftHit = findEdgeClick(left, sampleRate, reverse, ratio);
-    const rightHit = findEdgeClick(right, sampleRate, reverse, ratio);
-    const indices = [leftHit.index, rightHit.index].filter((index) => index >= 0);
-    if (indices.length === 0) continue;
-    const mute = Math.min(n, Math.max(...indices) + pad);
-    const indexAt = (k: number) => reverse ? n - 1 - k : k;
+    const l = findEdgeClick(left.subarray(0, n), sampleRate, reverse, ratio);
+    const r = findEdgeClick(right.subarray(0, n), sampleRate, reverse, ratio);
+    const hit = Math.max(l.index, r.index);
+    if (hit < 0) continue;
+    const mute = Math.min(n, hit + pad);
+    const idx = (k: number) => (reverse ? n - 1 - k : k);
     for (let k = 0; k < mute; k++) {
-      left[indexAt(k)] = 0;
-      right[indexAt(k)] = 0;
+      left[idx(k)] = 0;
+      right[idx(k)] = 0;
     }
     for (let k = 0; k < fade && mute + k < n; k++) {
       const gain = 0.5 - 0.5 * Math.cos((Math.PI * k) / fade);
-      left[indexAt(mute + k)] *= gain;
-      right[indexAt(mute + k)] *= gain;
+      left[idx(mute + k)] *= gain;
+      right[idx(mute + k)] *= gain;
     }
     repairs++;
   }
@@ -312,11 +315,10 @@ export function applyRepair(
     clicksRepaired += stereoSame
       ? repairClicksChannel(left, sampleRate, ratio, 0.02, half)
       : repairStereoClicks(left, right, sampleRate, ratio, 0.02, half);
-    // Both channels share the same edge window so a one-sided defect does not shift
-    // the stereo image at the file boundary.
-    clicksRepaired += stereoSame
+    const edgeRepairs = stereoSame
       ? repairEdgeClicksChannel(left, sampleRate, ratio)
-      : repairStereoEdgeClicks(left, right, sampleRate, ratio);
+      : repairEdgeClicksStereo(left, right, sampleRate, ratio);
+    clicksRepaired += edgeRepairs;
   }
   const crackle = ((settings.decrackle ?? 0) / 100) * intensityScale;
   if (crackle > 0) {

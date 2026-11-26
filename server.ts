@@ -15,8 +15,9 @@ import {
   generateGeminiMasterStrategy,
   refineGeminiIteration,
 } from './src/server/aiMastering.ts';
-import { isValidAnalysisPayload, sanitizeAvailablePlugins } from './src/server/aiPayloadValidation.ts';
+import { isValidAnalysisPayload, sanitizeAvailablePlugins, sanitizeVocalBalance } from './src/server/aiPayloadValidation.ts';
 import { createRateLimiter } from './src/server/requestLimiter.mjs';
+import { createAiSpendLimiter, createAiSpendMiddleware, readAiSpendLimitsFromEnv } from './src/server/aiSpendLimiter.mjs';
 import { createAiAccessGuard } from './src/server/aiAccess.ts';
 import { validateChainAgainstInventory } from './src/director/processorInventory.ts';
 
@@ -56,7 +57,13 @@ const aiAccessGuard = createAiAccessGuard({
 });
 // Keep the existing IP budget in front of the access check, then reject unauthenticated
 // production calls before JSON parsing or any billable Gemini work.
-app.use('/api/ai', aiRateLimiter, aiAccessGuard);
+// Spend caps for the routes that bill GEMINI_API_KEY (cloud AI is on by default for FIX ALL):
+// per-client strategy/refine calls per minute, per-client daily caps and one global daily cap.
+// It runs after the access guard so unauthenticated traffic can never drain the shared budget.
+// Override with SYN_AI_STRATEGY_PER_MINUTE, SYN_AI_REFINE_PER_MINUTE, SYN_AI_STRATEGY_PER_DAY,
+// SYN_AI_CLIENT_PER_DAY and SYN_AI_GLOBAL_PER_DAY.
+const aiSpendGuard = createAiSpendMiddleware(createAiSpendLimiter({ limits: readAiSpendLimitsFromEnv(process.env) }));
+app.use('/api/ai', aiRateLimiter, aiAccessGuard, aiSpendGuard);
 // Offline codec jobs are CPU-intensive but must not compete with AI requests for the
 // same budget, so export has its own per-client limiter.
 const allowExportRequest = createRateLimiter({ limit: 30, windowMs: 60_000, maxKeys: 10_000 });
@@ -336,6 +343,7 @@ app.post('/api/ai/master', async (req, res) => {
       userGenreOverride,
       referenceAnalysis,
       availablePlugins,
+      vocalBalance,
     } = req.body ?? {};
     if (!isValidAnalysisPayload(analysis)) {
       res.status(400).json({ error: 'Valid audio analysis telemetry is required.' });
@@ -369,6 +377,7 @@ app.post('/api/ai/master', async (req, res) => {
       userGenreOverride: typeof userGenreOverride === 'string' ? userGenreOverride.slice(0, 60) : undefined,
       referenceAnalysis,
       availablePlugins: safePlugins,
+      vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
     res.json({ strategy });
   } catch (err) {
@@ -386,6 +395,8 @@ app.post('/api/ai/refine', async (req, res) => {
       targetTruePeakDb,
       preserveDynamics,
       qcReport,
+      targetGate,
+      vocalBalance,
     } = req.body ?? {};
     if (
       !isValidAnalysisPayload(preAnalysis) ||
@@ -421,6 +432,8 @@ app.post('/api/ai/refine', async (req, res) => {
       targetTruePeakDb: parsedTargetTp,
       preserveDynamics: preserveDynamics !== false,
       qcReport,
+      targetGate,
+      vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
     res.json({ refined });
   } catch (err) {

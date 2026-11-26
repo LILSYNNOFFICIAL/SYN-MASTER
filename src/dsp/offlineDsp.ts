@@ -1,6 +1,8 @@
 import { applyFadesInPlace, hasFades, type FadeSettings } from './fades';
 import { applyClipper, applyDither, applyTransientShaper } from './extraProcessors';
 import { applyRepair } from './repair';
+import { applyMatchEq } from './matchEq';
+import { applyVocalRebalance, fingerprintStereo, getRebalanceStems, type VocalRebalanceTelemetry } from './vocalRebalance';
 import type {
   BassEnhancerParams,
   CompressorParams,
@@ -10,6 +12,7 @@ import type {
   MaximizerParams,
   TransientShaperParams,
   DitherParams,
+  MatchEqParams,
   ClipperParams,
   MultibandMaximizerParams,
   MultibandBandParams,
@@ -19,6 +22,7 @@ import type {
   RestoreParams,
   SaturationParams,
   StereoImagerParams,
+  VocalRebalanceParams,
 } from '../types/mastering';
 import { dbToLinear, linearToDb, maxInterSampleAbsAt, measureIntegratedLufs } from './analyzer';
 import {
@@ -43,17 +47,30 @@ import {
   fftInPlace,
   ifftInPlace,
 } from './fft';
+import {
+  bandChannel,
+  channelGroups,
+  computeAutoGainDb,
+  designAuditionSections,
+  designDynamicSections,
+  isLegacyEq,
+  sectionsMagnitudeDb,
+} from './eqDesign';
 
 export interface ProcessorMeterTelemetry {
   id: string;
   inputPeakDb: number;
   outputPeakDb: number;
   gainReductionDb: number;
+  /** Vocal Rebalance only: whether cached stems were applied, and the effective stem gains. */
+  rebalance?: VocalRebalanceTelemetry;
 }
 
 export interface OfflineDspResult {
   channels: Float32Array[];
   telemetry: ProcessorMeterTelemetry[];
+  /** Per-module Dynamic EQ detector/gain history (only when `collectDynamicEqTraces` was set). */
+  dynamicEqTraces?: DynamicEqTrace[];
 }
 
 function measurePeakDb(l: Float32Array, r: Float32Array): number {
@@ -133,6 +150,23 @@ function convolveLinearPhaseFir(
 }
 
 function applyParametricEQ(
+  left: Float32Array,
+  right: Float32Array,
+  params: ParametricEQParams,
+  sampleRate: number,
+  intensityScale: number,
+  audition = false,
+): void {
+  // Chains saved before band subtypes / slopes / channels existed keep the original
+  // render path untouched, so they render bit-identically.
+  if (isLegacyEq(params)) {
+    applyParametricEQLegacy(left, right, params, sampleRate, intensityScale);
+    return;
+  }
+  applyParametricEQExtended(left, right, params, sampleRate, intensityScale, audition);
+}
+
+function applyParametricEQLegacy(
   left: Float32Array,
   right: Float32Array,
   params: ParametricEQParams,
@@ -248,21 +282,214 @@ function applyParametricEQ(
   }
 }
 
+function processSectionsInPlace(signal: Float32Array, sections: BiquadCoeffs[]): void {
+  if (sections.length === 0) return;
+  const states = sections.map(() => createBiquadState());
+  for (let i = 0; i < signal.length; i++) {
+    let x = signal[i];
+    for (let s = 0; s < sections.length; s++) x = processBiquadSample(x, sections[s], states[s]);
+    signal[i] = x;
+  }
+}
+
+/** Zero-phase (linear-phase) FIR kernel spectrum whose magnitude is the sections' cascade. */
+function buildLinearPhaseKernel(sections: BiquadCoeffs[], sampleRate: number, extraGainDb = 0) {
+  const designN = 1024;
+  const kernelLen = 1023;
+  const halfKernel = (kernelLen - 1) >> 1;
+  const convFftSize = 2048;
+  const specReal = new Float32Array(designN);
+  const specImag = new Float32Array(designN);
+  for (let k = 0; k <= designN / 2; k++) {
+    const freq = Math.max(1e-3, (k * sampleRate) / designN);
+    const mag = dbToLinear(sectionsMagnitudeDb(sections, freq, sampleRate) + extraGainDb);
+    specReal[k] = mag;
+    if (k > 0 && k < designN / 2) specReal[designN - k] = mag;
+  }
+  ifftInPlace(specReal, specImag);
+  const win = createBlackmanHarrisWindow(kernelLen);
+  const kernelReal = new Float32Array(convFftSize);
+  const kernelImag = new Float32Array(convFftSize);
+  for (let i = 0; i < kernelLen; i++) {
+    const shiftedIdx = (i - halfKernel + designN) % designN;
+    kernelReal[i] = specReal[shiftedIdx] * win[i];
+  }
+  fftInPlace(kernelReal, kernelImag);
+  return { kernelReal, kernelImag, convFftSize, blockSize: 1024, halfKernel };
+}
+
+/**
+ * Extended parametric EQ: band subtypes, slopes, per-band channel (stereo / mid / side /
+ * left / right), auto-gain and (preview-only) band solo. Processing order: stereo bands,
+ * then mid/side bands, then left/right bands; auto-gain trim last.
+ */
+function applyParametricEQExtended(
+  left: Float32Array,
+  right: Float32Array,
+  params: ParametricEQParams,
+  sampleRate: number,
+  intensityScale: number,
+  audition: boolean,
+): void {
+  const n = left.length;
+  if (n === 0 || intensityScale <= 1e-4) return;
+
+  const solo = audition ? params.bands.find((b) => b.enabled && b.solo) : undefined;
+  if (solo) {
+    const secs = designAuditionSections(solo, sampleRate);
+    const ch = bandChannel(solo, params.msMode);
+    if (ch === 'stereo') {
+      processSectionsInPlace(left, secs);
+      processSectionsInPlace(right, secs);
+      return;
+    }
+    const sig = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = ch === 'mid' ? 0.5 * (left[i] + right[i]) : ch === 'side' ? 0.5 * (left[i] - right[i]) : ch === 'left' ? left[i] : right[i];
+    }
+    processSectionsInPlace(sig, secs);
+    for (let i = 0; i < n; i++) {
+      left[i] = sig[i];
+      right[i] = ch === 'side' ? -sig[i] : sig[i];
+    }
+    return;
+  }
+
+  const groups = channelGroups(params, sampleRate, intensityScale);
+  const autoGainDb = params.autoGain ? computeAutoGainDb(params, sampleRate, intensityScale) : 0;
+  const hasMs = groups.mid.length > 0 || groups.side.length > 0;
+
+  if (params.phaseMode === 'linear') {
+    const conv = (signal: Float32Array, sections: BiquadCoeffs[]) => {
+      if (sections.length === 0) return;
+      const k = buildLinearPhaseKernel(sections, sampleRate);
+      convolveLinearPhaseFir(signal, k.kernelReal, k.kernelImag, k.convFftSize, k.blockSize, k.halfKernel);
+    };
+    conv(left, groups.stereo);
+    conv(right, groups.stereo);
+    if (hasMs) {
+      const mid = new Float32Array(n);
+      const side = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        mid[i] = 0.5 * (left[i] + right[i]);
+        side[i] = 0.5 * (left[i] - right[i]);
+      }
+      conv(mid, groups.mid);
+      conv(side, groups.side);
+      for (let i = 0; i < n; i++) {
+        left[i] = mid[i] + side[i];
+        right[i] = mid[i] - side[i];
+      }
+    }
+    conv(left, groups.left);
+    conv(right, groups.right);
+  } else {
+    const st = groups.stereo;
+    if (st.length) {
+      const sL = st.map(() => createBiquadState());
+      const sR = st.map(() => createBiquadState());
+      for (let i = 0; i < n; i++) {
+        let l = left[i];
+        let r = right[i];
+        for (let s = 0; s < st.length; s++) {
+          l = processBiquadSample(l, st[s], sL[s]);
+          r = processBiquadSample(r, st[s], sR[s]);
+        }
+        left[i] = l;
+        right[i] = r;
+      }
+    }
+    if (hasMs) {
+      const mS = groups.mid.map(() => createBiquadState());
+      const sS = groups.side.map(() => createBiquadState());
+      for (let i = 0; i < n; i++) {
+        let m = 0.5 * (left[i] + right[i]);
+        let sd = 0.5 * (left[i] - right[i]);
+        for (let s = 0; s < groups.mid.length; s++) m = processBiquadSample(m, groups.mid[s], mS[s]);
+        for (let s = 0; s < groups.side.length; s++) sd = processBiquadSample(sd, groups.side[s], sS[s]);
+        left[i] = m + sd;
+        right[i] = m - sd;
+      }
+    }
+    processSectionsInPlace(left, groups.left);
+    processSectionsInPlace(right, groups.right);
+  }
+
+  if (Math.abs(autoGainDb) > 1e-4) {
+    const g = dbToLinear(autoGainDb);
+    for (let i = 0; i < n; i++) {
+      left[i] *= g;
+      right[i] *= g;
+    }
+  }
+}
+
+export interface DynamicEqBandTrace {
+  id: string;
+  /** Detector envelope (dBFS) every `hopSamples`. */
+  detectorDb: Float32Array;
+  /** Applied band gain (dB, negative = cut) every `hopSamples`. */
+  gainDb: Float32Array;
+}
+
+/** Per-band detector / gain history of one Dynamic EQ render, for the threshold meter and live curve. */
+export interface DynamicEqTrace {
+  moduleId: string;
+  hopSamples: number;
+  sampleRate: number;
+  bands: DynamicEqBandTrace[];
+}
+
+export const DYNAMIC_EQ_TRACE_HOP = 512;
+
+type DynBand = DynamicEQParams['bands'][number];
+
+/** Bands that only use pre-existing fields take the original (bit-identical) loop. */
+export function isLegacyDynamicBand(band: DynBand): boolean {
+  return (
+    band.type === undefined &&
+    band.kneeDb === undefined &&
+    band.channel === undefined &&
+    band.sidechain === undefined &&
+    band.lookaheadMs === undefined
+  );
+}
+
+function dynamicSlope(band: DynBand): number {
+  const ratio = band.ratio !== undefined && Number.isFinite(band.ratio) ? Math.max(1, band.ratio) : 20 / 7;
+  return ratio === 20 / 7 ? 0.65 : 1 - 1 / ratio;
+}
+
 function applyDynamicEQ(
   left: Float32Array,
   right: Float32Array,
   params: DynamicEQParams,
   sampleRate: number,
   intensityScale: number,
+  trace: DynamicEqBandTrace[] | null = null,
+  audition = false,
 ): number {
   const n = left.length;
   let maxGr = 0;
+  const hop = DYNAMIC_EQ_TRACE_HOP;
+  const traceLen = Math.ceil(n / hop);
 
   for (const band of params.bands) {
     if (!band.enabled) continue;
     const mode = band.mode ?? 'cut';
     const limitDb = band.maxCutDb;
     if ((mode === 'cut' && limitDb >= -0.05) || (mode === 'boost' && limitDb <= 0.05)) continue;
+    const bandTrace: DynamicEqBandTrace | null = trace
+      ? { id: band.id, detectorDb: new Float32Array(traceLen).fill(-120), gainDb: new Float32Array(traceLen) }
+      : null;
+    if (bandTrace && trace) trace.push(bandTrace);
+
+    if (!isLegacyDynamicBand(band)) {
+      const gr = applyDynamicBandExtended(left, right, band, sampleRate, intensityScale, bandTrace);
+      if (gr > maxGr) maxGr = gr;
+      continue;
+    }
+
     const bpCoeffs = designBandPass(band.freq, band.q, sampleRate);
     const bpStateL = createBiquadState();
     const bpStateR = createBiquadState();
@@ -291,15 +518,15 @@ function applyDynamicEQ(
       let targetGainDb = 0;
       if (envDb > band.thresholdDb) {
         const over = envDb - band.thresholdDb;
-        const ratio = band.ratio !== undefined && Number.isFinite(band.ratio) ? Math.max(1, band.ratio) : 20 / 7;
-        const slope = ratio === 20 / 7 ? 0.65 : 1 - 1 / ratio;
+        const slope = dynamicSlope(band);
         if (mode === 'boost') {
           targetGainDb = Math.min(limitDb * intensityScale, over * slope * intensityScale);
         } else {
           targetGainDb = Math.max(limitDb * intensityScale, -over * slope * intensityScale);
         }
       }
-      const gainCoeff = targetGainDb < currentGainDb ? gainAttackCoeff : gainReleaseCoeff;
+      // Attack while the gain moves away from 0 dB (deeper cut or bigger boost), release on the way back.
+      const gainCoeff = Math.abs(targetGainDb) > Math.abs(currentGainDb) ? gainAttackCoeff : gainReleaseCoeff;
       currentGainDb = gainCoeff * currentGainDb + (1 - gainCoeff) * targetGainDb;
       if (Math.abs(currentGainDb) > maxGr) maxGr = Math.abs(currentGainDb);
 
@@ -309,10 +536,206 @@ function applyDynamicEQ(
       }
       left[i] = processBiquadSample(left[i], coeffs, eqL);
       right[i] = processBiquadSample(right[i], coeffs, eqR);
+      if (bandTrace && i % hop === 0) {
+        const t = i / hop;
+        bandTrace.detectorDb[t] = envDb;
+        bandTrace.gainDb[t] = currentGainDb;
+      }
+    }
+  }
+
+  // Preview-only band listen: play the soloed band's detector region.
+  const solo = audition ? params.bands.find((b) => b.enabled && b.solo) : undefined;
+  if (solo) {
+    const bp = designBandPass(solo.freq, Math.max(0.3, solo.q), sampleRate);
+    const ch = solo.channel ?? 'stereo';
+    if (ch === 'stereo') {
+      processSectionsInPlace(left, [bp]);
+      processSectionsInPlace(right, [bp]);
+    } else {
+      const sig = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        sig[i] = ch === 'mid' ? 0.5 * (left[i] + right[i]) : ch === 'side' ? 0.5 * (left[i] - right[i]) : ch === 'left' ? left[i] : right[i];
+      }
+      processSectionsInPlace(sig, [bp]);
+      for (let i = 0; i < n; i++) {
+        left[i] = sig[i];
+        right[i] = ch === 'side' ? -sig[i] : sig[i];
+      }
     }
   }
 
   return Number(maxGr.toFixed(2));
+}
+
+/** Soft-knee overshoot: 0 below the knee, quadratic inside, linear above. */
+export function softKneeOver(over: number, kneeDb: number): number {
+  if (kneeDb <= 0) return Math.max(0, over);
+  const h = kneeDb / 2;
+  if (over <= -h) return 0;
+  if (over >= h) return over;
+  return ((over + h) * (over + h)) / (2 * kneeDb);
+}
+
+/**
+ * Dynamic band with a curve type, soft knee, channel (stereo / mid / side / left / right),
+ * an own-frequency sidechain detector and detector lookahead. The gain envelope and
+ * cut/boost/ratio maths match the legacy loop.
+ */
+function applyDynamicBandExtended(
+  left: Float32Array,
+  right: Float32Array,
+  band: DynBand,
+  sampleRate: number,
+  intensityScale: number,
+  bandTrace: DynamicEqBandTrace | null,
+): number {
+  const n = left.length;
+  const mode = band.mode ?? 'cut';
+  const limitDb = band.maxCutDb;
+  const channel = band.channel ?? 'stereo';
+  const sc = band.sidechain?.mode === 'custom' ? band.sidechain : null;
+  const detFreq = sc ? sc.freq : band.freq;
+  const detQ = sc ? sc.q : band.q;
+  const knee = Math.max(0, band.kneeDb ?? 0);
+  const look = Math.max(0, Math.min(Math.round(((band.lookaheadMs ?? 0) / 1000) * sampleRate), Math.floor(sampleRate * 0.02)));
+  const slope = dynamicSlope(band);
+  const hop = DYNAMIC_EQ_TRACE_HOP;
+
+  const bpCoeffs = designBandPass(detFreq, detQ, sampleRate);
+  const bpA = createBiquadState();
+  const bpB = createBiquadState();
+  const detectorAttackCoeff = Math.exp(-1 / Math.max(1, sampleRate * 0.001));
+  const detectorReleaseCoeff = Math.exp(-1 / Math.max(1, sampleRate * 0.03));
+  const gainAttackCoeff = Math.exp(-1 / Math.max(1, (band.attackMs / 1000) * sampleRate));
+  const gainReleaseCoeff = Math.exp(-1 / Math.max(1, (band.releaseMs / 1000) * sampleRate));
+  let env = 0;
+  let currentGainDb = 0;
+  let maxGr = 0;
+  let sections = designDynamicSections(band.type, band.freq, band.q, 0, sampleRate);
+  const stA = sections.map(() => createBiquadState());
+  const stB = sections.map(() => createBiquadState());
+  // When the section count changes with gain (never for these types), states are rebuilt.
+  const delayL = new Float32Array(look + 1);
+  const delayR = new Float32Array(look + 1);
+  let dIdx = 0;
+
+  for (let i = 0; i < n; i++) {
+    const inL = left[i];
+    const inR = right[i];
+    // Detector sees the undelayed input; audio is delayed by the lookahead.
+    let detA: number;
+    let detB = 0;
+    if (channel === 'stereo') {
+      detA = processBiquadSample(inL, bpCoeffs, bpA);
+      detB = processBiquadSample(inR, bpCoeffs, bpB);
+    } else {
+      const x = channel === 'mid' ? 0.5 * (inL + inR) : channel === 'side' ? 0.5 * (inL - inR) : channel === 'left' ? inL : inR;
+      detA = processBiquadSample(x, bpCoeffs, bpA);
+    }
+    const det = Math.max(Math.abs(detA), Math.abs(detB));
+    env = det > env
+      ? detectorAttackCoeff * env + (1 - detectorAttackCoeff) * det
+      : detectorReleaseCoeff * env + (1 - detectorReleaseCoeff) * det;
+    const envDb = linearToDb(env);
+    const over = softKneeOver(envDb - band.thresholdDb, knee);
+    let targetGainDb = 0;
+    if (over > 0) {
+      targetGainDb = mode === 'boost'
+        ? Math.min(limitDb * intensityScale, over * slope * intensityScale)
+        : Math.max(limitDb * intensityScale, -over * slope * intensityScale);
+    }
+    const gainCoeff = Math.abs(targetGainDb) > Math.abs(currentGainDb) ? gainAttackCoeff : gainReleaseCoeff;
+    currentGainDb = gainCoeff * currentGainDb + (1 - gainCoeff) * targetGainDb;
+    if (Math.abs(currentGainDb) > maxGr) maxGr = Math.abs(currentGainDb);
+    if ((i & 31) === 0) {
+      const next = designDynamicSections(band.type, band.freq, band.q, currentGainDb, sampleRate);
+      if (next.length !== sections.length) {
+        stA.length = 0;
+        stB.length = 0;
+        next.forEach(() => { stA.push(createBiquadState()); stB.push(createBiquadState()); });
+      }
+      sections = next;
+    }
+
+    let aL = inL;
+    let aR = inR;
+    if (look > 0) {
+      aL = delayL[dIdx];
+      aR = delayR[dIdx];
+      delayL[dIdx] = inL;
+      delayR[dIdx] = inR;
+      dIdx = (dIdx + 1) % look;
+    }
+    if (channel === 'stereo') {
+      for (let s = 0; s < sections.length; s++) {
+        aL = processBiquadSample(aL, sections[s], stA[s]);
+        aR = processBiquadSample(aR, sections[s], stB[s]);
+      }
+    } else if (channel === 'left') {
+      for (let s = 0; s < sections.length; s++) aL = processBiquadSample(aL, sections[s], stA[s]);
+    } else if (channel === 'right') {
+      for (let s = 0; s < sections.length; s++) aR = processBiquadSample(aR, sections[s], stA[s]);
+    } else {
+      let m = 0.5 * (aL + aR);
+      let sd = 0.5 * (aL - aR);
+      if (channel === 'mid') {
+        for (let s = 0; s < sections.length; s++) m = processBiquadSample(m, sections[s], stA[s]);
+      } else {
+        for (let s = 0; s < sections.length; s++) sd = processBiquadSample(sd, sections[s], stA[s]);
+      }
+      aL = m + sd;
+      aR = m - sd;
+    }
+    left[i] = aL;
+    right[i] = aR;
+    if (bandTrace && i % hop === 0) {
+      const t = i / hop;
+      bandTrace.detectorDb[t] = envDb;
+      bandTrace.gainDb[t] = currentGainDb;
+    }
+  }
+
+  // Lookahead keeps the output time-aligned: shift the delayed audio back by `look` samples
+  // and fill the tail with the remaining delayed samples.
+  if (look > 0) {
+    for (let i = 0; i < n - look; i++) {
+      left[i] = left[i + look];
+      right[i] = right[i + look];
+    }
+    // The last `look` input samples are still in the delay line; flush them through
+    // the final (held) filter state so the tail is not lost.
+    for (let k = 0; k < look; k++) {
+      let aL = delayL[(dIdx + k) % look];
+      let aR = delayR[(dIdx + k) % look];
+      if (channel === 'stereo') {
+        for (let s = 0; s < sections.length; s++) {
+          aL = processBiquadSample(aL, sections[s], stA[s]);
+          aR = processBiquadSample(aR, sections[s], stB[s]);
+        }
+      } else if (channel === 'left') {
+        for (let s = 0; s < sections.length; s++) aL = processBiquadSample(aL, sections[s], stA[s]);
+      } else if (channel === 'right') {
+        for (let s = 0; s < sections.length; s++) aR = processBiquadSample(aR, sections[s], stA[s]);
+      } else {
+        let m = 0.5 * (aL + aR);
+        let sd = 0.5 * (aL - aR);
+        if (channel === 'mid') {
+          for (let s = 0; s < sections.length; s++) m = processBiquadSample(m, sections[s], stA[s]);
+        } else {
+          for (let s = 0; s < sections.length; s++) sd = processBiquadSample(sd, sections[s], stA[s]);
+        }
+        aL = m + sd;
+        aR = m - sd;
+      }
+      const idx = n - look + k;
+      if (idx >= 0) {
+        left[idx] = aL;
+        right[idx] = aR;
+      }
+    }
+  }
+  return maxGr;
 }
 
 function applyCompressor(
@@ -1258,6 +1681,13 @@ function applyMultibandMaximizer(
 export interface OfflineDspOptions {
   /** The caller transferred exclusive ownership of these buffers and permits in-place rendering. */
   takeOwnership?: boolean;
+  /**
+   * Preview audition: honour EQ / Dynamic EQ band solo (listen) flags. Export, Fix All and
+   * verification never set this, so a soloed band can never leak into a delivered master.
+   */
+  audition?: boolean;
+  /** Record Dynamic EQ detector / gain history for the threshold meters and live curve. */
+  collectDynamicEqTraces?: boolean;
 }
 
 /**
@@ -1292,6 +1722,8 @@ export function processChainOffline(
     : null;
 
   const telemetry: ProcessorMeterTelemetry[] = [];
+  const dynamicEqTraces: DynamicEqTrace[] = [];
+  const audition = options.audition === true;
 
   for (const mod of chain) {
     const inputPeakDb = measurePeakDb(left, right);
@@ -1299,6 +1731,13 @@ export function processChainOffline(
       telemetry.push({ id: mod.id, inputPeakDb, outputPeakDb: inputPeakDb, gainReductionDb: 0 });
       continue;
     }
+    // Vocal Rebalance stems belong to the audio they were separated from: look them up by the
+    // fingerprint of this module's own (pre input-gain) input, so a rebalance after other
+    // processing or on another track renders as a no-op instead of a wrong mix.
+    let rebalanceTelemetry: VocalRebalanceTelemetry | undefined;
+    const rebalanceStems = mod.type === 'vocal-rebalance'
+      ? getRebalanceStems(fingerprintStereo(left, right, sampleRate))
+      : null;
 
     const useWetDry = mod.wetDry < 99.5;
     let dryL: Float32Array | null = null;
@@ -1324,11 +1763,14 @@ export function processChainOffline(
 
     switch (mod.type) {
       case 'parametric-eq':
-        applyParametricEQ(left, right, mod.params as ParametricEQParams, sampleRate, intensityScale);
+        applyParametricEQ(left, right, mod.params as ParametricEQParams, sampleRate, intensityScale, audition);
         break;
-      case 'dynamic-eq':
-        grDb = applyDynamicEQ(left, right, mod.params as DynamicEQParams, sampleRate, intensityScale);
+      case 'dynamic-eq': {
+        const bands: DynamicEqBandTrace[] | null = options.collectDynamicEqTraces ? [] : null;
+        grDb = applyDynamicEQ(left, right, mod.params as DynamicEQParams, sampleRate, intensityScale, bands, audition);
+        if (bands) dynamicEqTraces.push({ moduleId: mod.id, hopSamples: DYNAMIC_EQ_TRACE_HOP, sampleRate, bands });
         break;
+      }
       case 'compressor':
         grDb = applyCompressor(left, right, mod.params as CompressorParams, sampleRate, intensityScale);
         break;
@@ -1375,9 +1817,23 @@ export function processChainOffline(
       case 'multiband-maximizer':
         grDb = applyMultibandMaximizer(left, right, mod.params as MultibandMaximizerParams, sampleRate, intensityScale, multibandScratch!);
         break;
+      case 'match-eq':
+        applyMatchEq(left, right, mod.params as MatchEqParams, sampleRate, intensityScale);
+        break;
       case 'dither':
         // Telemetry: no gain reduction; the dither level is not a GR value.
         applyDither(left, right, mod.params as DitherParams, intensityScale);
+        break;
+      case 'vocal-rebalance':
+        rebalanceTelemetry = applyVocalRebalance(
+          left,
+          right,
+          mod.params as VocalRebalanceParams,
+          rebalanceStems,
+          sampleRate,
+          intensityScale,
+          inGain,
+        );
         break;
     }
 
@@ -1406,6 +1862,7 @@ export function processChainOffline(
       inputPeakDb,
       outputPeakDb,
       gainReductionDb: grDb,
+      ...(rebalanceTelemetry ? { rebalance: rebalanceTelemetry } : {}),
     });
   }
 
@@ -1416,5 +1873,6 @@ export function processChainOffline(
   return {
     channels: postFades && hasFades(postFades) ? applyFadesInPlace(out, sampleRate, postFades) : out,
     telemetry,
+    ...(options.collectDynamicEqTraces ? { dynamicEqTraces } : {}),
   };
 }

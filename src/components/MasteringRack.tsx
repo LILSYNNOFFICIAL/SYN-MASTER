@@ -49,6 +49,7 @@ const NATIVE_PROCESSOR_TYPES: ProcessorType[] = [
   'clipper',
   'multiband-maximizer',
   'dither',
+  'match-eq',
 ];
 
 export const MasteringRack: React.FC<Props> = React.memo(

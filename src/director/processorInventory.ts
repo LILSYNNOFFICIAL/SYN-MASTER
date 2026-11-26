@@ -12,7 +12,7 @@ export interface InventoryParamBound {
 export interface VerifiedProcessorDescriptor {
   type: ProcessorType;
   displayName: string;
-  role: 'cleanup' | 'eq' | 'dynamics' | 'color' | 'stereo' | 'limiting';
+  role: 'cleanup' | 'eq' | 'dynamics' | 'color' | 'stereo' | 'limiting' | 'balance';
   realtimeSupported: boolean;
   offlineSupported: boolean;
   maxRecommendedInstances: number;
@@ -59,6 +59,14 @@ export const VERIFIED_NATIVE_PROCESSOR_INVENTORY: Record<
       phaseMode: { options: ['minimum', 'linear'], defaultValue: 'minimum' },
       msMode: { options: ['stereo', 'mid-side'], defaultValue: 'stereo' },
       tiltDb: { min: -6, max: 6, defaultValue: 0, unit: 'dB' },
+      autoGain: { defaultValue: false },
+      'bands[].shape': { options: ['bell', 'lowshelf', 'highshelf', 'lowpass', 'highpass', 'notch', 'bandpass', 'tilt'], defaultValue: 'bell' },
+      'bands[].subtype': { options: ['bell', 'proportional', 'band-shelf', 'analog', 'baxandall', 'vintage', 'resonant', 'flat', 'brickwall'], defaultValue: 'bell' },
+      'bands[].slope': { options: ['6', '12', '18', '24', '36', '48', '72', '96'], defaultValue: 12, unit: 'dB/oct' },
+      'bands[].channel': { options: ['stereo', 'mid', 'side', 'left', 'right'], defaultValue: 'stereo' },
+      'bands[].freq': { min: 20, max: 19500, defaultValue: 1000, unit: 'Hz' },
+      'bands[].gain': { min: -12, max: 12, defaultValue: 0, unit: 'dB' },
+      'bands[].q': { min: 0.25, max: 12, defaultValue: 1 },
     },
   },
   'dynamic-eq': {
@@ -75,6 +83,13 @@ export const VERIFIED_NATIVE_PROCESSOR_INVENTORY: Record<
       maxCutDb: { min: -12, max: 0, defaultValue: -3, unit: 'dB' },
       attackMs: { min: 1, max: 100, defaultValue: 10, unit: 'ms' },
       releaseMs: { min: 20, max: 600, defaultValue: 110, unit: 'ms' },
+      ratio: { min: 1, max: 20, defaultValue: 20 / 7, unit: ':1' },
+      mode: { options: ['cut', 'boost'], defaultValue: 'cut' },
+      type: { options: ['bell', 'proportional', 'band-shelf', 'baxandall-bass', 'baxandall-treble', 'low-shelf', 'high-shelf'], defaultValue: 'bell' },
+      kneeDb: { min: 0, max: 24, defaultValue: 0, unit: 'dB' },
+      channel: { options: ['stereo', 'mid', 'side', 'left', 'right'], defaultValue: 'stereo' },
+      lookaheadMs: { min: 0, max: 10, defaultValue: 0, unit: 'ms' },
+      'sidechain.mode': { options: ['band', 'custom'], defaultValue: 'band' },
     },
   },
   compressor: {
@@ -225,6 +240,42 @@ export const VERIFIED_NATIVE_PROCESSOR_INVENTORY: Record<
       bitDepth: { options: ['16', '20', '24'], defaultValue: 24 },
       shape: { options: ['tpdf', 'tpdf-hp', 'shaped'], defaultValue: 'tpdf' },
       autoBlank: { options: ['true', 'false'], defaultValue: 'true' },
+    },
+  },
+  'match-eq': {
+    type: 'match-eq',
+    displayName: PROCESSOR_DEFAULT_NAMES['match-eq'],
+    role: 'eq',
+    realtimeSupported: true,
+    offlineSupported: true,
+    maxRecommendedInstances: 1,
+    parameters: {
+      amount: { min: 0, max: 100, defaultValue: 75, unit: '%' },
+      smoothing: { options: ['1', '2', '3', '6', '12', '24'], defaultValue: 3, unit: '1/N oct' },
+      maxBoostDb: { min: 0, max: 12, defaultValue: 6, unit: 'dB' },
+      maxCutDb: { min: 0, max: 12, defaultValue: 6, unit: 'dB' },
+      lowHz: { min: 20, max: 2000, defaultValue: 30, unit: 'Hz' },
+      highHz: { min: 1000, max: 20000, defaultValue: 18000, unit: 'Hz' },
+      channel: { options: ['stereo', 'mid', 'side'], defaultValue: 'stereo' },
+      phase: { options: ['linear', 'minimum'], defaultValue: 'linear' },
+    },
+  },
+  'vocal-rebalance': {
+    type: 'vocal-rebalance',
+    displayName: PROCESSOR_DEFAULT_NAMES['vocal-rebalance'],
+    role: 'balance',
+    // Offline only (preview render, export, Fix All). Realtime playback uses the last render.
+    realtimeSupported: false,
+    offlineSupported: true,
+    maxRecommendedInstances: 1,
+    parameters: {
+      vocalGainDb: { min: -12, max: 6, defaultValue: 0, unit: 'dB' },
+      bassEnabled: { defaultValue: false },
+      bassGainDb: { min: -12, max: 6, defaultValue: 0, unit: 'dB' },
+      drumsEnabled: { defaultValue: false },
+      drumsGainDb: { min: -12, max: 6, defaultValue: 0, unit: 'dB' },
+      sensitivity: { min: 0, max: 100, defaultValue: 30, unit: '%' },
+      smoothingMs: { min: 5, max: 500, defaultValue: 40, unit: 'ms' },
     },
   },
   'multiband-maximizer': {

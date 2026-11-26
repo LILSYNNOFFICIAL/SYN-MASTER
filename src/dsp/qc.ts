@@ -1,4 +1,5 @@
 import { isNoiseLikeFloor } from './analyzer';
+import { buildPlatformHints } from './platformRules';
 import type { AudioAnalysis, ExportConfig, QCCheckItem, QCReport, QCTargetProfile } from '../types/mastering';
 
 export const QC_TARGET_PROFILES: QCTargetProfile[] = [
@@ -337,5 +338,11 @@ export function runQualityControl(
     warningCount,
     failCount,
     checks,
+    // Read-only hint for the QC panel and the AI prompt; it does not affect any status above.
+    platformHints: buildPlatformHints({
+      integratedLufs: post.integratedLufs,
+      truePeakDb: post.truePeakDb,
+      samplePeakDb: post.samplePeakDb,
+    }),
   };
 }

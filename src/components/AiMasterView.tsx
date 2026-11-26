@@ -77,6 +77,10 @@ interface Props {
   convergenceThreshold: number;
   aiLoading: boolean;
   aiError: string | null;
+  /** Friendly notice (e.g. cloud AI limit reached; FIX ALL used the local DSP planner). */
+  aiNotice?: string | null;
+  /** "What AI changed" list shown after a FIX ALL / CHAIN WITH AI run. */
+  aiChanges?: React.ReactNode;
   onChangeOperatingMode: (mode: DirectorOperatingMode) => void;
   onChangeObjectiveId: (id: MasteringObjectiveId) => void;
   onChangeCustomObjective: (spec: CustomObjectiveSpec) => void;
@@ -119,7 +123,16 @@ const OBJECTIVE_LABELS: Array<{ id: MasteringObjectiveId; label: string }> = [
   { id: 'custom', label: 'Custom' },
 ];
 
-function verificationBadgeClass(status: FindingVerificationStatus): string {
+function isSourceLimitationFinding(findingId: string): boolean {
+  // These defects are already baked into the premaster. The current stereo mastering
+  // chain cannot reconstruct clipped peaks, restore dynamics removed upstream, or
+  // prove source de-distortion. Keep them visible, but do not present them as a failed
+  // mastering correction or invite the user to run the same repair repeatedly.
+  return ['diag-clipping', 'diag-overcompressed', 'diag-thd'].includes(findingId);
+}
+
+function verificationBadgeClass(status: FindingVerificationStatus, sourceLimitation = false): string {
+  if (sourceLimitation) return 'bg-[#F59E0B]/15 text-[#FBBF24] border border-[#F59E0B]/40';
   switch (status) {
     case 'RESOLVED':
       return 'bg-[#10B981]/20 text-[#34D399] border border-[#10B981]/40';
@@ -133,6 +146,21 @@ function verificationBadgeClass(status: FindingVerificationStatus): string {
     case 'ACTIVE':
     default:
       return 'bg-[#EF4444]/20 text-[#FCA5A5] border border-[#EF4444]/40';
+  }
+}
+
+function verificationCardClass(status: FindingVerificationStatus): string {
+  switch (status) {
+    case 'IMPROVED':
+      return 'bg-[#38BDF8]/6 border-[#38BDF8]/35';
+    case 'PARTIALLY_RESOLVED':
+      return 'bg-[#F59E0B]/6 border-[#F59E0B]/35';
+    case 'UNVERIFIED':
+      return 'bg-[#9CA3AF]/6 border-[#6B7280]/45';
+    case 'UNRESOLVED':
+    case 'ACTIVE':
+    default:
+      return 'bg-[#EF4444]/8 border-[#EF4444]/35';
   }
 }
 
@@ -171,6 +199,8 @@ export const AiMasterView: React.FC<Props> = ({
   convergenceThreshold,
   aiLoading,
   aiError,
+  aiNotice,
+  aiChanges,
   onChangeOperatingMode,
   onChangeObjectiveId,
   onChangeCustomObjective,
@@ -301,6 +331,41 @@ export const AiMasterView: React.FC<Props> = ({
   const activePluginSummary = directorReport?.pluginSummary ?? directorPlan?.pluginSummary ?? null;
   const activeEval = directorReport?.multiObjective ?? null;
   const effectiveVerification = postFixVerification ?? directorReport?.postFixVerification ?? null;
+  const actionableActiveFindings = effectiveVerification?.activeFindings.filter(
+    (finding) => !isSourceLimitationFinding(finding.findingId),
+  ) ?? [];
+  const sourceLimitations = effectiveVerification?.activeFindings.filter(
+    (finding) => isSourceLimitationFinding(finding.findingId),
+  ) ?? [];
+  const verifiedResolvedFindings = effectiveVerification?.analysisFresh && effectiveVerification.postAnalysis
+    ? effectiveVerification.resolvedFindings.filter((finding) => finding.status === 'RESOLVED' && finding.measurementReliable)
+    : [];
+  const verifiedResolvedIds = new Set(
+    directorReport?.postFixVerification?.resolvedFindings
+      .filter((finding) => finding.status === 'RESOLVED' && finding.measurementReliable)
+      .map((finding) => finding.findingId) ?? [],
+  );
+  const sourceLimitationIds = new Set(
+    directorReport?.postFixVerification?.activeFindings
+      .filter((finding) => isSourceLimitationFinding(finding.findingId))
+      .map((finding) => finding.findingId) ?? [],
+  );
+  const allBaselineTechnicalFindingsAccounted = Boolean(directorReport) &&
+    (directorReport?.diagnosis.findings ?? [])
+      .filter((finding) => finding.kind === 'technical-problem')
+      .every((finding) => verifiedResolvedIds.has(finding.id) || sourceLimitationIds.has(finding.id));
+  const reportIsVerified = Boolean(
+    directorReport &&
+    allBaselineTechnicalFindingsAccounted &&
+    directorReport.status === 'converged' &&
+    directorReport.qcReport.failCount === 0 &&
+    directorReport.postFixVerification?.analysisFresh === true &&
+    directorReport.postFixVerification?.postAnalysis &&
+    (directorReport.postFixVerification?.activeFindings ?? []).every((finding) =>
+      isSourceLimitationFinding(finding.findingId),
+    ) &&
+    (directorReport.postFixVerification?.newlyIntroducedFindings.length ?? 0) === 0
+  );
   const effectivePost: AudioAnalysis | null = effectiveVerification
     ? effectiveVerification.analysisFresh && effectiveVerification.postAnalysis
       ? effectiveVerification.postAnalysis
@@ -450,7 +515,8 @@ export const AiMasterView: React.FC<Props> = ({
                   key={m.id}
                   type="button"
                   onClick={() => onChangeOperatingMode(m.id)}
-                  className={`p-2 rounded border text-left transition-colors ${
+                  aria-pressed={operatingMode === m.id}
+                  className={`syn-ai-mode-card p-2 rounded border text-left transition-colors ${
                     operatingMode === m.id
                       ? 'bg-[#D4AF37]/15 border-[#D4AF37] text-[#F2CA52]'
                       : 'bg-[#0C0D12] border-[#242732] text-[#C5CDD8] hover:border-[#3A3F50]'
@@ -484,7 +550,8 @@ export const AiMasterView: React.FC<Props> = ({
                   key={obj.id}
                   type="button"
                   onClick={() => onChangeObjectiveId(obj.id)}
-                  className={`px-2.5 py-1 rounded border text-[11px] font-semibold whitespace-nowrap ${
+                  aria-pressed={objectiveId === obj.id}
+                  className={`syn-ai-chip-btn px-2.5 py-1 rounded border text-[11px] font-semibold whitespace-nowrap ${
                     objectiveId === obj.id
                       ? 'bg-[#D4AF37] text-[#070709] border-[#F2CA52]'
                       : 'bg-[#0C0D12] border-[#262934] text-[#C5CDD8] hover:border-[#D4AF37]/60'
@@ -653,6 +720,14 @@ export const AiMasterView: React.FC<Props> = ({
           </div>
         )}
 
+        {aiNotice && (
+          <div role="status" data-testid="ai-cloud-limit-notice" className="p-2.5 rounded bg-[#F59E0B]/10 border border-[#F59E0B]/40 text-xs text-[#FCD34D]">
+            {aiNotice}
+          </div>
+        )}
+
+        {aiChanges && <div className="syn-aichg-host-wide">{aiChanges}</div>}
+
         {aiError && (
           <div className="p-2.5 rounded bg-[#EF4444]/10 border border-[#EF4444]/40 text-xs text-[#FCA5A5]">
             {aiError} — Deterministic DSP Director remains fully functional locally.
@@ -727,7 +802,7 @@ export const AiMasterView: React.FC<Props> = ({
           {effectiveVerification ? (
             <div className="flex flex-col gap-3 text-xs">
               {activeDiagnosis && activeDiagnosis.workingWell.length > 0 && (
-                <div className="p-2.5 rounded bg-[#10B981]/10 border border-[#10B981]/30">
+                <div className="syn-ai-good p-2.5 rounded bg-[#10B981]/10 border border-[#10B981]/30">
                   <div className="font-semibold text-[#34D399] mb-1">Working Well in Source</div>
                   <ul className="list-disc list-inside text-[#C5CDD8] flex flex-col gap-0.5">
                     {activeDiagnosis.workingWell.map((w, idx) => (
@@ -742,31 +817,31 @@ export const AiMasterView: React.FC<Props> = ({
                 <p className="text-[10px] text-[#9CA3AF]">Run an autonomous repair pass against the original track. SYN-MASTER applies the best validated chain, then re-analyzes the result so unresolved issues stay visible.</p>
                 <div className="text-[11px] font-bold uppercase tracking-wider text-[#F7F8FA] flex items-center justify-between">
                   <span>
-                    Remaining Active Problems ({effectiveVerification.activeFindings.length})
+                    Remaining Active Problems ({actionableActiveFindings.length})
                   </span>
-                  {effectiveVerification.activeFindings.length > 0 && (
-                    <button type="button" onClick={onFixAllProblems} disabled={directorRunning} className="rounded-md bg-[#D4AF37] px-3 py-1.5 text-[10px] font-extrabold tracking-wide text-[#08090B] hover:bg-[#F2CA52] disabled:cursor-not-allowed disabled:opacity-50">
+                  {actionableActiveFindings.length > 0 && (
+                    <button type="button" onClick={onFixAllProblems} disabled={directorRunning} className="syn-ai-fixall rounded-md bg-[#D4AF37] px-3 py-1.5 text-[10px] font-extrabold tracking-wide text-[#08090B] hover:bg-[#F2CA52] disabled:cursor-not-allowed disabled:opacity-50">
                       {directorRunning ? 'FIXING & VERIFYING…' : 'FIX ALL & VERIFY'}
                     </button>
                   )}
-                  {effectiveVerification.activeFindings.length === 0 && (
+                  {actionableActiveFindings.length === 0 && (
                     <span className="text-[#34D399] font-mono-tabular">
-                      0 ACTIVE TECHNICAL PROBLEMS
+                      0 ACTIONABLE MASTERING PROBLEMS
                     </span>
                   )}
                 </div>
 
-                {effectiveVerification.activeFindings.length > 0 && (
+                {actionableActiveFindings.length > 0 && (
                   <div
                     className={`grid grid-cols-1 gap-2 ${
-                      effectiveVerification.activeFindings.length > 1 ? 'md:grid-cols-2' : ''
+                      actionableActiveFindings.length > 1 ? 'md:grid-cols-2' : ''
                     }`}
                   >
-                    {effectiveVerification.activeFindings.map((vf) => (
+                    {actionableActiveFindings.map((vf) => (
                       <div
                         key={vf.findingId}
                         data-testid={`active-finding-${vf.findingId}`}
-                        className="p-2.5 rounded border bg-[#EF4444]/8 border-[#EF4444]/35 flex flex-col gap-1.5"
+                        className={`syn-ai-finding syn-ai-finding-open p-2.5 rounded border flex flex-col gap-1.5 ${verificationCardClass(vf.status)}`}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
@@ -830,22 +905,45 @@ export const AiMasterView: React.FC<Props> = ({
                 )}
               </div>
 
+              {sourceLimitations.length > 0 && (
+                <div data-testid="source-limitations-section" className="flex flex-col gap-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[#FBBF24]">
+                    Source Limitations ({sourceLimitations.length})
+                  </div>
+                  <p className="text-[11px] text-[#9CA3AF]">
+                    These conditions were already present in the imported premaster. They remain visible because the current mastering chain cannot safely reconstruct missing or damaged source information. They are not failed FIX ALL corrections.
+                  </p>
+                  {sourceLimitations.map((vf) => (
+                    <div key={vf.findingId} data-testid={`source-limitation-${vf.findingId}`} className="p-2.5 rounded border bg-[#F59E0B]/6 border-[#F59E0B]/35 flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-[#F7F8FA]">{vf.originalFinding.title}</span>
+                        <span className={`text-[10px] font-mono-tabular font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap ${verificationBadgeClass(vf.status, true)}`}>
+                          SOURCE LIMITATION
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#C5CDD8]">{vf.verificationSummary}</p>
+                      {vf.nextRecommendedAction && <p className="text-[11px] text-[#D4AF37]">Best next step: {vf.nextRecommendedAction}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Verified Resolved Findings (Before/After proof + Status: RESOLVED) */}
-              {effectiveVerification.resolvedFindings.length > 0 && (
+              {verifiedResolvedFindings.length > 0 && (
                 <div data-testid="resolved-findings-section" className="flex flex-col gap-2">
                   <div className="text-[11px] font-bold uppercase tracking-wider text-[#34D399]">
-                    Verified Resolved Findings ({effectiveVerification.resolvedFindings.length})
+                    Verified Resolved Findings ({verifiedResolvedFindings.length})
                   </div>
                   <div
                     className={`grid grid-cols-1 gap-2 ${
-                      effectiveVerification.resolvedFindings.length > 1 ? 'md:grid-cols-2' : ''
+                      verifiedResolvedFindings.length > 1 ? 'md:grid-cols-2' : ''
                     }`}
                   >
-                    {effectiveVerification.resolvedFindings.map((vf) => (
+                    {verifiedResolvedFindings.map((vf) => (
                       <div
                         key={vf.findingId}
                         data-testid={`resolved-finding-${vf.findingId}`}
-                        className="p-2.5 rounded border bg-[#10B981]/8 border-[#10B981]/35 flex flex-col gap-1.5"
+                        className="syn-ai-finding syn-ai-finding-resolved p-2.5 rounded border bg-[#10B981]/8 border-[#10B981]/35 flex flex-col gap-1.5"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <span className="font-bold text-[#F7F8FA]">
@@ -1067,12 +1165,12 @@ export const AiMasterView: React.FC<Props> = ({
                   : postFallbackLabel,
               },
             ].map((row) => (
-              <div key={row.label} className="p-2 rounded bg-[#0C0D12] border border-[#21242F]">
+              <div key={row.label} className="syn-ai-tile p-2 rounded bg-[#0C0D12] border border-[#21242F]">
                 <div className="text-[10px] text-[#9CA3AF] font-sans">{row.label}</div>
                 <div className="text-[11px] text-[#9CA3AF] mt-0.5">Pre: {row.pre}</div>
                 <div
                   className={`text-xs font-bold ${
-                    row.post === 'UNVERIFIED' ? 'text-[#FCA5A5]' : 'text-[#F2CA52]'
+                    row.post === 'UNVERIFIED' ? 'text-[#FCA5A5]' : 'syn-ai-tile-post text-[#F2CA52]'
                   }`}
                 >
                   Post: {row.post}
@@ -1362,12 +1460,12 @@ export const AiMasterView: React.FC<Props> = ({
       {directorReport && (
         <div
           data-testid="ai-optimization-report"
-          className="p-4 rounded bg-[#111217] border border-[#34D399]/35 flex flex-col gap-3 text-xs"
+          className={`p-4 rounded bg-[#111217] border flex flex-col gap-3 text-xs ${reportIsVerified ? 'border-[#34D399]/35' : 'border-[#F59E0B]/45'}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#34D399] flex items-center gap-1.5">
-                <Check className="w-4 h-4" />
+              <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${reportIsVerified ? 'text-[#34D399]' : 'text-[#F59E0B]'}`}>
+                {reportIsVerified ? <Check className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
                 Final Optimization Report ({directorReport.objective.label} · {directorReport.iterationsExecuted} Pass(es))
               </h3>
               <span className="font-mono-tabular text-[11px] text-[#9CA3AF]">
@@ -1416,12 +1514,11 @@ export const AiMasterView: React.FC<Props> = ({
             <div className="p-2.5 rounded bg-[#0C0D12] border border-[#1E222B]">
               <div className="font-semibold text-[#34D399] mb-1">Problems Detected &amp; Resolved</div>
               <ul className="list-disc list-inside text-[#C5CDD8] flex flex-col gap-0.5">
-                {(directorReport.resolvedProblems.length > 0
-                  ? directorReport.resolvedProblems
-                  : directorReport.verifiedImprovements
-                ).map((item, i) => (
-                  <li key={i}>{item}</li>
-                ))}
+                {verifiedResolvedFindings.length > 0
+                  ? verifiedResolvedFindings.map((finding) => (
+                      <li key={finding.findingId}>{finding.originalFinding.title} — {finding.verificationSummary}</li>
+                    ))
+                  : <li>No technical findings have been independently verified as resolved.</li>}
               </ul>
             </div>
 

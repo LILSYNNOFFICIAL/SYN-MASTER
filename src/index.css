@@ -271,6 +271,11 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 .syn2-issue.sev-high { border-left-color: var(--s2-bad); }
 .syn2-issue.sev-moderate { border-left-color: #E8A33A; }
 .syn2-issue.sev-low, .syn2-issue.sev-info { border-left-color: var(--s2-gold-lo); }
+/* Current verification status takes precedence over original source severity. */
+.syn2-issue.is-fixed { border-left-color: var(--s2-good); }
+.syn2-issue.is-not-fixed { border-left-color: var(--s2-bad); }
+.syn2-issue.is-advisory { border-left-color: #E8A33A; }
+.syn2-issue.is-open { border-left-color: var(--s2-dim); }
 .syn2-issue-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .syn2-issue-title { font: 800 13px var(--syn-font-display); color: var(--s2-text); }
 .syn2-issue-cat { font: 600 10px var(--syn-font-mono); color: var(--s2-dim); text-transform:uppercase; letter-spacing:.1em; }
@@ -1005,8 +1010,8 @@ select option, select optgroup { background-color:#090704; color:#F7F1E2; }
   .syn-workstation [role="toolbar"] { align-items: stretch; gap: 8px; padding: 8px 10px; }
   .syn-workstation [role="toolbar"] > * { min-width: 0; max-width: 100%; }
   .syn-control-desk { padding: 12px !important; }
-  .syn-meter-bridge { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; padding: 8px 10px; }
-  .syn-meter-stereo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(104px, .42fr); gap: 10px; align-items: center; }
+  .syn-workstation .syn-meter-bridge { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; padding: 8px 10px; }
+  .syn-meter-stereo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(132px, .5fr); gap: 10px; align-items: center; }
   .syn-meter-stereo-head { justify-content: flex-start; column-gap: 8px; }
   .syn-meter-kicker { font-size: 9px; }
   .syn-meter-live-readout { font-size: 9px; }
@@ -1651,6 +1656,29 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 .syn-eq-empty { display: grid; place-items: center; min-height: 220px; }
 .syn-eq-panel canvas[data-testid="spectrum-canvas"] { border-radius: 12px; }
 
+/* Keep the six-view selector from imposing a one-row intrinsic width on mobile. */
+@media (max-width: 640px) {
+  .syn-eq-panel,
+  .syn-eq-head { min-width: 0; }
+  .syn-eq-head > [aria-label="EQ view"] {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .syn-eq-head > [aria-label="EQ view"] > button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 4px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.15;
+  }
+}
+
+
 .syn-ceq-plot { position: relative; padding: 0 0 18px 30px; }
 .syn-ceq-svg {
   display: block; width: 100%; height: clamp(170px, 22vh, 250px); border-radius: 12px; touch-action: none;
@@ -1721,6 +1749,7 @@ body { background: radial-gradient(ellipse at 52% -20%, rgba(25,74,111,.18), tra
 @keyframes syn-fix-spin { to { transform: rotate(360deg); } }
 .syn-fixai-status { max-width: 260px; text-align: center; font: 700 9px var(--syn-font-body); letter-spacing: .2em; color: var(--syn-gold); text-transform: uppercase; }
 .syn-fixai-stop { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 1px solid var(--syn-bad); border-radius: 999px; color: var(--syn-bad); font-size: 11px; font-weight: 800; letter-spacing: .1em; }
+.syn-fixai-notice { max-width: 300px; margin: 0; padding: 8px 10px; border: 1px solid rgba(245,184,46,.45); border-radius: 10px; background: rgba(245,184,46,.08); color: #FCD9A0; font: 500 11px/1.4 var(--syn-font-body); text-align: center; }
 
 /* Global / presets / loudness */
 .syn-field { display: flex; flex-direction: column; gap: 4px; font: 700 9px var(--syn-font-body); letter-spacing: .14em; color: var(--syn-dim); text-transform: uppercase; }

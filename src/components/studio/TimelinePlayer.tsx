@@ -4,11 +4,6 @@ import { telemetryStore } from '../../engine/telemetryStore';
 import type { FadeCurve, FadeSettings } from '../../dsp/fades';
 import { TimelineWaveform } from './TimelineWaveform';
 
-/**
- * Overview player under the EQ: glowing blue waveform (original vs processed), playhead,
- * click/drag to seek, FL-style fade-in / fade-out handles at the two ends. The fades are the
- * app's real FadeSettings (applied after the chain on preview, Fix-All verification and export).
- */
 interface Props {
   prePeaks: number[];
   postPeaks: number[] | null;
@@ -21,6 +16,14 @@ interface Props {
   onTogglePlay: () => void;
   onImport: (file: File) => void;
   disabled?: boolean;
+  /** Render only transport/fade controls; the waveform is already overlaid behind the EQ graph. */
+  integrated?: boolean;
+  /** Render only the transport controls for placement in the EQ header. */
+  transportOnly?: boolean;
+  /** Hide the transport here when a header-mounted copy is rendered. */
+  hideTransport?: boolean;
+  /** Optional compact control rendered under the transport (Platform Preview selector). */
+  extra?: React.ReactNode;
 }
 
 function fmt(sec: number): string {
@@ -48,40 +51,55 @@ const CURVES: { id: FadeCurve; label: string }[] = [
   { id: 'exp', label: 'Exponential' },
 ];
 
-export const TimelinePlayer: React.FC<Props> = (p) => {
+const TransportControls: React.FC<Props> = (p) => {
   const hasTrack = p.durationSec > 0;
   return (
-    <section className="syn-card syn-player syn-area-player" aria-label="Timeline player and fades">
-      <div className="syn-player-head">
-        <h3 className="syn-card-title">Timeline</h3>
-        <span className="syn-player-hint">Click or drag to seek · drag the end knobs to fade</span>
-        <TimeReadout durationSec={p.durationSec} />
-      </div>
-      {hasTrack ? (
-        <TimelineWaveform
-          prePeaks={p.prePeaks}
-          postPeaks={p.postPeaks}
-          durationSec={p.durationSec}
-          showPost={p.showPost}
-          fades={p.fades}
-          onFadesChange={p.onFadesChange}
-          onSeek={p.onSeek}
-          heightPx={112}
-        />
+    <div className="syn-player-transport" role="group" aria-label="Transport">
+      <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(0)} disabled={!hasTrack || p.disabled} aria-label="Jump to start" title="Jump to start">
+        <SkipBack className="w-3 h-3" />
+      </button>
+      <button type="button" className="syn-player-play" onClick={p.onTogglePlay} disabled={!hasTrack || p.disabled} aria-label={p.isPlaying ? 'Pause' : 'Play'} title={p.isPlaying ? 'Pause' : 'Play'}>
+        {p.isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+      </button>
+      <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(Math.max(0, p.durationSec - 0.05))} disabled={!hasTrack || p.disabled} aria-label="Jump to end" title="Jump to end">
+        <SkipForward className="w-3 h-3" />
+      </button>
+    </div>
+  );
+};
+
+export const TimelinePlayer: React.FC<Props> = (p) => {
+  const hasTrack = p.durationSec > 0;
+  if (p.transportOnly) return <TransportControls {...p} />;
+  return (
+    <section className={`syn-card syn-player syn-area-player${p.integrated ? ' syn-player-integrated' : ''}`} aria-label={p.integrated ? 'Integrated EQ timeline fades' : 'Timeline player and fades'}>
+      {p.integrated ? (
+        <div className="syn-player-integrated-readout"><span>TRACK POSITION</span><TimeReadout durationSec={p.durationSec} /></div>
       ) : (
-        <div className="syn-player-empty">Import a track to see its waveform</div>
+        <>
+          <div className="syn-player-head">
+            <h3 className="syn-card-title">Timeline</h3>
+            <span className="syn-player-hint">Click or drag to seek · drag the end knobs to fade</span>
+            <TimeReadout durationSec={p.durationSec} />
+          </div>
+          {hasTrack ? (
+            <TimelineWaveform
+              prePeaks={p.prePeaks}
+              postPeaks={p.postPeaks}
+              durationSec={p.durationSec}
+              showPost={p.showPost}
+              fades={p.fades}
+              onFadesChange={p.onFadesChange}
+              onSeek={p.onSeek}
+              heightPx={112}
+            />
+          ) : (
+            <div className="syn-player-empty">Import a track to see its waveform</div>
+          )}
+        </>
       )}
-      <div className="syn-player-transport" role="group" aria-label="Transport">
-        <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(0)} disabled={!hasTrack} aria-label="Jump to start">
-            <SkipBack className="w-3.5 h-3.5" />
-          </button>
-          <button type="button" className="syn-player-play" onClick={p.onTogglePlay} disabled={!hasTrack} aria-label={p.isPlaying ? 'Pause' : 'Play'} title={p.isPlaying ? 'Pause' : 'Play'}>
-            {p.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          </button>
-        <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(Math.max(0, p.durationSec - 0.05))} disabled={!hasTrack} aria-label="Jump to end">
-            <SkipForward className="w-3.5 h-3.5" />
-          </button>
-      </div>
+      {!p.hideTransport && <TransportControls {...p} />}
+      {p.extra}
       <div className="syn-player-controls">
         <label className="syn-player-btn syn-player-import">
           <Upload className="w-4 h-4" aria-hidden="true" /> Import Track

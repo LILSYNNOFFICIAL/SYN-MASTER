@@ -116,9 +116,11 @@ function makeOverCompressedStereo(durationSec = 1.0): Float32Array[] {
   return [L, R];
 }
 
-test('Verified Processor Inventory exposes all 14 native processors and rejects invalid payloads', () => {
+test('Verified Processor Inventory exposes all 16 native processors and rejects invalid payloads', () => {
   const keys = Object.keys(VERIFIED_NATIVE_PROCESSOR_INVENTORY);
-  assert.equal(keys.length, 14);
+  assert.equal(keys.length, 16);
+  assert.ok(keys.includes('match-eq'));
+  assert.ok(keys.includes('vocal-rebalance'));
 
   const invalidType = validateChainAgainstInventory([
     { type: 'magic-maximizer', name: 'Fake', params: {} },
@@ -977,6 +979,74 @@ test('Explainable plan still targets a genuinely isolated upper-mid resonance', 
   );
 });
 
+
+test('Fix All does not converge while a baseline technical finding remains unresolved even when objective and QC gates pass', async () => {
+  const n = Math.floor(SR * 2);
+  const left = new Float32Array(n);
+  const right = new Float32Array(n);
+  let seed = 71;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const broadband = ((seed / 4294967296) * 2 - 1) * 0.018;
+    const resonance = 0.24 * Math.sin(2 * Math.PI * 3100 * t);
+    left[i] = broadband + resonance;
+    right[i] = broadband * 0.98 + resonance;
+  }
+  const source = [left, right];
+  const baseline = analyzeAudioBuffer(source, SR);
+  const diagnosis = analyzeTrackIntelligence(baseline, 'streaming');
+  assert.ok(
+    diagnosis.findings.some((finding) => finding.id === 'diag-harsh'),
+    'Fixture must contain a baseline upper-mid resonance finding',
+  );
+
+  // Simulate a render that meets loudness, peak, dynamics and delivery QC, but fails
+  // to remove the measured source resonance. The post-fix diagnosis must still block
+  // a clean convergence claim.
+  const delivered = {
+    ...baseline,
+    integratedLufs: -14,
+    truePeakDb: -2,
+    samplePeakDb: -2.5,
+    dynamicRangeDb: 12,
+    loudnessRangeLu: 8,
+    crestFactorDb: Math.max(8, baseline.crestFactorDb),
+    clippedSamples: 0,
+    interSamplePeaks: 0,
+    thdEstimatePercent: 0.5,
+    clickCount: 0,
+    clicksPerMinute: 0,
+    clickAtStart: false,
+    clickAtEnd: false,
+    dcOffset: 0,
+    zoneEnergyDb: {
+      ...baseline.zoneEnergyDb,
+      sub: Math.min(baseline.zoneEnergyDb.sub, baseline.zoneEnergyDb.bass + 3),
+    },
+  };
+
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: source,
+    sampleRate: SR,
+    operatingMode: 'autonomous',
+    objectiveId: 'streaming',
+    maxIterations: 1,
+    renderPassFn: async () => ({ channels: source, analysis: delivered }),
+  });
+
+  const firstPass = report.checkpoints.find((checkpoint) => checkpoint.passNumber === 1);
+  assert.equal(firstPass?.targetGate?.passed, true, 'Objective gate must pass for this regression fixture');
+  assert.equal(firstPass?.qcReport.failCount, 0, 'Blocking QC must pass for this regression fixture');
+  assert.notEqual(report.status, 'converged', 'An unresolved technical finding must prevent clean convergence');
+  const verification = report.postFixVerification;
+  assert.ok(verification, 'Final report must include independent post-fix verification');
+  assert.ok(
+    verification.activeFindings.some((finding) => finding.findingId === 'diag-harsh'),
+    'The remaining resonance must stay visible as an active finding',
+  );
+  assert.match(report.stopReason, /actionable technical finding/i);
+});
 
 test('Noise objective remains unverified when the source contains no measurable quiet passage', () => {
   const n = Math.floor(SR * 2);

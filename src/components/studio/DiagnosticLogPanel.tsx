@@ -19,6 +19,8 @@ const statusIcon = (s: string) =>
     <CheckCircle2 className="w-3.5 h-3.5 text-[#7BE0A0]" />
   ) : s === 'not-fixed' || s === 'fail' ? (
     <XCircle className="w-3.5 h-3.5 text-[#FF7A6B]" />
+  ) : s === 'improved' || s === 'partially-resolved' || s === 'unverified' ? (
+    <AlertTriangle className="w-3.5 h-3.5 text-[#E8C85A]" />
   ) : s === 'advisory' ? (
     <AlertTriangle className="w-3.5 h-3.5 text-[#E8C85A]" />
   ) : (
@@ -73,7 +75,7 @@ export const DiagnosticLogPanel: React.FC<{ log: DiagnosticLog }> = ({ log }) =>
         <ul className="syn2-issues">
           {log.entries.length === 0 && <li className="text-xs text-[#B6A780]">No measured problems.</li>}
           {log.entries.map((e) => (
-            <li key={e.id} className={`syn2-issue sev-${e.severity}`}>
+            <li key={e.id} className={`syn2-issue sev-${e.severity} is-${e.status}`}>
               <div className="syn2-issue-top">
                 {statusIcon(e.status)}
                 <span className="syn2-issue-title">{e.issue}</span>

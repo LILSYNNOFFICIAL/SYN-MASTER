@@ -13,6 +13,8 @@ export type ProcessorType =
   | 'clipper'
   | 'multiband-maximizer'
   | 'dither'
+  | 'match-eq'
+  | 'vocal-rebalance'
   | 'external-vst3';
 
 export type MasteringMode =
@@ -39,7 +41,39 @@ export type WorkspaceTab =
 
 export type LabSubTab = 'frequency' | 'dynamics' | 'stereo' | 'distortion';
 
-export type EQBandShape = 'highpass' | 'lowshelf' | 'bell' | 'highshelf' | 'lowpass' | 'notch';
+export type EQBandShape =
+  | 'highpass'
+  | 'lowshelf'
+  | 'bell'
+  | 'highshelf'
+  | 'lowpass'
+  | 'notch'
+  | 'bandpass'
+  | 'tilt';
+
+/**
+ * Curve flavour within a band family (Ozone-style cascading Type menu).
+ *  - bell: 'proportional' (Q narrows as |gain| rises), 'bell' (RBJ constant-Q, legacy), 'band-shelf' (flat-top)
+ *  - lowshelf/highshelf: 'analog' (RBJ, legacy), 'baxandall' (gentle wide 1st-order), 'vintage' (Pultec bump/dip), 'resonant' (overshoot)
+ *  - lowpass/highpass: 'flat' (Butterworth; legacy 12 dB/oct uses Q), 'resonant' (peak at cutoff), 'brickwall' (12th-order Chebyshev)
+ * Omitted = the family's legacy default, which renders bit-identically to chains saved before subtypes existed.
+ */
+export type EQBandSubtype =
+  | 'proportional'
+  | 'bell'
+  | 'band-shelf'
+  | 'analog'
+  | 'baxandall'
+  | 'vintage'
+  | 'resonant'
+  | 'flat'
+  | 'brickwall';
+
+/** Filter slope in dB/octave for pass and shelf filters. Omitted = 12 (legacy). */
+export type EQSlope = 6 | 12 | 18 | 24 | 36 | 48 | 72 | 96;
+
+/** Which part of the stereo signal a band processes. Omitted = follows ParametricEQParams.msMode. */
+export type EQChannel = 'stereo' | 'mid' | 'side' | 'left' | 'right';
 
 export interface EQBand {
   id: string;
@@ -48,6 +82,11 @@ export interface EQBand {
   freq: number;
   gain: number;
   q: number;
+  subtype?: EQBandSubtype;
+  slope?: EQSlope;
+  channel?: EQChannel;
+  /** Listen to this band's region only. Honoured by preview renders (audition) only; export and Fix All ignore it. */
+  solo?: boolean;
   dynamicThresholdDb?: number;
   dynamicRangeDb?: number;
 }
@@ -57,21 +96,52 @@ export interface ParametricEQParams {
   msMode: 'stereo' | 'mid-side';
   tiltDb: number;
   bands: EQBand[];
+  /** Output trim that cancels the curve's average (pink-weighted) level change. Omitted = off. */
+  autoGain?: boolean;
+}
+
+/** Dynamic EQ band curve. Omitted = 'bell' (legacy RBJ peaking). */
+export type DynamicEQBandType =
+  | 'proportional'
+  | 'bell'
+  | 'band-shelf'
+  | 'baxandall-bass'
+  | 'baxandall-treble'
+  | 'low-shelf'
+  | 'high-shelf';
+
+export interface DynamicEQSidechain {
+  /** 'band' = detector band-pass follows the band's freq/Q (legacy); 'custom' = its own freq/Q. */
+  mode: 'band' | 'custom';
+  freq: number;
+  q: number;
+}
+
+export interface DynamicEQBand {
+  id: string;
+  enabled: boolean;
+  freq: number;
+  q: number;
+  thresholdDb: number;
+  /** Range: max cut (negative, cut mode) or max boost (positive, boost mode) in dB. */
+  maxCutDb: number;
+  ratio?: number;
+  mode?: 'cut' | 'boost';
+  attackMs: number;
+  releaseMs: number;
+  type?: DynamicEQBandType;
+  /** Soft knee width in dB. Omitted = hard knee (legacy). */
+  kneeDb?: number;
+  channel?: EQChannel;
+  sidechain?: DynamicEQSidechain;
+  /** Detector lookahead in ms (0-10). Omitted = 0. */
+  lookaheadMs?: number;
+  /** Preview-only audition of the band region; export ignores it. */
+  solo?: boolean;
 }
 
 export interface DynamicEQParams {
-  bands: Array<{
-    id: string;
-    enabled: boolean;
-    freq: number;
-    q: number;
-    thresholdDb: number;
-    maxCutDb: number;
-    ratio?: number;
-    mode?: 'cut' | 'boost';
-    attackMs: number;
-    releaseMs: number;
-  }>;
+  bands: DynamicEQBand[];
 }
 
 export interface CompressorParams {
@@ -173,6 +243,25 @@ export interface DitherParams {
   autoBlank: boolean; // no dither in digital silence (keeps fades/edges clean)
 }
 
+/**
+ * Vocal Rebalance (Ozone Master Rebalance style). Raises or lowers the vocal (and optionally
+ * bass and drums) inside a finished stereo master using cached HT-Demucs stems of the source.
+ * Phase-preserving: only the gain DIFFERENCE is added (out = mix + (g - 1) * w(t) * stem), so
+ * 0 dB on every stem is bit-exact pass-through. Must sit first in the chain (the stems belong
+ * to the source track); validation hoists it there.
+ */
+export interface VocalRebalanceParams {
+  vocalGainDb: number; // -12 to +6
+  bassEnabled: boolean;
+  bassGainDb: number; // -12 to +6
+  drumsEnabled: boolean;
+  drumsGainDb: number; // -12 to +6
+  /** 0 = apply the gain to the whole stem; higher = only where the stem clearly dominates the mix (less bleed). */
+  sensitivity: number; // 0 to 100
+  /** Time smoothing of the sensitivity weighting (zero-phase), ms. */
+  smoothingMs: number; // 5 to 500
+}
+
 export interface MultibandMaximizerBand {
   preGainDb: number; // -6 to +12 (Maximus "pre")
   thresholdDb: number; // -36 to 0
@@ -231,6 +320,45 @@ export interface ExternalVST3Params {
   parameters: ExternalPluginParamValue[];
 }
 
+/** Match EQ channel mode: whole stereo signal, mid (L+R)/2 only, or side (L-R)/2 only. */
+export type MatchEqChannel = 'stereo' | 'mid' | 'side';
+/** Fractional-octave smoothing denominator: 1 = 1/1 octave ... 24 = 1/24 octave. */
+export type MatchEqSmoothing = 1 | 2 | 3 | 6 | 12 | 24;
+
+/**
+ * Long-term average spectra (dB power) sampled on the fixed 1/24-octave grid MATCH_EQ_GRID_HZ
+ * (src/dsp/matchEq.ts), one array per channel view.
+ */
+export interface MatchEqSpectrumSet {
+  stereo: number[];
+  mid: number[];
+  side: number[];
+}
+
+/**
+ * Match EQ (Ozone-style): learns the long-term average spectrum of the source and of a
+ * reference and applies a smoothed, limited correction curve. The learned spectra live in
+ * the params so renders, presets and saved projects are deterministic. Without both spectra
+ * the processor is a pass-through.
+ */
+export interface MatchEqParams {
+  /** 0-100 % of the correction curve. */
+  amount: number;
+  smoothing: MatchEqSmoothing;
+  /** Largest boost / cut the curve may apply (positive dB, 0-12). */
+  maxBoostDb: number;
+  maxCutDb: number;
+  /** Correction fades to 0 dB outside [lowHz, highHz]. */
+  lowHz: number;
+  highHz: number;
+  channel: MatchEqChannel;
+  /** Offline FIR design. 'linear' = latency-compensated linear phase; 'minimum' = minimum phase. */
+  phase: 'linear' | 'minimum';
+  source?: MatchEqSpectrumSet | null;
+  reference?: MatchEqSpectrumSet | null;
+  referenceName?: string;
+}
+
 export type ProcessorParams =
   | { type: 'parametric-eq'; data: ParametricEQParams }
   | { type: 'dynamic-eq'; data: DynamicEQParams }
@@ -246,6 +374,8 @@ export type ProcessorParams =
   | { type: 'clipper'; data: ClipperParams }
   | { type: 'multiband-maximizer'; data: MultibandMaximizerParams }
   | { type: 'dither'; data: DitherParams }
+  | { type: 'match-eq'; data: MatchEqParams }
+  | { type: 'vocal-rebalance'; data: VocalRebalanceParams }
   | { type: 'external-vst3'; data: ExternalVST3Params };
 
 export interface ProcessorModule {
@@ -421,6 +551,11 @@ export interface QCReport {
   warningCount: number;
   failCount: number;
   checks: QCCheckItem[];
+  /**
+   * Read-only Platform Preview hint: predicted playback gain and true peak per streaming platform
+   * (src/dsp/platformRules.ts). Never a check, never part of a gate or of the counts above.
+   */
+  platformHints?: import('../dsp/platformRules').PlatformQcHint[];
 }
 
 export type ExportAudioFormat = 'wav' | 'mp3' | 'ogg' | 'flac' | 'm4a' | 'mid' | 'webm-opus';

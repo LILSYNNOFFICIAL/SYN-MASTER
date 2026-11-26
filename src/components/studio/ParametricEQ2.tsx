@@ -1,529 +1,388 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Trash2 } from 'lucide-react';
-import type { AudioAnalysis, EQBand, EQBandShape, ParametricEQParams } from '../../types/mastering';
-import { designEQBand } from '../../dsp/offlineDsp';
-import { telemetryStore } from '../../engine/telemetryStore';
-import { designHighShelf, designLowShelf, evaluateBiquadMagnitudeDb } from '../../dsp/biquad';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AudioAnalysis, EQBand, EQBandShape, EQBandSubtype, EQChannel, EQSlope, ParametricEQParams } from '../../types/mastering';
+import {
+  CHANNEL_LABELS,
+  DEFAULT_SUBTYPE,
+  EQ_CHANNELS,
+  EQ_SUBTYPES,
+  SHAPE_LABELS,
+  SUBTYPE_LABELS,
+  allowedSlopes,
+  bandChannel,
+  designBandSections,
+  eqDisplayCurves,
+  freqToNote,
+  resolveSlope,
+  resolveSubtype,
+  sectionsMagnitudeDb,
+  usesGain,
+} from '../../dsp/eqDesign';
+import { MAX_EQ_BANDS, validateProcessorParams } from '../../dsp/chainValidation';
+import { EqGraph, type AnalyzerMode, type EqGraphNode } from './eq/EqGraph';
+import { EqBandPopover, NumField, SelField } from './eq/EqBandPopover';
+import { EqTypeMenu, type TypeMenuOption } from './eq/EqTypeMenu';
+import { CurveIcon } from './eq/CurveIcon';
+import { BAND_COLORS, F_MAX, F_MIN, G_MAX, H, W, curveFreqs, fToX, fmtHz, gToY } from './eq/graphMath';
+import { BUILTIN_EQ_PRESETS, deleteUserEqPreset, loadUserEqPresets, saveUserEqPreset, type EqPreset } from './eq/eqPresets';
 
 /**
- * FL Studio "Fruity Parametric EQ 2"-style editor:
- *  - live/pre-rendered spectrum behind a log-frequency grid
- *  - coloured, draggable band nodes (drag = freq/gain, mouse wheel = Q / bandwidth,
- *    Shift-drag = fine, double-click empty space = new band, double-click node = reset gain)
- *  - per-band shape (bell, shelves, HP, LP, notch), enable and delete in the band strip
- * The curve is computed from the same biquad designs the offline renderer uses.
+ * SYN EQ: Ozone / FL Studio Parametric EQ 2-class editor.
+ *  - Graph: pre/post analyser, per-band fills, mid curve plus dashed side / left / right curves,
+ *    draggable nodes (drag = freq/gain, Shift = fine, wheel or diamond handles = Q, double-click
+ *    empty space = add band, double-click node = reset gain), keyboard nudges.
+ *  - Per-band popover: power / S (listen) / X, cascading Type menu (Bell, shelves, passes with
+ *    subtypes; Notch, Band-Pass, Tilt), numeric freq (with note) / gain / Q, slope, channel.
+ *  - Global: phase mode, analyser mode, auto-gain, output gain, tilt, A/B snapshots, presets.
+ * The curve uses the same section designs as the offline render and the realtime graph.
+ * Edits stream locally while dragging and commit once on release (one undo step per gesture).
  */
 interface Props {
   params: ParametricEQParams;
   sampleRate: number;
+  /** Analysis for the analyser when pre/post are not given separately. */
   spectrum: AudioAnalysis | null;
   onChange: (next: ParametricEQParams) => void;
-  /** 'console' = reference-mockup styling (gradient curve, waveform blanket, band table, keyboard-focusable nodes). */
   variant?: 'classic' | 'console';
-  /** Console only: decoded waveform peaks (0..1) of the processed preview, drawn as a glowing blanket behind the curve. */
   waveformPeaks?: number[] | null;
-  /** Console only: track length, used to place the live playhead on the blanket. */
   durationSec?: number;
+  /** Seek the shared track timeline from the overlaid waveform. */
+  onSeek?: (sec: number) => void;
+  /** Source (pre-chain) analysis. */
+  preSpectrum?: AudioAnalysis | null;
+  /** Rendered (post-chain) analysis. */
+  postSpectrum?: AudioAnalysis | null;
+  /** Module output gain (dB), shown as the EQ's global output. */
+  outputGainDb?: number;
+  onOutputGainDb?: (db: number) => void;
 }
 
-const W = 640;
-const H = 240;
-const F_MIN = 20;
-const F_MAX = 20000;
-const G_MAX = 18;
-const CONSOLE_COLORS = ['#2EA8FF', '#3FE0FF', '#8B5CF6', '#C04CFF', '#E040FB', '#5EC8FF', '#2EA8FF', '#8B5CF6'];
-const SHAPE_SHORT: Record<EQBandShape, string> = { bell: 'Peak', lowshelf: 'Low shelf', highshelf: 'High shelf', highpass: 'High pass', lowpass: 'Low pass', notch: 'Notch' };
-const COLORS = ['#F2CA52', '#FF8A5B', '#7BE0A0', '#6CC4FF', '#C792EA', '#FF6B9A', '#E8E36A', '#5EEAD4'];
-const SHAPES: EQBandShape[] = ['bell', 'lowshelf', 'highshelf', 'highpass', 'lowpass', 'notch'];
-const SHAPE_LABEL: Record<EQBandShape, string> = { bell: 'Peaking', lowshelf: 'Low shelf', highshelf: 'High shelf', highpass: 'High pass', lowpass: 'Low pass', notch: 'Notch' };
+const PASS_SHAPES: EQBandShape[] = ['lowpass', 'highpass'];
 
-const fToX = (f: number) => (Math.log10(f / F_MIN) / Math.log10(F_MAX / F_MIN)) * W;
-const xToF = (x: number) => F_MIN * Math.pow(F_MAX / F_MIN, Math.max(0, Math.min(1, x / W)));
-const gToY = (g: number) => H / 2 - (g / G_MAX) * (H / 2 - 10);
-const yToG = (y: number) => ((H / 2 - y) / (H / 2 - 10)) * G_MAX;
-const usesGain = (s: EQBandShape) => s === 'bell' || s === 'lowshelf' || s === 'highshelf';
-
-function fmtF(f: number) {
-  return f >= 1000 ? `${(f / 1000).toFixed(f >= 10000 ? 1 : 2)}k` : f.toFixed(0);
+function iconFor(b: Pick<EQBand, 'shape' | 'subtype'>): string {
+  const sub = resolveSubtype(b);
+  if (b.shape === 'bell') return sub === 'bell' || !sub ? 'bell' : sub;
+  if (sub && (b.shape.endsWith('shelf') || PASS_SHAPES.includes(b.shape))) return `${b.shape}-${sub}`;
+  return b.shape;
 }
 
-export const ParametricEQ2: React.FC<Props> = ({ params, sampleRate, spectrum, onChange, variant = 'classic', waveformPeaks = null, durationSec = 0 }) => {
-  const uid = useId().replace(/:/g, '');
+const TYPE_OPTIONS: TypeMenuOption[] = (['bell', 'lowshelf', 'highshelf', 'lowpass', 'highpass', 'notch', 'bandpass', 'tilt'] as EQBandShape[]).map((shape) => ({
+  value: shape,
+  label: SHAPE_LABELS[shape],
+  icon: shape,
+  children: EQ_SUBTYPES[shape].length
+    ? EQ_SUBTYPES[shape].map((sub) => ({ value: sub, label: SUBTYPE_LABELS[sub], icon: iconFor({ shape, subtype: sub }) }))
+    : undefined,
+}));
+
+/** Does Q change this band's curve? */
+function qMatters(b: EQBand): boolean {
+  const sub = resolveSubtype(b);
+  if (b.shape === 'tilt') return false;
+  if (sub === 'baxandall' || sub === 'brickwall') return false;
+  if ((b.shape === 'lowshelf' || b.shape === 'highshelf') && resolveSlope(b) === 6) return false;
+  if (PASS_SHAPES.includes(b.shape) && resolveSlope(b) === 6) return false;
+  return true;
+}
+
+function nodeY(b: EQBand): { yDb: number; yMode: EqGraphNode['yMode'] } {
+  if (usesGain(b.shape)) return { yDb: b.gain, yMode: 'gain' };
+  if (PASS_SHAPES.includes(b.shape) && qMatters(b)) return { yDb: Math.max(-G_MAX, Math.min(G_MAX, 6 * Math.log2(b.q / 0.707))), yMode: 'q' };
+  return { yDb: 0, yMode: 'none' };
+}
+
+function bandTitle(b: EQBand, i: number): string {
+  const sub = resolveSubtype(b);
+  const def = DEFAULT_SUBTYPE[b.shape];
+  return `Band ${i + 1}: ${SHAPE_LABELS[b.shape]}${sub && sub !== def ? ` ${SUBTYPE_LABELS[sub]}` : ''}`;
+}
+
+function bandDescription(b: EQBand, i: number, msMode: ParametricEQParams['msMode']): string {
+  return `${bandTitle(b, i)}, ${fmtHz(b.freq)}${usesGain(b.shape) ? `, ${b.gain.toFixed(1)} dB` : ''}${qMatters(b) ? `, Q ${b.q.toFixed(2)}` : ''}, ${CHANNEL_LABELS[bandChannel(b, msMode)]}${b.enabled ? '' : ', off'}${b.solo ? ', soloed' : ''}`;
+}
+
+function readAnalyzer(): AnalyzerMode {
+  try {
+    const v = localStorage.getItem('syn-master.eq-analyzer');
+    if (v === 'off' || v === 'pre' || v === 'post' || v === 'both') return v;
+  } catch { /* ignore */ }
+  return 'post';
+}
+
+export const ParametricEQ2: React.FC<Props> = ({
+  params, sampleRate, spectrum, onChange, variant = 'classic', waveformPeaks = null, durationSec = 0, onSeek,
+  preSpectrum, postSpectrum, outputGainDb, onOutputGainDb,
+}) => {
   const isConsole = variant === 'console';
-  const palette = isConsole ? CONSOLE_COLORS : COLORS;
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const [sel, setSel] = useState<string | null>(params.bands[0]?.id ?? null);
-  const dragRef = useRef<null | { id: string; fine: boolean; sx: number; sy: number; start: EQBand }>(null);
-  const bands = params.bands;
-
-  const setBand = (id: string, patch: Partial<EQBand>) =>
-    onChange({ ...params, bands: bands.map((b) => (b.id === id ? { ...b, ...patch } : b)) });
-
-  // Curves
-  const { total, perBand, totalDb, curveFreqs } = useMemo(() => {
-    const N = 220;
-    const freqs = Array.from({ length: N }, (_, i) => xToF((i / (N - 1)) * W));
-    const per = bands.map((b) => {
-      if (!b.enabled) return null;
-      const c = designEQBand(b, sampleRate, 1);
-      return freqs.map((f) => evaluateBiquadMagnitudeDb(c, f, sampleRate));
-    });
-    const tilt = params.tiltDb;
-    const tl = Math.abs(tilt) > 0.05 ? designLowShelf(650, -tilt * 0.5, 0.55, sampleRate) : null;
-    const th = Math.abs(tilt) > 0.05 ? designHighShelf(1500, tilt * 0.5, 0.55, sampleRate) : null;
-    const tot = freqs.map((f, i) => {
-      let s = 0;
-      for (const p of per) if (p) s += p[i];
-      if (tl && th) s += evaluateBiquadMagnitudeDb(tl, f, sampleRate) + evaluateBiquadMagnitudeDb(th, f, sampleRate);
-      return s;
-    });
-    return { total: tot.map((g, i) => [fToX(freqs[i]), gToY(Math.max(-G_MAX - 6, Math.min(G_MAX + 6, g)))] as const), perBand: per, totalDb: tot, curveFreqs: freqs };
-  }, [bands, params.tiltDb, sampleRate]);
-
-  const spectrumPath = useMemo(() => {
-    if (!spectrum || !spectrum.spectrumBinsFreq?.length) return null;
-    const fs = spectrum.spectrumBinsFreq;
-    const ds = spectrum.spectrumBinsDb;
-    let max = -Infinity;
-    for (const d of ds) if (d > max) max = d;
-    let path = `M0,${H}`;
-    for (let i = 0; i < fs.length; i++) {
-      if (fs[i] < F_MIN || fs[i] > F_MAX) continue;
-      const y = H - Math.max(0, Math.min(1, (ds[i] - (max - 72)) / 72)) * (H - 8);
-      path += ` L${fToX(fs[i]).toFixed(1)},${y.toFixed(1)}`;
-    }
-    return path + ` L${W},${H} Z`;
-  }, [spectrum]);
-
-  const toLocal = (e: { clientX: number; clientY: number }) => {
-    const r = svgRef.current!.getBoundingClientRect();
-    return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
+  const [draft, setDraft] = useState<ParametricEQParams | null>(null);
+  const view = draft ?? params;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const [sel, setSel] = useState<string | null>(null);
+  const [analyzer, setAnalyzerState] = useState<AnalyzerMode>(readAnalyzer);
+  const setAnalyzer = (m: AnalyzerMode) => {
+    setAnalyzerState(m);
+    try { localStorage.setItem('syn-master.eq-analyzer', m); } catch { /* ignore */ }
   };
+  const [slots, setSlots] = useState<{ active: 'A' | 'B'; other: ParametricEQParams | null }>({ active: 'A', other: null });
+  const [userPresets, setUserPresets] = useState<EqPreset[]>(() => loadUserEqPresets());
+  const bands = view.bands;
 
-  const onNodeDown = (b: EQBand) => (e: React.PointerEvent) => {
-    e.stopPropagation();
-    setSel(b.id);
-    dragRef.current = { id: b.id, fine: e.shiftKey, sx: e.clientX, sy: e.clientY, start: b };
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-  };
-  const onMove = (e: React.PointerEvent) => {
-    const d = dragRef.current;
-    if (!d) return;
-    const p = toLocal(e);
-    const s = d.start;
-    if (d.fine) {
-      const r = svgRef.current!.getBoundingClientRect();
-      const dx = ((e.clientX - d.sx) / r.width) * W * 0.15;
-      const dy = ((e.clientY - d.sy) / r.height) * H * 0.15;
-      const nf = xToF(fToX(s.freq) + dx);
-      const patch: Partial<EQBand> = { freq: Math.round(nf) };
-      if (usesGain(s.shape)) patch.gain = Number(Math.max(-G_MAX, Math.min(G_MAX, s.gain - (dy / (H / 2 - 10)) * G_MAX)).toFixed(1));
-      setBand(d.id, patch);
-      return;
-    }
-    const patch: Partial<EQBand> = { freq: Math.round(Math.max(F_MIN, Math.min(F_MAX, xToF(p.x)))) };
-    if (usesGain(s.shape)) patch.gain = Number(Math.max(-G_MAX, Math.min(G_MAX, yToG(p.y))).toFixed(1));
-    else if (s.shape === 'highpass' || s.shape === 'lowpass') patch.q = Number(Math.max(0.3, Math.min(6, 0.707 * Math.pow(2, yToG(p.y) / 6))).toFixed(2));
-    setBand(d.id, patch);
-  };
-  const onUp = () => {
-    dragRef.current = null;
-  };
-  // Mouse wheel over a node = Q. React attaches wheel listeners as passive, so
-  // preventDefault there cannot stop the page from scrolling; use a native non-passive
-  // listener on the SVG instead and look the band up from the node under the pointer.
-  const wheelStateRef = useRef({ bands, setBand });
-  wheelStateRef.current = { bands, setBand };
+  // A committed change from outside (undo/redo, AI, preset) drops any stale drag draft.
+  useEffect(() => setDraft(null), [params]);
   useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const onWheel = (e: WheelEvent) => {
-      const target = e.target as Element | null;
-      const id = target?.closest?.('[data-band-id]')?.getAttribute('data-band-id');
-      if (!id) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const { bands: current, setBand: set } = wheelStateRef.current;
-      const b = current.find((x) => x.id === id);
-      if (!b) return;
-      const q = Math.max(0.1, Math.min(18, b.q * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
-      set(b.id, { q: Number(q.toFixed(2)) });
-    };
-    svg.addEventListener('wheel', onWheel, { passive: false });
-    return () => svg.removeEventListener('wheel', onWheel);
-  }, []);
-  const onDouble = (e: React.MouseEvent) => {
-    if (bands.length >= 8) return;
-    const p = toLocal(e);
-    const nb: EQBand = { id: `b${Date.now().toString(36)}`, enabled: true, shape: 'bell', freq: Math.round(xToF(p.x)), gain: Number(yToG(p.y).toFixed(1)), q: 1 };
-    onChange({ ...params, bands: [...bands, nb] });
+    if (sel && !params.bands.some((b) => b.id === sel)) setSel(null);
+  }, [params, sel]);
+
+  const commit = useCallback((next: ParametricEQParams) => {
+    setDraft(null);
+    onChange(next);
+  }, [onChange]);
+
+  const patchBand = useCallback((id: string, patch: Partial<EQBand>, phase: 'move' | 'end' = 'end') => {
+    const cur = viewRef.current;
+    const next = { ...cur, bands: cur.bands.map((b) => (b.id === id ? { ...b, ...patch } : b)) };
+    if (phase === 'move') setDraft(next);
+    else commit(next);
+  }, [commit]);
+
+  const removeBand = (id: string) => {
+    commit({ ...viewRef.current, bands: viewRef.current.bands.filter((b) => b.id !== id) });
+    setSel(null);
+  };
+
+  const addBand = (freq = 1000, gain = 0) => {
+    const cur = viewRef.current;
+    if (cur.bands.length >= MAX_EQ_BANDS) return;
+    const used = new Set(cur.bands.map((b) => b.id));
+    let n = cur.bands.length + 1;
+    while (used.has(`b${n}`)) n++;
+    const nb: EQBand = { id: `b${n}`, enabled: true, shape: 'bell', subtype: 'bell', freq, gain, q: 1 };
+    commit({ ...cur, bands: [...cur.bands, nb] });
     setSel(nb.id);
   };
 
-  const selected = bands.find((b) => b.id === sel) ?? null;
-  const gridF = [30, 50, 100, 200, 300, 500, 1000, 2000, 3000, 5000, 10000, 20000];
-
-  // Waveform "blanket": mirrored envelope of the processed preview (re-rendered, debounced, on
-  // every chain change), so the shape visibly reacts to the settings.
-  const blanketPath = useMemo(() => {
-    if (!isConsole || !waveformPeaks || waveformPeaks.length < 2) return null;
-    const N = Math.min(480, waveformPeaks.length);
-    const step = waveformPeaks.length / N;
-    const env: number[] = [];
-    for (let i = 0; i < N; i++) {
-      let m = 0;
-      const a = Math.floor(i * step);
-      const b = Math.max(a + 1, Math.floor((i + 1) * step));
-      for (let k = a; k < b && k < waveformPeaks.length; k++) if (waveformPeaks[k] > m) m = waveformPeaks[k];
-      env.push(Math.min(1, m));
-    }
-    const mid = H / 2;
-    const amp = H * 0.44;
-    let d = `M0,${mid}`;
-    for (let i = 0; i < N; i++) d += ` L${((i / (N - 1)) * W).toFixed(1)},${(mid - env[i] * amp).toFixed(1)}`;
-    for (let i = N - 1; i >= 0; i--) d += ` L${((i / (N - 1)) * W).toFixed(1)},${(mid + env[i] * amp).toFixed(1)}`;
-    return d + ' Z';
-  }, [isConsole, waveformPeaks]);
-  const blanketHeadRef = useRef<SVGLineElement | null>(null);
-  useEffect(() => {
-    if (!isConsole || !durationSec) return;
-    const update = (sec: number) => {
-      const el = blanketHeadRef.current;
-      if (!el) return;
-      const x = (Math.max(0, Math.min(1, sec / durationSec)) * W).toFixed(1);
-      el.setAttribute('x1', x);
-      el.setAttribute('x2', x);
-    };
-    update(telemetryStore.getSnapshot().currentTimeSec);
-    return telemetryStore.subscribe((snap) => update(snap.currentTimeSec));
-  }, [isConsole, durationSec]);
-
-  const nudgeBand = (b: EQBand, e: React.KeyboardEvent) => {
-    const fine = e.shiftKey;
-    let patch: Partial<EQBand> | null = null;
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      const ratio = fine ? 1.01 : 1.06;
-      const f = e.key === 'ArrowRight' ? b.freq * ratio : b.freq / ratio;
-      patch = { freq: Math.round(Math.max(F_MIN, Math.min(F_MAX, f))) };
-    } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && usesGain(b.shape)) {
-      const d = (fine ? 0.1 : 0.5) * (e.key === 'ArrowUp' ? 1 : -1);
-      patch = { gain: Number(Math.max(-G_MAX, Math.min(G_MAX, b.gain + d)).toFixed(1)) };
-    } else if (e.key === '+' || e.key === '=' || e.key === '-') {
-      const q = b.q * (e.key === '-' ? 1 / 1.12 : 1.12);
-      patch = { q: Number(Math.max(0.1, Math.min(18, q)).toFixed(2)) };
-    } else if (e.key === 'Delete' || e.key === 'Backspace') {
-      e.preventDefault();
-      onChange({ ...params, bands: bands.filter((x) => x.id !== b.id) });
-      return;
-    }
-    if (patch) {
-      e.preventDefault();
-      setBand(b.id, patch);
-    }
+  const toggleSolo = (id: string) => {
+    const cur = viewRef.current;
+    const on = !cur.bands.find((b) => b.id === id)?.solo;
+    commit({ ...cur, bands: cur.bands.map((b) => {
+      if (b.id === id) return on ? { ...b, solo: true } : (({ solo: _s, ...rest }) => rest)(b);
+      if (on && b.solo) return (({ solo: _s, ...rest }) => rest)(b);
+      return b;
+    }) });
   };
 
-  const nodeY = (b: EQBand) =>
-    usesGain(b.shape) ? gToY(b.gain) : b.shape === 'notch' ? gToY(-G_MAX + 2) : gToY(6 * Math.log2(b.q / 0.707));
+  const setType = (b: EQBand, value: string, parent?: string) => {
+    const shape = (parent ?? value) as EQBandShape;
+    const subtype = parent ? (value as EQBandSubtype) : DEFAULT_SUBTYPE[shape] ?? undefined;
+    const next: EQBand = { ...b, shape };
+    if (subtype) next.subtype = subtype;
+    else delete next.subtype;
+    const slopes = allowedSlopes(shape, resolveSubtype(next));
+    if (next.slope !== undefined && !slopes.includes(next.slope)) delete next.slope;
+    if (PASS_SHAPES.includes(shape) && !PASS_SHAPES.includes(b.shape)) next.q = 0.71;
+    patchBand(b.id, next);
+  };
 
-  if (isConsole) {
-    const consoleGridF = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
-    const addBand = () => {
-      const nb: EQBand = { id: `b${Date.now().toString(36)}`, enabled: true, shape: 'bell', freq: 1000, gain: 0, q: 1 };
-      onChange({ ...params, bands: [...bands, nb] });
-      setSel(nb.id);
+  // Curves (same designs as the renderer)
+  const freqs = useMemo(() => curveFreqs(240), []);
+  const curves = useMemo(() => {
+    const c = eqDisplayCurves(view, sampleRate, freqs);
+    const perBand = view.bands.map((b) => (b.enabled ? freqs.map((f) => sectionsMagnitudeDb(designBandSections(b, sampleRate, 1), f, sampleRate)) : null));
+    const extras = [
+      c.side && { key: 'side', label: 'Side', values: c.side, color: '#E040FB' },
+      c.left && { key: 'left', label: 'Left', values: c.left, color: '#7BE0A0' },
+      c.right && { key: 'right', label: 'Right', values: c.right, color: '#FF8A5B' },
+    ].filter(Boolean) as Array<{ key: string; label: string; values: number[]; color: string }>;
+    return { freqs, main: c.main, perBand, extras, autoGainDb: c.autoGainDb };
+  }, [view, sampleRate, freqs]);
+
+  const nodes: EqGraphNode[] = bands.map((b, i) => {
+    const { yDb, yMode } = nodeY(b);
+    return {
+      id: b.id,
+      freq: b.freq,
+      yDb,
+      yMode,
+      q: b.q,
+      enabled: b.enabled,
+      color: BAND_COLORS[i % BAND_COLORS.length],
+      label: String(i + 1),
+      description: bandDescription(b, i, view.msMode),
+      showQ: (b.shape === 'bell' || b.shape === 'notch' || b.shape === 'bandpass') && qMatters(b),
+      solo: b.solo,
     };
-    return (
-      <div className="syn-ceq">
-        <div className="syn-ceq-plot">
-          <span className="syn-ceq-axis-y" aria-hidden="true">GAIN (dB)</span>
-          <svg
-            ref={svgRef}
-            viewBox={`0 0 ${W} ${H}`}
-            preserveAspectRatio="none"
-            className="syn-ceq-svg"
-            onPointerMove={onMove}
-            onPointerUp={onUp}
-            onPointerCancel={onUp}
-            onDoubleClick={onDouble}
-            role="group"
-            aria-label="Parametric EQ. Tab to a band node; arrow keys move frequency and gain, plus and minus change Q, Delete removes. Drag nodes with the mouse, wheel for Q, double-click to add a band."
-          >
-            <defs>
-              <linearGradient id={`${uid}-curve`} x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0%" stopColor="#2EA8FF" />
-                <stop offset="35%" stopColor="#3FE0FF" />
-                <stop offset="65%" stopColor="#8B5CF6" />
-                <stop offset="100%" stopColor="#E040FB" />
-              </linearGradient>
-              <linearGradient id={`${uid}-spec`} x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0%" stopColor="#2EA8FF" />
-                <stop offset="50%" stopColor="#8B5CF6" />
-                <stop offset="100%" stopColor="#2EA8FF" />
-              </linearGradient>
-              <linearGradient id={`${uid}-blanket`} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.42} />
-                <stop offset="50%" stopColor="#2EA8FF" stopOpacity={0.18} />
-                <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0.42} />
-              </linearGradient>
-              <linearGradient id={`${uid}-area`} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="#3FE0FF" stopOpacity={0.22} />
-                <stop offset="100%" stopColor="#E040FB" stopOpacity={0} />
-              </linearGradient>
-              <filter id={`${uid}-soft`} x="-5%" y="-20%" width="110%" height="140%">
-                <feGaussianBlur stdDeviation="1.6" result="b" />
-                <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
-              <filter id={`${uid}-glow`} x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="2.2" result="b" />
-                <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
-            </defs>
-            {consoleGridF.map((f) => (
-              <line key={f} x1={fToX(f)} x2={fToX(f)} y1={0} y2={H} className="syn-ceq-grid" />
-            ))}
-            {[-12, -6, 0, 6, 12].map((g) => (
-              <line key={g} x1={0} x2={W} y1={gToY(g)} y2={gToY(g)} className={g === 0 ? 'syn-ceq-grid is-zero' : 'syn-ceq-grid'} />
-            ))}
-            {blanketPath && (
-              <g className="syn-ceq-blanket" pointerEvents="none">
-                <path d={blanketPath} className="syn-ceq-blanket-path" data-live="false"
-                  fill={`url(#${uid}-blanket)`} stroke={`url(#${uid}-spec)`} strokeWidth={0.8} strokeOpacity={0.5} filter={`url(#${uid}-soft)`} />
-                {durationSec > 0 && <line ref={blanketHeadRef} x1={0} x2={0} y1={0} y2={H} className="syn-ceq-playhead" />}
-              </g>
-            )}
-            <path
-              d={`${total.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')} L${W},${gToY(0)} L0,${gToY(0)} Z`}
-              fill={`url(#${uid}-area)`}
-              pointerEvents="none"
-            />
-            <path
-              d={total.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')}
-              fill="none"
-              stroke={`url(#${uid}-curve)`}
-              strokeWidth={2.4}
-              filter={`url(#${uid}-glow)`}
-            />
-            {bands.map((b, i) => {
-              const x = fToX(Math.max(F_MIN, Math.min(F_MAX, b.freq)));
-              const y = nodeY(b);
-              const color = palette[i % palette.length];
-              return (
-                <g key={b.id} opacity={b.enabled ? 1 : 0.35}>
-                  <line x1={x} x2={x} y1={y} y2={H} stroke={color} strokeOpacity={0.25} strokeDasharray="2 3" />
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r={b.id === sel ? 9 : 7.5}
-                    fill="#05070D"
-                    stroke={color}
-                    strokeWidth={2.4}
-                    className="syn-ceq-node"
-                    style={{ cursor: 'grab', color }}
-                    tabIndex={0}
-                    role="button"
-                    aria-label={`Band ${i + 1}, ${SHAPE_LABEL[b.shape]}, ${fmtF(b.freq)} Hz${usesGain(b.shape) ? `, ${b.gain.toFixed(1)} dB` : ''}, Q ${b.q.toFixed(2)}${b.enabled ? '' : ', off'}`}
-                    aria-pressed={b.id === sel}
-                    onFocus={() => setSel(b.id)}
-                    onKeyDown={(e) => nudgeBand(b, e)}
-                    onPointerDown={onNodeDown(b)}
-                    data-band-id={b.id}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      if (usesGain(b.shape)) setBand(b.id, { gain: 0 });
-                    }}
-                  />
-                  <text x={x} y={y + 3} fontSize={8} textAnchor="middle" fill={color} fontWeight={800} pointerEvents="none">{i + 1}</text>
-                </g>
-              );
-            })}
-          </svg>
-          <div className="syn-ceq-ylabels" aria-hidden="true">
-            {[12, 6, 0, -6, -12].map((g) => (
-              <span key={g} style={{ top: `${(gToY(g) / H) * 100}%` }}>{g > 0 ? `+${g}` : g}</span>
-            ))}
-          </div>
-          <div className="syn-ceq-xlabels" aria-hidden="true">
-            {consoleGridF.map((f) => (
-              <span key={f} className={f === 50 || f === 200 || f === 2000 ? 'is-minor' : undefined} style={{ left: `${(fToX(f) / W) * 100}%` }}>{f >= 1000 ? `${f / 1000}k` : f}</span>
-            ))}
-          </div>
-        </div>
-        <div className="syn-ceq-axis-x" aria-hidden="true">FREQUENCY (Hz)</div>
+  });
 
-        <div className="syn-ceq-table" role="list" aria-label="EQ bands">
-          {bands.map((b, i) => {
-            const color = palette[i % palette.length];
-            return (
-              <div
-                key={b.id}
-                role="listitem"
-                className={`syn-ceq-band${b.id === sel ? ' is-sel' : ''}${b.enabled ? '' : ' is-off'}`}
-                style={{ ['--band-color' as string]: color }}
-                onClick={() => setSel(b.id)}
-              >
-                <div className="syn-ceq-band-head">
-                  <label className="syn-ceq-band-on">
-                    <input type="checkbox" checked={b.enabled} onChange={(e) => setBand(b.id, { enabled: e.target.checked })} aria-label={`Band ${i + 1} enabled`} />
-                    <span>{i + 1}</span>
-                  </label>
-                  <select value={b.shape} onChange={(e) => setBand(b.id, { shape: e.target.value as EQBandShape })} aria-label={`Band ${i + 1} type`}>
-                    {SHAPES.map((sh) => (
-                      <option key={sh} value={sh}>{SHAPE_SHORT[sh]}</option>
-                    ))}
-                  </select>
-                </div>
-                <label className="syn-ceq-row">
-                  <span>FREQ</span>
-                  <input type="number" min={F_MIN} max={F_MAX} value={b.freq} aria-label={`Band ${i + 1} frequency (Hz)`} onChange={(e) => setBand(b.id, { freq: Math.max(F_MIN, Math.min(F_MAX, Number(e.target.value) || 1000)) })} />
-                </label>
-                <label className="syn-ceq-row">
-                  <span>GAIN</span>
-                  <input type="number" step={0.1} min={-G_MAX} max={G_MAX} value={b.gain} disabled={!usesGain(b.shape)} aria-label={`Band ${i + 1} gain (dB)`} onChange={(e) => setBand(b.id, { gain: Math.max(-G_MAX, Math.min(G_MAX, Number(e.target.value) || 0)) })} />
-                </label>
-                <label className="syn-ceq-row">
-                  <span>Q</span>
-                  <input type="number" step={0.05} min={0.1} max={18} value={b.q} aria-label={`Band ${i + 1} Q`} className="is-q" onChange={(e) => setBand(b.id, { q: Math.max(0.1, Math.min(18, Number(e.target.value) || 1)) })} />
-                </label>
-                <button type="button" className="syn-ceq-del" aria-label={`Delete band ${i + 1}`} onClick={(e) => { e.stopPropagation(); onChange({ ...params, bands: bands.filter((x) => x.id !== b.id) }); }}>
-                  <Trash2 className="w-3 h-3" />
-                </button>
-              </div>
-            );
-          })}
-          {bands.length < 8 && (
-            <button type="button" className="syn-ceq-add" onClick={addBand}>+ Band</button>
-          )}
-        </div>
-      </div>
+  const onNodeChange = (id: string, patch: { freq?: number; yDb?: number; q?: number }, phase: 'move' | 'end') => {
+    const b = viewRef.current.bands.find((x) => x.id === id);
+    if (!b) return;
+    const out: Partial<EQBand> = {};
+    if (patch.freq !== undefined) out.freq = patch.freq;
+    if (patch.q !== undefined && qMatters(b)) out.q = patch.q;
+    if (patch.yDb !== undefined) {
+      const { yMode } = nodeY(b);
+      if (yMode === 'gain') out.gain = patch.yDb;
+      if (yMode === 'q') out.q = Number(Math.max(0.3, Math.min(12, 0.707 * Math.pow(2, patch.yDb / 6))).toFixed(2));
+    }
+    if (Object.keys(out).length) patchBand(id, out, phase);
+  };
+
+  const selected = bands.find((b) => b.id === sel) ?? null;
+  const selIdx = selected ? bands.indexOf(selected) : -1;
+  const soloIdx = bands.findIndex((b) => b.solo);
+
+  const pre = preSpectrum !== undefined ? preSpectrum : spectrum;
+  const post = postSpectrum !== undefined ? postSpectrum : spectrum;
+
+  const applyPreset = (p: EqPreset) => commit(validateProcessorParams('parametric-eq', p.params) as ParametricEQParams);
+  const switchAB = (to: 'A' | 'B') => {
+    if (to === slots.active) return;
+    const current = viewRef.current;
+    const target = slots.other ?? current;
+    setSlots({ active: to, other: current });
+    if (target !== current) commit(target);
+  };
+
+  const popover = selected && (() => {
+    const b = selected;
+    const i = selIdx;
+    const sub = resolveSubtype(b);
+    const slopes = allowedSlopes(b.shape, sub);
+    const note = freqToNote(b.freq);
+    const { yDb } = nodeY(b);
+    return (
+      <EqBandPopover
+        anchorX={fToX(b.freq) / W}
+        anchorY={gToY(Math.max(-G_MAX, Math.min(G_MAX, yDb))) / H}
+        color={BAND_COLORS[i % BAND_COLORS.length]}
+        title={`Band ${i + 1}`}
+        enabled={b.enabled}
+        solo={Boolean(b.solo)}
+        onToggleEnabled={() => patchBand(b.id, { enabled: !b.enabled })}
+        onToggleSolo={() => toggleSolo(b.id)}
+        onDelete={() => removeBand(b.id)}
+        onClose={() => setSel(null)}
+        typeMenu={
+          <EqTypeMenu
+            ariaLabel={`Band ${i + 1} type`}
+            label={sub && sub !== DEFAULT_SUBTYPE[b.shape] ? `${SHAPE_LABELS[b.shape]} · ${SUBTYPE_LABELS[sub]}` : SHAPE_LABELS[b.shape]}
+            icon={iconFor(b)}
+            options={TYPE_OPTIONS}
+            activeParent={b.shape}
+            activeValue={sub ?? b.shape}
+            onSelect={(v, parent) => setType(b, v, parent)}
+          />
+        }
+      >
+        <NumField label="Freq" unit="Hz" value={b.freq} min={F_MIN} max={F_MAX} step={1} log decimals={b.freq < 100 ? 1 : 0} onChange={(v, ph) => patchBand(b.id, { freq: v }, ph)} />
+        <span className="syn-eqx-note" aria-label="Nearest note">{note.note} {note.cents >= 0 ? '+' : ''}{note.cents}¢</span>
+        <NumField label="Gain" unit="dB" value={b.gain} min={-G_MAX} max={G_MAX} step={0.1} decimals={1} disabled={!usesGain(b.shape)} onChange={(v, ph) => patchBand(b.id, { gain: v }, ph)} />
+        <NumField label="Q" value={b.q} min={0.1} max={18} step={0.01} log decimals={2} disabled={!qMatters(b)} onChange={(v, ph) => patchBand(b.id, { q: v }, ph)} />
+        {slopes.length > 0 && (
+          <SelField label="Slope" value={String(resolveSlope(b))} options={slopes.map((s) => ({ value: String(s), label: `${s} dB/oct` }))}
+            onChange={(v) => patchBand(b.id, { slope: Number(v) as EQSlope })} />
+        )}
+        <SelField label="Channel" value={bandChannel(b, view.msMode)} options={EQ_CHANNELS.map((c) => ({ value: c, label: CHANNEL_LABELS[c] }))}
+          onChange={(v) => patchBand(b.id, { channel: v as EQChannel })} />
+      </EqBandPopover>
     );
-  }
+  })();
 
   return (
-    <div className="syn2-peq">
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-        className="syn2-peq-svg"
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerCancel={onUp}
-        onDoubleClick={onDouble}
-        role="application"
-        aria-label="Parametric EQ: drag nodes to set frequency and gain, mouse wheel for Q, double-click to add a band"
-      >
-        <rect x={0} y={0} width={W} height={H} fill="#070604" />
-        {spectrumPath && <path d={spectrumPath} fill="rgba(212,175,55,0.16)" stroke="rgba(212,175,55,0.35)" strokeWidth={0.8} />}
-        {gridF.map((f) => (
-          <g key={f}>
-            <line x1={fToX(f)} x2={fToX(f)} y1={0} y2={H} stroke="rgba(212,175,55,0.10)" />
-            <text x={fToX(f) + 2} y={H - 3} fontSize={8} fill="#8F7D50" fontFamily="JetBrains Mono, monospace">{fmtF(f)}</text>
-          </g>
-        ))}
-        {[-12, -6, 0, 6, 12].map((g) => (
-          <g key={g}>
-            <line x1={0} x2={W} y1={gToY(g)} y2={gToY(g)} stroke={g === 0 ? 'rgba(212,175,55,0.35)' : 'rgba(212,175,55,0.08)'} />
-            <text x={3} y={gToY(g) - 2} fontSize={8} fill="#8F7D50" fontFamily="JetBrains Mono, monospace">{g > 0 ? `+${g}` : g}</text>
-          </g>
-        ))}
-        {perBand.map((curve, i) =>
-          curve ? (
-            <path
-              key={bands[i].id}
-              d={curve.map((g, k) => `${k ? 'L' : 'M'}${((k / (curve.length - 1)) * W).toFixed(1)},${gToY(Math.max(-G_MAX - 6, Math.min(G_MAX + 6, g))).toFixed(1)}`).join(' ') + ` L${W},${H / 2} L0,${H / 2} Z`}
-              fill={COLORS[i % COLORS.length]}
-              fillOpacity={bands[i].id === sel ? 0.14 : 0.05}
-              stroke="none"
-            />
-          ) : null,
+    <div className={`syn-ceq syn-eqx${isConsole ? ' is-console' : ' is-compact'}`}>
+      <div className="syn-eqx-toolbar" role="toolbar" aria-label="EQ settings">
+        <SelField label="Phase" value={view.phaseMode} options={[{ value: 'minimum', label: 'Minimum' }, { value: 'linear', label: 'Linear' }]} onChange={(v) => commit({ ...view, phaseMode: v as ParametricEQParams['phaseMode'] })} />
+        <SelField label="Analyser" value={analyzer} options={[{ value: 'post', label: 'Post' }, { value: 'pre', label: 'Pre' }, { value: 'both', label: 'Pre + Post' }, { value: 'off', label: 'Off' }]} onChange={(v) => setAnalyzer(v as AnalyzerMode)} />
+        <button type="button" className={`syn-eqx-chip${view.autoGain ? ' is-on' : ''}`} aria-pressed={Boolean(view.autoGain)} onClick={() => {
+          const next = { ...view };
+          if (view.autoGain) delete next.autoGain;
+          else next.autoGain = true;
+          commit(next);
+        }} title="Trim output to cancel the curve's loudness change">
+          Auto gain{view.autoGain ? ` ${curves.autoGainDb >= 0 ? '+' : ''}${curves.autoGainDb.toFixed(1)} dB` : ''}
+        </button>
+        {onOutputGainDb && (
+          <NumField label="Output" unit="dB" value={outputGainDb ?? 0} min={-12} max={12} step={0.1} decimals={1} onChange={(v, ph) => { if (ph === 'end') onOutputGainDb(v); }} />
         )}
-        <path d={total.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')} fill="none" stroke="#FFE08A" strokeWidth={2} />
-        {bands.map((b, i) => {
-          const x = fToX(Math.max(F_MIN, Math.min(F_MAX, b.freq)));
-          const y = nodeY(b);
-          return (
-            <g key={b.id} opacity={b.enabled ? 1 : 0.35}>
-              <circle
-                cx={x}
-                cy={y}
-                r={b.id === sel ? 9 : 7}
-                fill={COLORS[i % COLORS.length]}
-                stroke="#0A0804"
-                strokeWidth={2}
-                style={{ cursor: 'grab' }}
-                onPointerDown={onNodeDown(b)}
-                data-band-id={b.id}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  if (usesGain(b.shape)) setBand(b.id, { gain: 0 });
-                }}
-              />
-              <text x={x} y={y + 3} fontSize={8} textAnchor="middle" fill="#0A0804" fontWeight={800} pointerEvents="none">{i + 1}</text>
-            </g>
-          );
-        })}
-      </svg>
-
-      <div className="syn2-peq-strip">
+        <NumField label="Tilt" unit="dB" value={view.tiltDb} min={-6} max={6} step={0.1} decimals={1} onChange={(v, ph) => (ph === 'move' ? setDraft({ ...viewRef.current, tiltDb: v }) : commit({ ...viewRef.current, tiltDb: v }))} />
+        <div className="syn-eqx-ab" role="group" aria-label="A/B snapshots">
+          {(['A', 'B'] as const).map((s) => (
+            <button key={s} type="button" aria-pressed={slots.active === s} className={slots.active === s ? 'is-on' : ''} onClick={() => switchAB(s)}>{s}</button>
+          ))}
+          <button type="button" title="Copy the current curve to the other slot" onClick={() => setSlots((p) => ({ ...p, other: viewRef.current }))}>{slots.active}→{slots.active === 'A' ? 'B' : 'A'}</button>
+        </div>
+        <label className="syn-eqx-num syn-eqx-sel">
+          <span className="syn-eqx-num-label">Preset</span>
+          <select aria-label="EQ preset" value="" onChange={(e) => {
+            const v = e.target.value;
+            if (v === '__save') {
+              const name = typeof window !== 'undefined' ? window.prompt('Save EQ preset as:', 'My EQ') : null;
+              if (name) setUserPresets(saveUserEqPreset(name, viewRef.current));
+            } else if (v.startsWith('__del:')) {
+              setUserPresets(deleteUserEqPreset(v.slice(6)));
+            } else {
+              const p = [...BUILTIN_EQ_PRESETS, ...userPresets].find((x) => x.id === v);
+              if (p) applyPreset(p);
+            }
+          }}>
+            <option value="" disabled>Load / save…</option>
+            <optgroup label="Built-in">{BUILTIN_EQ_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
+            {userPresets.length > 0 && <optgroup label="Saved">{userPresets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>}
+            <option value="__save">Save current as…</option>
+            {userPresets.length > 0 && <optgroup label="Delete saved">{userPresets.map((p) => <option key={`d-${p.id}`} value={`__del:${p.id}`}>Delete “{p.name}”</option>)}</optgroup>}
+          </select>
+        </label>
+        <button type="button" className="syn-eqx-chip" disabled={bands.length >= MAX_EQ_BANDS} onClick={() => addBand()}>+ Band</button>
+      </div>
+      {soloIdx >= 0 && (
+        <div className="syn-eqx-solo-note" role="status">Listening to band {soloIdx + 1} only (preview). Export and Fix All ignore solo.</div>
+      )}
+      <EqGraph
+        nodes={nodes}
+        selectedId={sel}
+        onSelect={setSel}
+        onNodeChange={onNodeChange}
+        onAdd={bands.length < MAX_EQ_BANDS ? (f, g) => addBand(f, g) : undefined}
+        onDelete={removeBand}
+        onResetGain={(id) => { const b = bands.find((x) => x.id === id); if (b && usesGain(b.shape)) patchBand(id, { gain: 0 }); }}
+        onToggleSolo={toggleSolo}
+        curves={curves}
+        preSpectrum={pre}
+        postSpectrum={post}
+        analyzer={analyzer}
+        waveformPeaks={isConsole ? waveformPeaks : null}
+        durationSec={isConsole ? durationSec : 0}
+        onSeek={isConsole ? onSeek : undefined}
+        ariaLabel="Parametric EQ. Click or drag the waveform background to seek; focus the graph background and use Left/Right to seek (Shift for 1-second steps, Home/End for start/end). Tab to a band node; arrow keys move frequency and gain, plus and minus change Q, S solos, Delete removes, Escape closes. Drag nodes, wheel or the diamond handles for Q, double-click to add a band."
+      >
+        {popover}
+      </EqGraph>
+      {curves.extras.length > 0 && (
+        <div className="syn-eqx-legend" aria-hidden="true">
+          <span style={{ color: '#3FE0FF' }}>━ Mid / mono</span>
+          {curves.extras.map((x) => <span key={x.key} style={{ color: x.color }}>┅ {x.label}</span>)}
+        </div>
+      )}
+      <div className="syn-eqx-bands" role="list" aria-label="EQ bands">
         {bands.map((b, i) => (
           <button
             key={b.id}
             type="button"
-            className={`syn2-peq-tab ${b.id === sel ? 'is-sel' : ''} ${b.enabled ? '' : 'is-off'}`}
-            style={{ borderColor: COLORS[i % COLORS.length] }}
-            onClick={() => setSel(b.id)}
+            role="listitem"
+            className={`syn-eqx-band${b.id === sel ? ' is-sel' : ''}${b.enabled ? '' : ' is-off'}${b.solo ? ' is-solo' : ''}`}
+            style={{ ['--band-color' as string]: BAND_COLORS[i % BAND_COLORS.length] }}
+            aria-pressed={b.id === sel}
+            aria-label={bandDescription(b, i, view.msMode)}
+            onClick={() => setSel(b.id === sel ? null : b.id)}
           >
-            <span style={{ background: COLORS[i % COLORS.length] }} />
-            {i + 1}
+            <b>{i + 1}</b>
+            <CurveIcon kind={iconFor(b)} />
+            <span>{fmtHz(b.freq)}</span>
+            {usesGain(b.shape) && <span>{b.gain > 0 ? '+' : ''}{b.gain.toFixed(1)}</span>}
+            {bandChannel(b, view.msMode) !== 'stereo' && <em>{CHANNEL_LABELS[bandChannel(b, view.msMode)][0]}</em>}
           </button>
         ))}
-        {bands.length < 8 && (
-          <button
-            type="button"
-            className="syn2-peq-tab"
-            onClick={() => {
-              const nb: EQBand = { id: `b${Date.now().toString(36)}`, enabled: true, shape: 'bell', freq: 1000, gain: 0, q: 1 };
-              onChange({ ...params, bands: [...bands, nb] });
-              setSel(nb.id);
-            }}
-          >
-            + band
-          </button>
-        )}
       </div>
-
-      {selected && (
-        <div className="syn2-peq-edit">
-          <label className="syn2-peq-field">
-            <span>On</span>
-            <input type="checkbox" checked={selected.enabled} onChange={(e) => setBand(selected.id, { enabled: e.target.checked })} />
-          </label>
-          <label className="syn2-peq-field">
-            <span>Type</span>
-            <select value={selected.shape} onChange={(e) => setBand(selected.id, { shape: e.target.value as EQBandShape })}>
-              {SHAPES.map((s) => (
-                <option key={s} value={s}>{SHAPE_LABEL[s]}</option>
-              ))}
-            </select>
-          </label>
-          <label className="syn2-peq-field">
-            <span>Freq</span>
-            <input type="number" min={F_MIN} max={F_MAX} value={selected.freq} onChange={(e) => setBand(selected.id, { freq: Math.max(F_MIN, Math.min(F_MAX, Number(e.target.value) || 1000)) })} />
-          </label>
-          <label className="syn2-peq-field">
-            <span>Gain</span>
-            <input type="number" step={0.1} min={-G_MAX} max={G_MAX} value={selected.gain} disabled={!usesGain(selected.shape)} onChange={(e) => setBand(selected.id, { gain: Math.max(-G_MAX, Math.min(G_MAX, Number(e.target.value) || 0)) })} />
-          </label>
-          <label className="syn2-peq-field">
-            <span>Q</span>
-            <input type="number" step={0.05} min={0.1} max={18} value={selected.q} onChange={(e) => setBand(selected.id, { q: Math.max(0.1, Math.min(18, Number(e.target.value) || 1)) })} />
-          </label>
-          <button type="button" className="syn2-peq-del" aria-label="Delete band" onClick={() => onChange({ ...params, bands: bands.filter((b) => b.id !== selected.id) })}>
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-      <div className="syn2-peq-help">Drag nodes · wheel = Q · Shift-drag = fine · double-click = add band / reset gain</div>
     </div>
   );
 };
