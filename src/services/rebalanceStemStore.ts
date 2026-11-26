@@ -142,7 +142,7 @@ export async function separateActiveRebalanceStems(options: { highQuality?: bool
   if (!state.assessment && state.status === 'checking') {
     await new Promise<void>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | null = null;
-      let unsubscribe = () => undefined;
+      let unsubscribe: () => void = () => {};
       const finish = (error?: Error) => {
         if (timer !== null) clearTimeout(timer);
         unsubscribe();
