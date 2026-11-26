@@ -76,7 +76,9 @@ test('tampered, missing and expired guest cookies are rejected', () => {
   const bootstrapRes = makeResponse();
   sessions.bootstrap(req, bootstrapRes.response);
   const cookie = bootstrapRes.headers['set-cookie'].split(';', 1)[0];
-  const tampered = makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https', cookie: cookie.slice(0, -1) + 'x' });
+  const tokenValue = cookie.slice('syn_master_guest='.length);
+  const tamperedValue = (tokenValue[0] === '0' ? '1' : '0') + tokenValue.slice(1);
+  const tampered = makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https', cookie: 'syn_master_guest=' + tamperedValue });
   const expired = makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https', cookie });
   now += 13 * 60 * 60 * 1000;
   for (const invalid of [makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https' }), tampered, expired]) {
