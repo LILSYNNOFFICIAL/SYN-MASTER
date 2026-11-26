@@ -94,21 +94,28 @@ function bridgeHermite(ch: Float32Array, a: number, b: number): void {
     const h10 = t3 - 2 * t2 + t;
     const h01 = -2 * t3 + 3 * t2;
     const h11 = t3 - t2;
-    const v = h00 * p0 + h10 * m0 * len + h01 * p1 + h11 * m1 * len;
-    ch[a + k] = Math.max(lo, Math.min(hi, v));
+    const reconstructed = h00 * p0 + h10 * m0 * len + h01 * p1 + h11 * m1 * len;
+    // Blend into the reconstruction with a raised-cosine microfade. The original
+    // samples are retained at both window edges, while the centre of the isolated
+    // discontinuity is fully replaced. This avoids creating a second click at either
+    // splice boundary and preserves the surrounding musical waveform.
+    const microfade = 0.5 - 0.5 * Math.cos(2 * Math.PI * t);
+    const original = ch[a + k];
+    const blended = original * (1 - microfade) + reconstructed * microfade;
+    ch[a + k] = Math.max(lo, Math.min(hi, blended));
   }
 }
 
 /**
  * Repairs a click in the first/last ~3 ms (where the Hermite bridge has no audio on one
  * side): everything up to just past the click is silenced and the audio is faded back in
- * (or out, at the end) with a 2 ms raised cosine. Returns 1 per repaired edge.
+ * (or out, at the end) with an 8 ms raised-cosine microfade. Returns 1 per repaired edge.
  */
 export function repairEdgeClicksChannel(ch: Float32Array, sampleRate: number, ratio = 10): number {
   const n = ch.length;
   if (n < 64) return 0;
   const pad = Math.max(2, Math.round(sampleRate * 0.0005));
-  const fade = Math.max(8, Math.round(sampleRate * 0.002));
+  const fade = Math.max(8, Math.round(sampleRate * 0.008));
   let repairs = 0;
   for (const reverse of [false, true]) {
     const hit = findEdgeClick(ch, sampleRate, reverse, ratio);
