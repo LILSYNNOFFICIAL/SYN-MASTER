@@ -24,7 +24,7 @@ export interface DiagnosticLogEntry {
   tools: ProcessorType[];
   /** Exact settings of the matching modules in the chain, e.g. "SYN-Restore: declick=55, ..." */
   settings: string[];
-  status: 'open' | 'fixed' | 'not-fixed' | 'advisory';
+  status: 'open' | 'fixed' | 'not-fixed' | 'improved' | 'partially-resolved' | 'unverified' | 'advisory';
 }
 
 export interface DiagnosticLog {
@@ -39,6 +39,28 @@ export interface DiagnosticLog {
   entries: DiagnosticLogEntry[];
   chain: Array<{ name: string; type: ProcessorType; bypassed: boolean; settings: string }>;
   verdict: string;
+}
+
+/** Map verification evidence to a display status. Missing evidence is never a successful fix. */
+export function diagnosticStatusForFinding(
+  report: Pick<MasterFinalReport, 'postFixVerification'> | null | undefined,
+  findingId: string,
+): DiagnosticLogEntry['status'] {
+  const verification = report?.postFixVerification;
+  if (!verification) return report ? 'unverified' : 'open';
+  if (verification.resolvedFindings.some((f) => f.originalFinding.id === findingId && f.status === 'RESOLVED' && f.measurementReliable)) {
+    return 'fixed';
+  }
+  const active = verification.activeFindings.find((f) => f.originalFinding.id === findingId);
+  if (!active) return 'unverified';
+  switch (active.status) {
+    case 'IMPROVED': return 'improved';
+    case 'PARTIALLY_RESOLVED': return 'partially-resolved';
+    case 'UNVERIFIED': return 'unverified';
+    case 'ACTIVE':
+    case 'UNRESOLVED':
+    default: return 'not-fixed';
+  }
 }
 
 const FINDING_TOOLS: Record<string, ProcessorType[]> = {
@@ -170,12 +192,6 @@ export function buildDiagnosticLog(input: {
   }
 
   // Engineering findings (harshness, mud, sibilance, phase, noise, distortion, ...)
-  const postFindingIds = new Set(
-    (report?.postFixVerification?.activeFindings ?? []).map((f) => f.originalFinding.id),
-  );
-  const resolvedIds = new Set(
-    (report?.postFixVerification?.resolvedFindings ?? []).map((f) => f.originalFinding.id),
-  );
   for (const f of input.findings) {
     if (f.kind !== 'technical-problem') continue;
     if (entries.some((e) => e.id === `finding-${f.id}`)) continue;
@@ -189,7 +205,7 @@ export function buildDiagnosticLog(input: {
       target: f.recommendedAction ?? '-',
       tools,
       settings: settingsFor(chain, tools),
-      status: !report ? 'open' : resolvedIds.has(f.id) ? 'fixed' : postFindingIds.has(f.id) ? 'not-fixed' : 'fixed',
+      status: diagnosticStatusForFinding(report, f.id),
     });
   }
 
