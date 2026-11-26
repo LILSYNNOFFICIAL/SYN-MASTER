@@ -4,10 +4,7 @@ import { telemetryStore } from '../../engine/telemetryStore';
 import type { FadeCurve, FadeSettings } from '../../dsp/fades';
 
 interface Props {
-  prePeaks: number[];
-  postPeaks: number[] | null;
   durationSec: number;
-  showPost: boolean;
   isPlaying: boolean;
   fades: FadeSettings;
   onFadesChange: (f: FadeSettings) => void;
