@@ -258,7 +258,7 @@ async function runViewport(browser, width, height, mobile) {
     assert.equal(await page.getByLabel('Mastering Mode').inputValue(), 'ai-auto', 'A fresh session must default the dropdown to AI Automatic, not Hybrid');
     // One existing EQ waveform owns seeking and fade editing. Do not render a duplicate timeline waveform.
     assert.equal(await page.locator('.syn-player .syn2-wave').count(), 0, 'Fade editing must not create a second waveform');
-    assert.equal(await page.locator('.syn-eqx-svg [data-fade-overlay]').count(), 1, 'Fade curves must be layered over the existing EQ waveform');
+    assert.equal(await page.locator('.syn-eqx-svg:visible [data-fade-overlay]').count(), 1, 'Fade curves must be layered over the existing EQ waveform');
     await inspectLayout(page, width, 'studio-timeline');
 
     await page.locator('.syn-library-toggle').click();
@@ -409,11 +409,12 @@ async function runWavExportE2E(browser) {
       buffer: makeToneWav(),
     });
     step('imported');
-    await page.locator('.syn-eqx-svg').waitFor({ state: 'visible', timeout: 30000 });
+    const waveform = page.locator('.syn-eqx-svg:visible').last();
+    await waveform.waitFor({ state: 'visible', timeout: 30000 });
 
-    const waveform = page.locator('.syn-eqx-svg');
+    // Use the last visible graph; hidden responsive/tab copies may still exist in the DOM.
     const box = await waveform.boundingBox();
-    assert.ok(box && box.width > 100, 'Imported track must expose an interactive timeline');
+    assert.ok(box && box.width > 100, `Imported track must expose a visible interactive EQ waveform (matches: ${await page.locator('.syn-eqx-svg').count()})`);
     const fadeInY = box.y + box.height * 0.05;
     const fadeOutY = box.y + box.height * (28 / 240);
     const dragHandle = async (fromX, toX, y) => {
@@ -442,7 +443,7 @@ async function runWavExportE2E(browser) {
     await page.locator('.syn-workspace-menu-item').filter({ hasText: 'AI Director' }).click();
     await page.locator('.syn-ai-hero').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('.syn-primary-nav-item').filter({ hasText: 'Dashboard' }).click();
-    await page.locator('.syn-eqx-svg').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('.syn-eqx-svg:visible').last().waitFor({ state: 'visible', timeout: 10000 });
     assert.equal(await page.getByLabel('Fade-in curve').inputValue(), 'exp', 'fade-in curve must survive a workspace switch');
     assert.equal(await page.getByLabel('Fade-out curve').inputValue(), 'scurve', 'fade-out curve must survive a workspace switch');
     assert.match(await page.locator('.syn-player-fades').innerText(), /Fade in\s+0\.10s/i);
