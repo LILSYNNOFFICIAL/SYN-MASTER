@@ -2,6 +2,7 @@ import React, { useEffect, useId, useMemo, useRef } from 'react';
 import type { AudioAnalysis } from '../../../types/mastering';
 import { qEdgeRatio, qFromEdgeRatio } from '../../../dsp/eqDesign';
 import { telemetryStore } from '../../../engine/telemetryStore';
+import { fadeGain, type FadeSettings } from '../../../dsp/fades';
 import { F_MAX, F_MIN, G_MAX, H, W, clampF, clampG, curvePath, fToX, fmtF, gToY, xToF, yToG } from './graphMath';
 
 export interface EqGraphNode {
@@ -58,6 +59,9 @@ interface Props {
   durationSec?: number;
   /** Seek the shared track timeline by clicking or dragging the waveform layer. */
   onSeek?: (sec: number) => void;
+  /** Fade curves and handles layered directly over the existing waveform blanket. */
+  fades?: FadeSettings;
+  onFadesChange?: (next: FadeSettings) => void;
   ariaLabel: string;
   /** Popover rendered over the plot. */
   children?: React.ReactNode;
@@ -111,6 +115,8 @@ export const EqGraph: React.FC<Props> = ({
   waveformPeaks,
   durationSec = 0,
   onSeek,
+  fades,
+  onFadesChange,
   ariaLabel,
   children,
   className = '',
@@ -119,6 +125,7 @@ export const EqGraph: React.FC<Props> = ({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<null | { id: string; kind: 'node' | 'qlo' | 'qhi'; fine: boolean; sx: number; sy: number; node: EqGraphNode; last: { freq?: number; yDb?: number; q?: number } }>(null);
   const seekDragRef = useRef(false);
+  const fadeDragRef = useRef<null | 'in' | 'out'>(null);
   const lastSeekAtRef = useRef(0);
   const lastPointerXRef = useRef(0);
 
@@ -136,6 +143,14 @@ export const EqGraph: React.FC<Props> = ({
   };
 
   const onMove = (e: React.PointerEvent) => {
+    if (fadeDragRef.current && fades && onFadesChange && durationSec > 0 && svgRef.current) {
+      const rect = svgRef.current.getBoundingClientRect();
+      const sec = timelineSecondsFromPointer(e.clientX, rect.left, rect.width, durationSec);
+      const maxLen = durationSec * 0.5;
+      if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
+      else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
+      return;
+    }
     if (seekDragRef.current && onSeek && durationSec > 0 && svgRef.current) {
       const now = performance.now();
       if (now - lastSeekAtRef.current >= 60) {
@@ -169,6 +184,10 @@ export const EqGraph: React.FC<Props> = ({
   };
 
   const endDrag = () => {
+    if (fadeDragRef.current) {
+      fadeDragRef.current = null;
+      return;
+    }
     if (seekDragRef.current) {
       seekDragRef.current = false;
       if (onSeek && durationSec > 0 && svgRef.current) {
@@ -259,6 +278,24 @@ export const EqGraph: React.FC<Props> = ({
     for (let i = N - 1; i >= 0; i--) d += ` L${((i / (N - 1)) * W).toFixed(1)},${(mid + env[i] * amp).toFixed(1)}`;
     return d + ' Z';
   }, [waveformPeaks]);
+  const fadeOverlay = useMemo(() => {
+    if (!fades || durationSec <= 0) return null;
+    const inX = Math.max(0, Math.min(W, (fades.inSec / durationSec) * W));
+    const outX = Math.max(0, Math.min(W, W - (fades.outSec / durationSec) * W));
+    const inPath = fades.inSec > 0
+      ? Array.from({ length: 41 }, (_, i) => {
+          const t = i / 40;
+          return `${i ? 'L' : 'M'}${(t * inX).toFixed(1)},${(H - fadeGain(t, fades.inCurve) * H).toFixed(1)}`;
+        }).join(' ')
+      : '';
+    const outPath = fades.outSec > 0
+      ? Array.from({ length: 41 }, (_, i) => {
+          const t = i / 40;
+          return `${i ? 'L' : 'M'}${(W - t * (W - outX)).toFixed(1)},${(H - fadeGain(t, fades.outCurve) * H).toFixed(1)}`;
+        }).join(' ')
+      : '';
+    return { inX, outX, inPath, outPath };
+  }, [fades, durationSec]);
   const headRef = useRef<SVGLineElement | null>(null);
   useEffect(() => {
     if (!blanketPath || !durationSec) return;
@@ -288,11 +325,23 @@ export const EqGraph: React.FC<Props> = ({
         className="syn-ceq-svg syn-eqx-svg"
         onPointerMove={(e) => { lastPointerXRef.current = e.clientX; onMove(e); }}
         onPointerUp={(e) => { lastPointerXRef.current = e.clientX; endDrag(); }}
-        onPointerCancel={() => { seekDragRef.current = false; endDrag(); }}
+        onPointerCancel={() => { fadeDragRef.current = null; seekDragRef.current = false; endDrag(); }}
         onDoubleClick={onDouble}
         onPointerDown={(e) => {
           const target = e.target as Element | null;
           if (target?.closest?.('[data-band-id], [data-q-handle]')) return;
+          if (fades && onFadesChange && durationSec > 0 && svgRef.current) {
+            const p = toLocal(e);
+            const inX = (fades.inSec / durationSec) * W;
+            const outX = W - (fades.outSec / durationSec) * W;
+            if (p.y <= 30 && Math.abs(p.x - inX) <= 15) fadeDragRef.current = 'in';
+            else if (p.y <= 30 && Math.abs(p.x - outX) <= 15) fadeDragRef.current = 'out';
+            if (fadeDragRef.current) {
+              e.preventDefault();
+              svgRef.current.setPointerCapture?.(e.pointerId);
+              return;
+            }
+          }
           if (onSeek && durationSec > 0 && svgRef.current) {
             e.preventDefault();
             seekDragRef.current = true;
@@ -317,7 +366,7 @@ export const EqGraph: React.FC<Props> = ({
         }}
         tabIndex={0}
         role="group"
-        aria-label={ariaLabel}
+        aria-label={`${ariaLabel} Drag the cyan top handles to set fade-in and fade-out on this waveform.`}
       >
         <defs>
           <linearGradient id={`${uid}-curve`} x1="0" x2="1" y1="0" y2="0">
@@ -348,6 +397,14 @@ export const EqGraph: React.FC<Props> = ({
           <g className="syn-ceq-blanket" pointerEvents="none">
             <path d={blanketPath} className="syn-ceq-blanket-path" fill={`url(#${uid}-blanket)`} stroke="#2EA8FF" strokeOpacity={0.25} strokeWidth={0.8} />
             {durationSec > 0 && <line ref={headRef} x1={0} x2={0} y1={0} y2={H} className="syn-ceq-playhead" />}
+          </g>
+        )}
+        {fadeOverlay && (
+          <g data-fade-overlay="true" className="syn-eqx-fade-overlay" pointerEvents="none">
+            {fadeOverlay.inPath && <path d={fadeOverlay.inPath} fill="none" stroke="#E040FB" strokeWidth={2.5} strokeLinecap="round" filter={`url(#${uid}-glow)`} />}
+            {fadeOverlay.outPath && <path d={fadeOverlay.outPath} fill="none" stroke="#E040FB" strokeWidth={2.5} strokeLinecap="round" filter={`url(#${uid}-glow)`} />}
+            <circle data-fade-handle="in" cx={Math.max(10, fadeOverlay.inX)} cy={12} r={7} fill="#3FE0FF" stroke="#07111C" strokeWidth={2} pointerEvents="all" />
+            <circle data-fade-handle="out" cx={Math.min(W - 10, fadeOverlay.outX)} cy={12} r={7} fill="#3FE0FF" stroke="#07111C" strokeWidth={2} pointerEvents="all" />
           </g>
         )}
         {postPath && <path d={postPath} className="syn-eqx-spec-post" pointerEvents="none" />}
