@@ -1,47 +1,107 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 
-const MIN_TOKEN_BYTES = 32;
-const MAX_TOKEN_BYTES = 512;
+const COOKIE_NAME = 'syn_master_guest';
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const RENEW_WITHIN_MS = 2 * 60 * 60 * 1000;
 
-export interface AiAccessGuardOptions {
-  accessToken?: string;
+export interface AiGuestSessionOptions {
+  secret?: string;
   production?: boolean;
+  now?: () => number;
 }
 
-/**
- * Production-only bearer gate for the server-owned Gemini endpoints.
- * Development remains frictionless; production fails closed if no sufficiently
- * strong access token is configured. This is an access gate, not a user-account system.
- */
-export function createAiAccessGuard(options: AiAccessGuardOptions = {}) {
-  const expected = String(options.accessToken ?? '').trim();
-  const expectedBytes = Buffer.from(expected, 'utf8');
-  const configured = expectedBytes.length >= MIN_TOKEN_BYTES && expectedBytes.length <= MAX_TOKEN_BYTES;
-  const production = options.production === true;
+interface SessionPayload { id: string; expiresAt: number; }
 
-  return function aiAccessGuard(req: Request, res: Response, next: NextFunction): void {
-    if (!production) {
-      next();
+function signature(secret: string, id: string, expiresAt: number): string {
+  return createHmac('sha256', secret).update(id + '.' + expiresAt).digest('base64url');
+}
+
+function readCookie(header: string | undefined, name: string): string {
+  if (!header) return '';
+  for (const part of header.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 0) continue;
+    if (part.slice(0, separator).trim() === name) return part.slice(separator + 1).trim();
+  }
+  return '';
+}
+
+/** Signed, anonymous guest sessions. The signing key never leaves this server module. */
+export function createAiGuestSession(options: AiGuestSessionOptions = {}) {
+  const production = options.production === true;
+  const now = options.now ?? Date.now;
+  const configuredSecret = String(options.secret ?? '');
+  const secret = configuredSecret.length >= 32
+    ? configuredSecret
+    : production ? '' : randomBytes(32).toString('hex');
+
+  function parse(req: Request): SessionPayload | null {
+    if (!secret) return null;
+    const token = readCookie(req.headers.cookie, COOKIE_NAME);
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [id, expiryText, supplied] = parts;
+    const expiresAt = Number(expiryText);
+    if (!/^[0-9a-f-]{36}$/i.test(id) || !Number.isSafeInteger(expiresAt) || expiresAt <= now()) return null;
+    const expected = Buffer.from(signature(secret, id, expiresAt));
+    const actual = Buffer.from(supplied);
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
+    return { id, expiresAt };
+  }
+
+  function sameOrigin(req: Request): boolean {
+    const fetchSite = String(req.get('sec-fetch-site') ?? '').toLowerCase();
+    if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') return false;
+    const origin = req.get('origin');
+    if (!origin) return !production && !fetchSite;
+    try {
+      return new URL(origin).origin === req.protocol + '://' + req.get('host');
+    } catch {
+      return false;
+    }
+  }
+
+  function setCookie(req: Request, res: Response, id: string, expiresAt: number): void {
+    const token = [id, expiresAt, signature(secret, id, expiresAt)].join('.');
+    const maxAge = Math.max(0, Math.floor((expiresAt - now()) / 1000));
+    const secure = req.secure ? '; Secure' : '';
+    res.setHeader('Set-Cookie', COOKIE_NAME + '=' + token + '; Path=/api/ai; HttpOnly; SameSite=Strict; Max-Age=' + maxAge + secure);
+  }
+
+  function bootstrap(req: Request, res: Response): void {
+    if (!secret) {
+      res.status(503).json({ error: 'Cloud AI guest sessions are not configured on this server. Local mastering remains available.' });
       return;
     }
-    if (!configured) {
-      res.status(503).json({
-        error: 'Built-in cloud AI is disabled because the server access token is not configured.',
-      });
+    if (!sameOrigin(req)) {
+      res.status(403).json({ error: 'Cloud AI sessions can only be created from the SYN-MASTER application.' });
       return;
     }
-    const authorization = req.get('authorization') ?? '';
-    const candidate = authorization.slice(0, 7).toLowerCase() === 'bearer '
-      ? authorization.slice(7).trim()
-      : '';
-    const candidateBytes = Buffer.from(candidate, 'utf8');
-    const valid = candidateBytes.length === expectedBytes.length &&
-      timingSafeEqual(candidateBytes, expectedBytes);
-    if (!valid) {
-      res.status(401).json({ error: 'A valid SYN MASTER cloud AI access token is required.' });
+    const existing = parse(req);
+    const id = existing?.id ?? randomUUID();
+    setCookie(req, res, id, now() + SESSION_TTL_MS);
+    res.status(204).end();
+  }
+
+  function middleware(req: Request, res: Response, next: NextFunction): void {
+    if (!secret) {
+      res.status(503).json({ error: 'Cloud AI guest sessions are not configured on this server. Local mastering remains available.' });
       return;
     }
+    if (!sameOrigin(req)) {
+      res.status(403).json({ error: 'Cloud AI requests must originate from the SYN-MASTER application.' });
+      return;
+    }
+    const session = parse(req);
+    if (!session) {
+      res.status(401).json({ error: 'Your Cloud AI session expired. Retry the request to start a new guest session.' });
+      return;
+    }
+    res.locals.guestSessionId = session.id;
+    if (session.expiresAt - now() <= RENEW_WITHIN_MS) setCookie(req, res, session.id, now() + SESSION_TTL_MS);
     next();
-  };
+  }
+
+  return { bootstrap, middleware, isConfigured: Boolean(secret), readSession: parse };
 }
