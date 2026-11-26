@@ -235,13 +235,13 @@ async function runViewport(browser, width, height, mobile) {
     assert.notEqual(await firstKnob.getAttribute('aria-valuenow'), before, 'Console knob must respond to the keyboard');
     await page.keyboard.press('ArrowDown');
     assert.equal(await page.locator('.syn2-wave-wrap').count(), 0, 'The default mastering workspace must use the unified waveform-behind-EQ visualization, not a second stacked waveform panel');
-    // Guided flow (README round 3 · A): 1 Import/timeline → 2 Fix with AI → 3 Master it yourself (EQ).
-    const fixPrecedesEq = await page.evaluate(() => {
+    // Guided flow: 1 Import & EQ → 2 Fix with AI → 3 Master it yourself.
+    const eqPrecedesFix = await page.evaluate(() => {
       const eq = document.querySelector('[data-testid="central-spectrum"]');
       const fix = document.querySelector('.syn2-fix-centerpiece');
-      return Boolean(eq && fix && fix.getBoundingClientRect().bottom <= eq.getBoundingClientRect().top + 1);
+      return Boolean(eq && fix && eq.getBoundingClientRect().bottom <= fix.getBoundingClientRect().top + 1);
     });
-    if (mobile) assert.equal(fixPrecedesEq, true, 'FIX ALL AI (step 2) must appear above the EQ (step 3) on mobile');
+    if (mobile) assert.equal(eqPrecedesFix, true, 'Import & EQ (step 1) must appear above FIX ALL AI (step 2) on mobile');
 
     // The always-visible TimelinePlayer replaced the old "Timeline & fades" toggle.
     assert.equal(await page.locator('.syn-player .syn2-wave').count(), 1, 'Timeline and fade editing must stay available in the TimelinePlayer');
