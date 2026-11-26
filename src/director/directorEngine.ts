@@ -2105,6 +2105,45 @@ function buildFinalReportFromState(params: {
 }
 
 /**
+ * Preserve measured local corrections when a cloud AI seed chain is supplied.
+ * AI suggestions are a starting point, not permission to discard deterministic,
+ * evidence-backed Dynamic EQ / Match EQ stages or local stem-balance corrections.
+ */
+export function mergeAiChainWithMeasuredPlan(
+  aiChain: ProcessorModule[],
+  leadModules: ProcessorModule[],
+  measuredPlanChain: ProcessorModule[],
+): ProcessorModule[] {
+  const hasEffective = (chain: ProcessorModule[], type: 'dynamic-eq' | 'match-eq') =>
+    chain.some((module) => {
+      if (module.type !== type || !module.enabled || module.bypassed || module.wetDry <= 0 || module.intensity <= 0) return false;
+      const params = module.params as unknown as { bands?: Array<{ enabled?: boolean; maxCutDb?: number }>; amount?: number };
+      if (type === 'dynamic-eq') {
+        return (params.bands ?? []).some((band) => band.enabled !== false && Math.abs(band.maxCutDb ?? 0) > 0.05);
+      }
+      return (params.amount ?? 0) > 0;
+    });
+
+  let merged = validateChain([...structuredClone(leadModules), ...structuredClone(aiChain)]);
+  for (const type of ['dynamic-eq', 'match-eq'] as const) {
+    if (hasEffective(merged, type)) continue;
+    const measured = measuredPlanChain.find((module) =>
+      module.type === type && module.enabled && !module.bypassed && module.wetDry > 0 && module.intensity > 0,
+    );
+    if (!measured) continue;
+    // Remove empty/no-op AI placeholders, then place the measured processor before
+    // compression and loudness stages so its detector sees the intended source signal.
+    merged = merged.filter((module) => module.type !== type);
+    const insertAt = merged.findIndex((module) =>
+      ['compressor', 'multiband-comp', 'clipper', 'limiter', 'maximizer', 'multiband-maximizer', 'dither'].includes(module.type),
+    );
+    const at = insertAt < 0 ? merged.length : insertAt;
+    merged.splice(at, 0, structuredClone(measured));
+  }
+  return validateChain(merged);
+}
+
+/**
  * Closed-loop Autonomous Mastering Director (SYN-ITERATE + SYN-QC + Safeguards)
  */
 export async function runAutonomousDirectorLoop(
@@ -2316,7 +2355,7 @@ export async function runAutonomousDirectorLoop(
     hydrateMatchEqChain(c, matchEqProfile, { dropUnlearned: true, conservative: fromAi });
   let workingChain: ProcessorModule[] =
     opts.initialChain && opts.initialChain.length > 0
-      ? prepareChain(validateChain(structuredClone(opts.initialChain)), true)
+      ? prepareChain(mergeAiChainWithMeasuredPlan(opts.initialChain, opts.leadModules ?? [], plan.chain), true)
       : opts.leadModules && opts.leadModules.length > 0
         ? validateChain([...structuredClone(opts.leadModules), ...structuredClone(plan.chain)])
         : structuredClone(plan.chain);
