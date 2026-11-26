@@ -104,7 +104,7 @@ interface Props {
 const MODE_LABELS: Array<{ id: DirectorOperatingMode; label: string; desc: string }> = [
   { id: 'manual', label: 'Manual', desc: 'Analyze & explain plan only. Zero automatic rack edits.' },
   { id: 'assisted', label: 'Assisted', desc: 'Single verified closed-loop pass with manual sign-off.' },
-  { id: 'autonomous', label: 'Autonomous', desc: 'Closed-loop CHAIN WITH AI -> Render -> Measure -> Refine.' },
+  { id: 'autonomous', label: 'AI Automatic', desc: 'Analyze, select, render, measure and refine until the result is verified.' },
 ];
 
 const OBJECTIVE_LABELS: Array<{ id: MasteringObjectiveId; label: string }> = [
