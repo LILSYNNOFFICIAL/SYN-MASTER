@@ -2593,6 +2593,22 @@ export default function App() {
         setStatusNotice(`Custom loudness target: ${lufs} LUFS.`);
       }}
       blanketPeaks={chainBypassed || auditionTarget === 'original' ? prePeaksHi : postPeaksHi ?? prePeaksHi}
+      timelineTransport={
+        <TimelinePlayer
+          prePeaks={prePeaksHi}
+          postPeaks={postPeaksHi}
+          durationSec={activeTrack?.durationSec ?? 0}
+          showPost={auditionTarget !== 'original'}
+          isPlaying={isPlaying}
+          fades={fades}
+          onFadesChange={setFades}
+          onSeek={seekTo}
+          onTogglePlay={togglePlay}
+          onImport={handleUploadSourceFile}
+          integrated
+          transportOnly
+        />
+      }
       timeline={
         <TimelinePlayer
           prePeaks={prePeaksHi}
@@ -2606,6 +2622,7 @@ export default function App() {
           onTogglePlay={togglePlay}
           onImport={handleUploadSourceFile}
           integrated
+          hideTransport
           extra={<React.Suspense fallback={null}><PlatformPreviewSelector levels={platformLevels} onOpenPanel={() => setActiveTab('qc')} /></React.Suspense>}
         />
       }
