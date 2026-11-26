@@ -1586,7 +1586,8 @@ export default function App() {
         // If the AI diagnosis explicitly selects Vocal Rebalance, create the missing source
         // stems now rather than silently dropping the requested processor. Separation is
         // resource-gated by the stem store and only runs for this warranted case.
-        if (Array.isArray(strat.chain) && strat.chain.some((m) => m.type === 'vocal-rebalance') && !vocalBalance.stemsCached) {
+        const aiRequestsVocalBalance = Array.isArray(strat.chain) && strat.chain.some((m) => m.type === 'vocal-rebalance') || (strat.issuesDetected ?? []).some((issue) => /vocal.*(balance|level|quiet|loud|buried|forward)|(?:balance|level).*(vocal|lead)/i.test(issue));
+        if (aiRequestsVocalBalance && !vocalBalance.stemsCached) {
           aiProviderLog.push('Vocal Rebalance: AI selected stem-level vocal correction; starting automatic stem separation.');
           try {
             await separateActiveRebalanceStems();
@@ -1635,7 +1636,8 @@ export default function App() {
 
     // Local Director: a conservative vocal-only move when stems are cached and the measured
     // balance is clearly outside the objective range (never used when the AI planned the chain).
-    const localRebalance = !geminiInitialChain && runOperatingMode !== 'assisted' ? planLocalVocalRebalance(vocalBalance) : null;
+    const aiAlreadyRebalancesVocals = Boolean(geminiInitialChain?.some((m) => m.type === 'vocal-rebalance'));
+    const localRebalance = !aiAlreadyRebalancesVocals && runOperatingMode !== 'assisted' ? planLocalVocalRebalance(vocalBalance) : null;
     const leadModules = localRebalance
       ? gateRebalance([createProcessorModule('vocal-rebalance', { params: localRebalance })]).filter((m) => m.type === 'vocal-rebalance')
       : [];
