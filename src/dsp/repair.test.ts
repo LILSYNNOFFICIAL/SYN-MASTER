@@ -5,7 +5,7 @@ import { repairClicksChannel, repairEdgeClicksChannel, repairEdgeClicksStereo } 
 
 const SR = 44100;
 
-function tone(length = SR) {
+function tone(length = SR * 2) {
   const ch = new Float32Array(length);
   for (let i = 0; i < length; i++) ch[i] = 0.18 * Math.sin((2 * Math.PI * 440 * i) / SR);
   return ch;
