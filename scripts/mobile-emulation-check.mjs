@@ -50,7 +50,7 @@ const readTime = async (page) => {
   const m = text.match(/(\d+):(\d+(?:\.\d+)?)/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
 };
-const playheadX = (page) => page.locator('.syn-eqx-svg .syn-ceq-playhead').first().evaluate((el) => el.x1.baseVal.value);
+const playheadX = (page) => page.locator('.syn-eqx-svg .syn-ceq-playhead').first().evaluate((el) => (el.x1.baseVal.value / 640) * el.ownerSVGElement.getBoundingClientRect().width);
 
 async function runViewport(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
