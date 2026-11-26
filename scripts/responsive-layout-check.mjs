@@ -414,16 +414,17 @@ async function runWavExportE2E(browser) {
     const waveform = page.locator('.syn-eqx-svg');
     const box = await waveform.boundingBox();
     assert.ok(box && box.width > 100, 'Imported track must expose an interactive timeline');
-    const fadeY = box.y + box.height * 0.05;
-    const dragHandle = async (fromX, toX) => {
-      await page.mouse.move(fromX, fadeY);
+    const fadeInY = box.y + box.height * 0.05;
+    const fadeOutY = box.y + box.height * (28 / 240);
+    const dragHandle = async (fromX, toX, y) => {
+      await page.mouse.move(fromX, y);
       await page.mouse.down();
-      await page.mouse.move(toX, fadeY, { steps: 4 });
+      await page.mouse.move(toX, y, { steps: 4 });
       await page.mouse.up();
     };
     step('fades');
-    await dragHandle(box.x + 10, box.x + box.width * 0.1);
-    await dragHandle(box.x + box.width - 10, box.x + box.width * 0.9);
+    await dragHandle(box.x + 10, box.x + box.width * 0.1, fadeInY);
+    await dragHandle(box.x + box.width - 10, box.x + box.width * 0.9, fadeOutY);
     const fadeControls = await page.locator('.syn-player-fades').innerText();
     assert.match(fadeControls, /Fade in\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-in');
     assert.match(fadeControls, /Fade out\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-out');
