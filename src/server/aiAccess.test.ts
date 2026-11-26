@@ -102,6 +102,18 @@ test('guest bootstrap rejects cross-origin requests and fails closed without a p
   assert.equal(unavailable.statusCode, 503);
 });
 
+test('production rejects placeholder signing secrets and reuse of the Gemini provider key', () => {
+  const placeholder = createAiGuestSession({ secret: 'GENERATE_A_RANDOM_64_CHARACTER_HEX_SECRET', production: true });
+  assert.equal(placeholder.isConfigured, false);
+  const reused = createAiGuestSession({ secret: SECRET, providerKey: SECRET, production: true });
+  assert.equal(reused.isConfigured, false);
+  for (const sessions of [placeholder, reused]) {
+    const res = makeResponse();
+    sessions.bootstrap(makeRequest({ origin: 'https://app.example', host: 'app.example', protocol: 'https' }), res.response);
+    assert.equal(res.statusCode, 503);
+  }
+});
+
 test('development guest cookies omit Secure on loopback HTTP and still validate', () => {
   const sessions = createAiGuestSession({ secret: SECRET, production: false });
   const req = makeRequest({ origin: 'http://127.0.0.1:3000', host: '127.0.0.1:3000', protocol: 'http', secure: false });
