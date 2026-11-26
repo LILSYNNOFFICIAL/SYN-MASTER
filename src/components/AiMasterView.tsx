@@ -337,10 +337,15 @@ export const AiMasterView: React.FC<Props> = ({
   const sourceLimitations = effectiveVerification?.activeFindings.filter(
     (finding) => isSourceLimitationFinding(finding.findingId),
   ) ?? [];
+  const verifiedResolvedFindings = effectiveVerification?.analysisFresh && effectiveVerification.postAnalysis
+    ? effectiveVerification.resolvedFindings.filter((finding) => finding.status === 'RESOLVED' && finding.measurementReliable)
+    : [];
   const reportIsVerified = Boolean(
     directorReport &&
     directorReport.status === 'converged' &&
     directorReport.qcReport.failCount === 0 &&
+    directorReport.postFixVerification?.analysisFresh === true &&
+    directorReport.postFixVerification.postAnalysis &&
     (directorReport.postFixVerification?.activeFindings ?? []).every((finding) =>
       isSourceLimitationFinding(finding.findingId),
     ) &&
@@ -909,17 +914,17 @@ export const AiMasterView: React.FC<Props> = ({
               )}
 
               {/* Verified Resolved Findings (Before/After proof + Status: RESOLVED) */}
-              {effectiveVerification.resolvedFindings.length > 0 && (
+              {verifiedResolvedFindings.length > 0 && (
                 <div data-testid="resolved-findings-section" className="flex flex-col gap-2">
                   <div className="text-[11px] font-bold uppercase tracking-wider text-[#34D399]">
-                    Verified Resolved Findings ({effectiveVerification.resolvedFindings.length})
+                    Verified Resolved Findings ({verifiedResolvedFindings.length})
                   </div>
                   <div
                     className={`grid grid-cols-1 gap-2 ${
-                      effectiveVerification.resolvedFindings.length > 1 ? 'md:grid-cols-2' : ''
+                      verifiedResolvedFindings.length > 1 ? 'md:grid-cols-2' : ''
                     }`}
                   >
-                    {effectiveVerification.resolvedFindings.map((vf) => (
+                    {verifiedResolvedFindings.map((vf) => (
                       <div
                         key={vf.findingId}
                         data-testid={`resolved-finding-${vf.findingId}`}
@@ -1494,12 +1499,11 @@ export const AiMasterView: React.FC<Props> = ({
             <div className="p-2.5 rounded bg-[#0C0D12] border border-[#1E222B]">
               <div className="font-semibold text-[#34D399] mb-1">Problems Detected &amp; Resolved</div>
               <ul className="list-disc list-inside text-[#C5CDD8] flex flex-col gap-0.5">
-                {(directorReport.resolvedProblems.length > 0
-                  ? directorReport.resolvedProblems
-                  : directorReport.verifiedImprovements
-                ).map((item, i) => (
-                  <li key={i}>{item}</li>
-                ))}
+                {verifiedResolvedFindings.length > 0
+                  ? verifiedResolvedFindings.map((finding) => (
+                      <li key={finding.findingId}>{finding.originalFinding.title} — {finding.verificationSummary}</li>
+                    ))
+                  : <li>No technical findings have been independently verified as resolved.</li>}
               </ul>
             </div>
 
