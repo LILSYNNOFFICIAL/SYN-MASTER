@@ -2,6 +2,32 @@
 
 **Precision Engineering. Intelligent Mastering. Exceptional Sound.** The goal: *Ozone on steroids.*
 
+<!-- Project badges: dynamically reflects the repository's workflows and metadata. -->
+<p align="center">
+  <a href="https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/workflows/web-ci.yml"><img alt="Web CI" src="https://img.shields.io/github/actions/workflow/status/LILSYNNOFFICIAL/SYN-MASTER/web-ci.yml?branch=main&label=Web%20CI&logo=githubactions&logoColor=white"></a>
+  <a href="https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/workflows/windows-x64-build.yml"><img alt="Windows x64 CI" src="https://img.shields.io/github/actions/workflow/status/LILSYNNOFFICIAL/SYN-MASTER/windows-x64-build.yml?branch=main&label=Windows%20x64%20CI&logo=windows&logoColor=white"></a>
+  <a href="https://github.com/LILSYNNOFFICIAL/SYN-MASTER/blob/main/LICENSE"><img alt="AGPL-3.0-only" src="https://img.shields.io/badge/license-AGPL--3.0--only-blue"></a>
+  <img alt="TypeScript 7.0.2" src="https://img.shields.io/badge/TypeScript-7.0.2-3178C6?logo=typescript&logoColor=white">
+  <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white">
+  <img alt="Node.js 22+" src="https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111111">
+  <img alt="Vite 8" src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white">
+  <img alt="Tailwind CSS 4" src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white">
+  <img alt="Express 4" src="https://img.shields.io/badge/Express-4-000000?logo=express&logoColor=white">
+  <img alt="Google Gen AI SDK" src="https://img.shields.io/badge/Google_Gen_AI-SDK-4285F4?logo=googlegemini&logoColor=white">
+  <img alt="ONNX Runtime Web" src="https://img.shields.io/badge/ONNX_Runtime-Web-005CED?logo=onnx&logoColor=white">
+  <img alt="Web Audio API" src="https://img.shields.io/badge/Web_Audio_API-Offline_DSP-8A2BE2">
+  <img alt="JUCE VST3 companion" src="https://img.shields.io/badge/JUCE- VST3_Companion-333333">
+</p>
+
+## Built with
+
+**Coding:** [ChatGPT](https://chatgpt.com/) · Hark AI · [GitHub Copilot](https://github.com/features/copilot) · [Google AI Studio](https://aistudio.google.com/)
+
+**Guidance:** [Claude](https://claude.ai/) · [Google Gemini](https://gemini.google.com/)
+
+**UI:** Hark AI
+
 SYN MASTER is an AI-assisted mastering workstation (React + TypeScript + Vite front end, an Express server that holds the Gemini key, offline Web Audio / SYN-DSP rendering, and an optional Windows VST3 companion host). It was created in **Google AI Studio** (published at https://syn-master.ai.studio/), edited with ChatGPT, and synced back into AI Studio through this GitHub repo.
 
 > **Handoff note for ChatGPT / the next developer.** This README is the single source of truth for what the owner (LIL SYNN / LILSYNNOFFICIAL) wants. Read the *Vision / Spec* section, then pick up the first unticked item in the *Roadmap*. Tick items (`- [x]`) as you finish them and commit straight to `main` (the owner wants every commit pushed directly to `main`: no branches, no PRs). Commit small and often.
@@ -13,6 +39,82 @@ SYN MASTER is an AI-assisted mastering workstation (React + TypeScript + Vite fr
 - The Gemini API key is read **only on the server** from `process.env.GEMINI_API_KEY` (see `server.ts` / `src/server/aiMastering.ts`). Never move it into client code or a `VITE_` variable.
 - No new backend services. New DSP goes in the browser (Web Audio API / `OfflineAudioContext` / the existing `src/dsp/*` offline renderer).
 - Minimal checks before pushing: `npm run lint` (tsc) and `npm run build`.
+
+## Technology, packages & engineering references
+
+This section records the technologies and dependencies currently declared by the repository. Version numbers below are the package manifest's declared versions (semver ranges), not a claim that every package has been independently audited or upgraded to its newest upstream release.
+
+### Application stack
+
+| Area | Technology | How SYN-MASTER uses it |
+| --- | --- | --- |
+| Front end | React 19, TypeScript 7, Vite 8 | Component-based mastering workstation, typed application logic, development server and production bundling. |
+| Styling and UI | Tailwind CSS 4, custom CSS, `lucide-react`, Motion | Purpose-built responsive DAW interface, icons and interface animation. |
+| Server | Node.js 22+, Express 4, `tsx`, `dotenv` | Existing Express API and local development runtime. Gemini credentials stay server-side in `GEMINI_API_KEY`; never expose them through Vite or browser code. |
+| AI mastering | `@google/genai` | Server-side Gemini requests and structured mastering-strategy responses. AI proposes settings; the offline renderer and Director verify rendered audio against objective measurements. |
+| Audio engine / DSP | Web Audio API, `OfflineAudioContext`, custom SYN-DSP | Browser-side analysis, offline rendering, processor chain, repair, loudness and objective-aware refinement. |
+| Stem separation | `onnxruntime-web`, Web Workers, HT-Demucs ONNX | Browser-local four-stem separation (drums, bass, other, vocals), preferring WebGPU with WASM fallback. |
+| Export | FFmpeg (server runtime) | Full-track encoding and resampling for supported delivery formats. FFmpeg is an external runtime dependency, not an npm package. |
+| Windows plugin companion | C++20, CMake, JUCE 8, Steinberg VST3 SDK | Optional local VST3 scanner/host/worker companion. This is separate from the full SYN-MASTER workstation application. |
+| Verification | GitHub Actions, Node test runner, TypeScript, CTest | Web tests/build checks and native Windows build/validation workflows. |
+
+### npm packages
+
+Versions are copied from `package.json`. `^ `-style ranges follow npm semver and may resolve to a newer compatible patch/minor version when dependencies are installed.
+
+**Runtime dependencies**
+
+| Package | Declared version | Purpose |
+| --- | --- | --- |
+| `react`, `react-dom` | `^19.0.1` | UI framework and browser renderer |
+| `vite` | `^8.3.0` | Front-end dev server and bundler |
+| `@vitejs/plugin-react` | `^6.1.1` | React integration for Vite |
+| `express` | `^4.21.2` | Existing HTTP API server |
+| `@google/genai` | `^2.32.0` | Google Gen AI JavaScript SDK |
+| `@tailwindcss/vite` | `^4.3.3` | Tailwind CSS v4 integration |
+| `lucide-react` | `^0.546.0` | UI icon components |
+| `motion` | `^12.23.24` | UI animation |
+| `onnxruntime-web` | `^1.31.1` | Browser ONNX inference runtime |
+| `dotenv` | `^17.2.3` | Local environment-variable loading |
+
+**Development dependencies**
+
+| Package | Declared version | Purpose |
+| --- | --- | --- |
+| `typescript` | `^7.0.2` | Static type checking |
+| `tsx` | `^4.21.0` | TypeScript execution for server, scripts and tests |
+| `esbuild` | `^0.27.0` | Desktop server bundling |
+| `tailwindcss` | `^4.3.3` | Utility CSS framework |
+| `autoprefixer` | `^10.4.21` | CSS vendor-prefix processing |
+| `@types/node`, `@types/react`, `@types/react-dom`, `@types/express` | See `package.json` | TypeScript declarations |
+
+**Native companion dependencies** (not npm packages): JUCE `8.0.17-security`, Steinberg VST3 SDK `3.8.0`, IXWebSocket `11.4.5`, nlohmann/json `3.11.3`, and SQLite `3.47.2`. Their license notices are recorded in [Third-Party Notices](docs/THIRD_PARTY_NOTICES.md).
+
+### Research and implementation references
+
+These are the upstream technical references and model/project sources relevant to the technologies actually used. Project-specific behavior and adaptations are documented in the linked repository files.
+
+| Subject | Reference | SYN-MASTER implementation notes |
+| --- | --- | --- |
+| React | [React documentation](https://react.dev/learn) | Component and state model for the workstation UI. |
+| TypeScript | [TypeScript documentation](https://www.typescriptlang.org/docs/) | Typed application, server and DSP code. |
+| Vite | [Vite documentation](https://vite.dev/guide/) | Existing Vite build and dev integration. |
+| Tailwind CSS | [Tailwind CSS v4 documentation](https://tailwindcss.com/docs) | Utility styling alongside the project's custom CSS. |
+| Web Audio | [MDN Web Audio API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API) · [OfflineAudioContext](https://developer.mozilla.org/en-US/docs/Web/API/OfflineAudioContext) | Browser audio graph and offline rendering. |
+| Gemini | [Google Gen AI SDK for JavaScript](https://googleapis.github.io/js-genai/) · [Google AI Studio](https://aistudio.google.com/) | Server-side AI mastering integration; key remains server-only. |
+| ONNX Runtime | [ONNX Runtime Web documentation](https://onnxruntime.ai/docs/get-started/with-javascript/web.html) | Local browser inference for stem separation. |
+| HT-Demucs | [StemSplit HT-Demucs ONNX model card](https://huggingface.co/StemSplitio/htdemucs-onnx) · [Meta Demucs repository](https://github.com/facebookresearch/demucs) | Pinned model, inference path, limitations and validation are recorded in [AI Stem Separation](docs/AI_STEM_SEPARATION.md). |
+| FFmpeg | [FFmpeg documentation](https://ffmpeg.org/documentation.html) | Server-side encoding and resampling; see the Export section below. |
+| JUCE / VST3 | [JUCE documentation](https://docs.juce.com/) · [Steinberg VST3 Developer Portal](https://steinbergmedia.github.io/vst3_dev_portal/) | Native plugin companion architecture and build details are in [VST Companion](docs/VST_COMPANION.md). |
+| Third-party licensing | [Third-Party Notices](docs/THIRD_PARTY_NOTICES.md) | Records the adapted ONNX compatibility helper and native companion dependencies/licenses. |
+
+### Key technical boundaries
+
+- The mastering DSP and final objective verdict run in the existing offline renderer / Director loop; Gemini does not certify its own output.
+- The Gemini API key remains in the Express server environment only. Do not put it in frontend source, browser storage, request headers, or any `VITE_*` variable.
+- Stem separation is browser-local: the app downloads and verifies the pinned HT-Demucs ONNX model, then processes it in a worker. See the model hash, resampling, chunking, caching and validation details in [AI Stem Separation](docs/AI_STEM_SEPARATION.md).
+- The optional Windows VST3 companion is a separate local C++ application that communicates with the browser app over loopback. It is not the full standalone SYN-MASTER desktop workstation.
+- The exact build commands, tests, supported runtime requirements and export encoder requirements remain in [Development](#development), [Current architecture](#current-architecture) and the dedicated docs linked above.
 
 ## Browser, Windows, and Android product requirements (owner confirmed Nov 23 2026)
 
