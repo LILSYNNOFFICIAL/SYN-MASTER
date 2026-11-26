@@ -30,6 +30,26 @@ function safeStorage(kind: 'session' | 'local'): Storage | null {
   catch { return null; }
 }
 
+/** Remove credentials written by older builds before any provider state is read. */
+function purgeLegacyServerTokens() {
+  for (const kind of ['session', 'local'] as const) {
+    const storage = safeStorage(kind);
+    const raw = storage?.getItem(STORAGE_KEY);
+    if (!storage || !raw || !raw.includes('"serverAccessToken"')) continue;
+    try {
+      const parsed = JSON.parse(raw) as Partial<ProviderSettings>;
+      const presetId = getPreset(parsed.presetId).id;
+      const overrides = parsed.overrides && typeof parsed.overrides === 'object' ? parsed.overrides : {};
+      const keys = parsed.keys && typeof parsed.keys === 'object' ? parsed.keys : {};
+      const isDefault = presetId === BUILTIN_PROVIDER_ID && Object.keys(keys).length === 0 && Object.keys(overrides).length === 0;
+      if (isDefault) storage.removeItem(STORAGE_KEY);
+      else storage.setItem(STORAGE_KEY, JSON.stringify({ presetId, overrides, keys }));
+    } catch {
+      storage.removeItem(STORAGE_KEY);
+    }
+  }
+}
+
 function load(): ProviderSettings {
   for (const kind of ['session', 'local'] as const) {
     const raw = safeStorage(kind)?.getItem(STORAGE_KEY);
@@ -47,6 +67,7 @@ function load(): ProviderSettings {
   return DEFAULT_PROVIDER_SETTINGS;
 }
 
+purgeLegacyServerTokens();
 let settings: ProviderSettings = load();
 let activeCall: ActiveAiCall | null = null;
 const listeners = new Set<() => void>();
