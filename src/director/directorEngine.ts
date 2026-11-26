@@ -2137,9 +2137,10 @@ export function mergeAiChainWithMeasuredPlan(
     // Remove empty/no-op AI placeholders, then place the measured processor before
     // compression and loudness stages so its detector sees the intended source signal.
     merged = merged.filter((module) => module.type !== type);
-    const insertAt = merged.findIndex((module) =>
-      ['compressor', 'multiband-comp', 'clipper', 'limiter', 'maximizer', 'multiband-maximizer', 'dither'].includes(module.type),
-    );
+    const beforeLoudnessTypes = new Set<string>([
+      'compressor', 'multiband-comp', 'clipper', 'limiter', 'maximizer', 'multiband-maximizer', 'dither',
+    ]);
+    const insertAt = merged.findIndex((module) => beforeLoudnessTypes.has(module.type));
     const at = insertAt < 0 ? merged.length : insertAt;
     merged.splice(at, 0, structuredClone(measured));
   }
