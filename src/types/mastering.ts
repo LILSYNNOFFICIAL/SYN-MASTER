@@ -784,6 +784,39 @@ export type MasteringObjectiveId =
   | 'warm'
   | 'custom';
 
+export const MASTERING_OBJECTIVE_IDS = [
+  'streaming',
+  'commercial-loudness',
+  'dynamic',
+  'cinematic',
+  'electronic',
+  'hip-hop',
+  'pop',
+  'acoustic',
+  'vocal-focused',
+  'transparent',
+  'punchy',
+  'warm',
+  'custom',
+] as const satisfies readonly MasteringObjectiveId[];
+
+const _objectiveCheck: Record<MasteringObjectiveId, true> = {
+  streaming: true,
+  'commercial-loudness': true,
+  dynamic: true,
+  cinematic: true,
+  electronic: true,
+  'hip-hop': true,
+  pop: true,
+  acoustic: true,
+  'vocal-focused': true,
+  transparent: true,
+  punchy: true,
+  warm: true,
+  custom: true,
+};
+void _objectiveCheck;
+
 export type AiChainLifecycleState =
   | 'Ready'
   | 'Analyzing'

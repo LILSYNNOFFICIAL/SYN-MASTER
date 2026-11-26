@@ -53,9 +53,7 @@ export const OBJECTIVE_LIMITS: Record<
   custom: { targetLufs: -13.0, lufsTolerance: 1.2, maxTruePeakDb: -1.0, minDynamicRangeDb: 7.0 },
 };
 
-export const MASTERING_OBJECTIVE_IDS: readonly MasteringObjectiveId[] = Object.keys(
-  OBJECTIVE_LIMITS,
-) as MasteringObjectiveId[];
+export { MASTERING_OBJECTIVE_IDS } from '../types/mastering.ts';
 
 function normalizeStageParamsForFingerprint(mod: ProcessorModule): unknown {
   if (mod.type === 'parametric-eq') {

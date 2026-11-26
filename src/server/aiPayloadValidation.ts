@@ -1,5 +1,4 @@
-import type { AudioAnalysis, MasteringMode, MasteringObjectiveId } from '../types/mastering.ts';
-import { MASTERING_OBJECTIVE_IDS } from '../director/postFixVerification.ts';
+import { MASTERING_OBJECTIVE_IDS, type AudioAnalysis, type MasteringMode, type MasteringObjectiveId } from '../types/mastering.ts';
 import { MODE_MEANINGS } from '../ai/masteringPrompt.ts';
 
 export interface SafeAvailablePlugin {
