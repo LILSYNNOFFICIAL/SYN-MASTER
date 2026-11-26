@@ -2129,14 +2129,17 @@ export function mergeAiChainWithMeasuredPlan(
   // the final limiter when one or two evidence-backed EQ stages are added.
   let merged = [...structuredClone(leadModules), ...structuredClone(aiChain)];
   for (const type of ['dynamic-eq', 'match-eq'] as const) {
-    if (hasEffective(merged, type)) continue;
     const measured = measuredPlanChain.find((module) =>
       module.type === type && hasEffective([module], type),
     );
-    if (!measured) continue;
-    // Remove empty/no-op AI placeholders, then place the measured processor before
-    // compression and loudness stages so its detector sees the intended source signal.
+    if (!measured && hasEffective(merged, type)) continue;
+    // A measured local configuration takes precedence over an AI placeholder or
+    // generic setting. If no measured plan exists, retain a genuinely configured AI
+    // stage, but discard an empty/no-op stage rather than counting it as a correction.
     merged = merged.filter((module) => module.type !== type);
+    if (!measured) continue;
+    // Place the measured processor before compression and loudness stages so its
+    // detector sees the intended source signal.
     const beforeLoudnessTypes = new Set<string>([
       'compressor', 'multiband-comp', 'clipper', 'limiter', 'maximizer', 'multiband-maximizer', 'dither',
     ]);
