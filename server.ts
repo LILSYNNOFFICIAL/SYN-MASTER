@@ -77,7 +77,14 @@ function aiConcurrencyGuard(req: express.Request, res: express.Response, next: e
   const slot = acquireAiSlot(sessionId);
   if (!slot.allowed) {
     req.resume();
-    res.status(429).json({ error: 'Cloud AI is busy for this guest session. Wait for the current request to finish and try again.' });
+    res.setHeader('Retry-After', '5');
+    res.status(429).json({
+      error: 'Cloud AI is busy for this guest session. Wait for the current request to finish and try again.',
+      code: 'ai_rate_limited',
+      scope: 'burst',
+      retryAfterSec: 5,
+      fallback: 'local-dsp-planner',
+    });
     return;
   }
   res.once('finish', slot.release);
