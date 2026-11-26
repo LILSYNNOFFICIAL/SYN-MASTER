@@ -1536,6 +1536,36 @@ export default function App() {
     const aiProviderLog: string[] = [];
     const aiProviderUsed = describeProvider(getActiveProviderConfig());
     let geminiInitialChain: ProcessorModule[] | undefined;
+
+    // The local diagnosis can warrant stem-level balance correction even when cloud AI
+    // reasoning is disabled. Vocal-focused mastering or an explicit vocal-level finding
+    // is sufficient; mere midrange energy is not treated as proof of a vocal.
+    const diagnosisRequestsVocalBalance = objectiveId === 'vocal-focused' || plan.diagnosis.findings.some((finding) =>
+      /vocal.*(balance|level|quiet|loud|buried|forward)|(?:balance|level).*(vocal|lead)/i.test(
+        `${finding.title} ${finding.explanation} ${finding.recommendedAction ?? ''}`,
+      ),
+    );
+    if (diagnosisRequestsVocalBalance && !vocalBalance.stemsCached) {
+      aiProviderLog.push('Vocal Rebalance: the local diagnosis warrants stem-level vocal balance analysis; starting resource-gated separation.');
+      try {
+        await separateActiveRebalanceStems();
+      } catch (separationError) {
+        aiProviderLog.push(`Vocal Rebalance: automatic stem separation failed: ${separationError instanceof Error ? separationError.message : 'unknown separation error'}.`);
+      }
+      if (isStale()) return;
+      const separatedStems = getActiveRebalanceStems();
+      if (separatedStems) {
+        vocalBalance = {
+          stemsCached: true,
+          measurement: measureVocalBalance(separatedStems, src[0], src[1] ?? src[0]),
+          range: vocalBalanceRange(objectiveId),
+        };
+        aiProviderLog.push('Vocal Rebalance: stem analysis is ready; local and AI proposals will be gated against measured vocal balance.');
+      } else {
+        const separationState = getRebalanceStemState();
+        aiProviderLog.push(`Vocal Rebalance unavailable: ${separationState.error ?? separationState.assessment?.message ?? 'stem separation did not produce usable stems'}; no vocal correction will be claimed.`);
+      }
+    }
     if (useGeminiCloud && runOperatingMode !== 'manual') {
       setAiLoading(true);
       setAiLifecycleState('Planning');
