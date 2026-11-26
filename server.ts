@@ -27,7 +27,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
 // Only trust a known number of reverse-proxy hops. Leave unset when the deployment topology is unknown.
-const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? (process.env.K_SERVICE ? 1 : 0));
 if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0 && trustedProxyHops <= 5) {
   app.set('trust proxy', trustedProxyHops);
 }
