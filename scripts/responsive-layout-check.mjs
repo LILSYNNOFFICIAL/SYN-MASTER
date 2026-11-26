@@ -132,6 +132,14 @@ async function runViewport(browser, width, height, mobile) {
   try {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     if (mobile) {
+      const cloudHelpButton = page.getByRole('button', { name: /Cloud AI is included/i });
+      await cloudHelpButton.click({ timeout: 15000 });
+      const cloudHelpDialog = page.getByRole('dialog', { name: /Cloud AI is included/i });
+      assert.equal(await cloudHelpDialog.isVisible(), true, 'First-use Import screen must expose the Cloud AI help dialog');
+      const cloudHelpLink = cloudHelpDialog.getByRole('link', { name: /Cloud AI help and usage limits/i });
+      assert.match(await cloudHelpLink.getAttribute('href') ?? '', /#cloud-ai$/, 'First-use dialog must link to the Cloud AI guide');
+      await cloudHelpDialog.getByRole('button', { name: /Close Cloud AI help/i }).click();
+      assert.equal(await cloudHelpDialog.count(), 0, 'Cloud AI help dialog must close cleanly');
       await page.getByRole('button', { name: /Try the demo mix/i }).click({ timeout: 15000 });
     } else {
       await page.locator('[data-testid="syn-console"]').waitFor({ state: 'visible', timeout: 15000 });
