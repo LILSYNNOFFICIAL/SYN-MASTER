@@ -141,9 +141,10 @@ export async function separateActiveRebalanceStems(options: { highQuality?: bool
   // device/memory assessment is still running. Never start the model before that gate.
   if (!state.assessment && state.status === 'checking') {
     await new Promise<void>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout>;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let unsubscribe = () => undefined;
       const finish = (error?: Error) => {
-        clearTimeout(timer);
+        if (timer !== null) clearTimeout(timer);
         unsubscribe();
         if (error) reject(error);
         else resolve();
@@ -155,7 +156,7 @@ export async function separateActiveRebalanceStems(options: { highQuality?: bool
           finish();
         }
       };
-      const unsubscribe = subscribeRebalanceStems(check);
+      unsubscribe = subscribeRebalanceStems(check);
       timer = setTimeout(() => finish(new Error('Stem-separation resource assessment timed out.')), 10000);
       check();
     });
