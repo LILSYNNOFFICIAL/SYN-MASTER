@@ -8,6 +8,8 @@ const SR = 44100;
 function tone(length = SR * 2) {
   const ch = new Float32Array(length);
   for (let i = 0; i < length; i++) ch[i] = 0.18 * Math.sin((2 * Math.PI * 440 * i) / SR);
+  const tail = Math.min(ch.length, Math.round(SR * 0.01));
+  for (let k = 0; k < tail; k++) ch[ch.length - tail + k] *= 0.5 + 0.5 * Math.cos((Math.PI * k) / tail);
   return ch;
 }
 
@@ -22,8 +24,8 @@ test('localized click repair removes an isolated AI-style impulse without fading
   const after = detectClicks([ch], SR);
   assert.ok(repaired > 0, 'the isolated discontinuity should be reconstructed');
   assert.ok(after.clickCount < before.clickCount, 'post-repair analysis should confirm fewer clicks');
-  assert.ok(Math.abs(ch[Math.floor(SR * 0.25)]) > 0.05, 'unaffected programme audio must remain intact');
-  assert.ok(Math.abs(ch[Math.floor(SR * 0.75)]) > 0.05, 'the repair must remain local to the click window');
+  assert.ok(Math.abs(ch[Math.floor(SR * 0.253)]) > 0.05, 'unaffected programme audio must remain intact');
+  assert.ok(Math.abs(ch[Math.floor(SR * 0.753)]) > 0.05, 'the repair must remain local to the click window');
 });
 
 test('edge click repair uses a smooth fade-in rather than leaving a hard file-boundary step', () => {
