@@ -221,7 +221,15 @@ export function buildDiagnosticLog(input: {
       target: '≤ -4 dB vs mid (genre dependent)',
       tools: ['restore', 'dynamic-eq'],
       settings: settingsFor(chain, ['restore', 'dynamic-eq']),
-      status: master ? (master.zoneEnergyDb.presence - master.zoneEnergyDb.mid <= sib - 0.5 ? 'fixed' : 'advisory') : 'open',
+      status: !report
+        ? 'open'
+        : !master || !report.postFixVerification?.analysisFresh
+          ? 'unverified'
+          : master.zoneEnergyDb.presence - master.zoneEnergyDb.mid <= -4
+            ? 'fixed'
+            : master.zoneEnergyDb.presence - master.zoneEnergyDb.mid <= sib - 0.5
+              ? 'improved'
+              : 'not-fixed',
     });
   }
 
@@ -271,11 +279,14 @@ export function buildDiagnosticLog(input: {
     outcome: cp.iterationSummary?.outcome ?? '',
   }));
 
+  const outstanding = entries.filter((entry) => !['fixed', 'advisory'].includes(entry.status)).length;
   const verdict = !report
     ? `${entries.length} issue(s) measured. Press FIX IT ALL WITH AI to correct and verify.`
     : gate?.passed
-      ? `PASSED: the delivered master was re-measured and meets every objective target (pass ${report.bestPassNumber} of ${report.iterationsExecuted}).`
-      : `NOT PASSED: ${gate?.summary ?? 'no verified render'} — see entries marked not-fixed.`;
+      ? outstanding === 0
+        ? `VERIFIED: the delivered master meets every objective target and all measurable technical findings are independently resolved (pass ${report.bestPassNumber} of ${report.iterationsExecuted}).`
+        : `OBJECTIVE TARGETS MET, BUT ${outstanding} technical issue(s) remain unresolved or unverified. Review the individual evidence below (pass ${report.bestPassNumber} of ${report.iterationsExecuted}).`
+      : `NOT PASSED: ${gate?.summary ?? 'no verified render'} — see entries marked not-fixed or unverified.`;
 
   return {
     createdAt: new Date().toISOString(),
