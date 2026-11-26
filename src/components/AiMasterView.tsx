@@ -340,8 +340,23 @@ export const AiMasterView: React.FC<Props> = ({
   const verifiedResolvedFindings = effectiveVerification?.analysisFresh && effectiveVerification.postAnalysis
     ? effectiveVerification.resolvedFindings.filter((finding) => finding.status === 'RESOLVED' && finding.measurementReliable)
     : [];
+  const verifiedResolvedIds = new Set(
+    directorReport?.postFixVerification?.resolvedFindings
+      .filter((finding) => finding.status === 'RESOLVED' && finding.measurementReliable)
+      .map((finding) => finding.findingId) ?? [],
+  );
+  const sourceLimitationIds = new Set(
+    directorReport?.postFixVerification?.activeFindings
+      .filter((finding) => isSourceLimitationFinding(finding.findingId))
+      .map((finding) => finding.findingId) ?? [],
+  );
+  const allBaselineTechnicalFindingsAccounted = Boolean(directorReport) &&
+    (directorReport?.diagnosis.findings ?? [])
+      .filter((finding) => finding.kind === 'technical-problem')
+      .every((finding) => verifiedResolvedIds.has(finding.id) || sourceLimitationIds.has(finding.id));
   const reportIsVerified = Boolean(
     directorReport &&
+    allBaselineTechnicalFindingsAccounted &&
     directorReport.status === 'converged' &&
     directorReport.qcReport.failCount === 0 &&
     directorReport.postFixVerification?.analysisFresh === true &&
