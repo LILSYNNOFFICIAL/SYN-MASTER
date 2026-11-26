@@ -70,7 +70,7 @@ Priority order. Tick as done; note open problems inline.
 - [x] Rewrite README with Vision / Spec + Roadmap (handoff note)
 - [x] Audit + fix the Fix-All verify / re-analyze loop (root cause documented below)
 - [x] New first screen: "Import your track" drag-and-drop (`src/components/studio/ImportScreen.tsx`)
-- [x] Waveform with time grid + big centered "FIX IT ALL WITH AI" button that runs the full auto-master and reveals technical details (`FixItStage.tsx`, `TimelineWaveform.tsx`)
+- [x] Shared EQ waveform with time grid and fade overlays, plus the separate centered "FIX IT ALL WITH AI" action (`MasterConsole.tsx`, `ParametricEQ2.tsx`, `eq/EqGraph.tsx`, `FixItStage.tsx`). The legacy `TimelineWaveform.tsx` file is not imported or rendered.
 - [x] Diagnostic log panel (every issue + exact per-tool settings), downloadable as JSON and text (`src/director/diagnosticLog.ts`, `DiagnosticLogPanel.tsx`)
 - [x] Iterative fix/verify engine on objective metrics (LUFS, dBTP, LRA, crest, clips, clicks, spectral balance vs reference curve, phase correlation, DC) with max-iteration cap (`src/director/masterTargets.ts`, gate wired into `runAutonomousDirectorLoop`, cap 10 passes / 120 s)
 - [x] De-click / de-crackle / transient spike repair (`src/dsp/repair.ts`, detector `src/dsp/clickDetect.ts`, exposed as SYN-Restore params `declick`, `decrackle`, `spikeRepair`)
@@ -127,7 +127,7 @@ The runner prints a JSON summary (before/after LUFS, dBTP, LRA, crest, clicks wi
 | Click detection / AI-audio repair | `src/dsp/clickDetect.ts`, `src/dsp/repair.ts` (SYN-Restore params `declick`, `decrackle`, `spikeRepair`, `deShimmer`) |
 | New processors | `src/dsp/extraProcessors.ts` (transient shaper, clipper), `applyMultibandMaximizer` in `src/dsp/offlineDsp.ts` |
 | Diagnostic log (JSON/text) | `src/director/diagnosticLog.ts`, `src/components/studio/DiagnosticLogPanel.tsx` |
-| New UX | `src/components/studio/` (`ImportScreen`, `FixItStage`, `TimelineWaveform`, `FxRackWindow`, `FloatingWindow`, `ParametricEQ2`, `moduleCatalog`) wired in `src/App.tsx` |
+| New UX | `src/components/studio/` (`ImportScreen`, `FixItStage`, `FxRackWindow`, `FloatingWindow`, `ParametricEQ2`, `eq/EqGraph`, `moduleCatalog`) wired in `src/App.tsx`; the old standalone `TimelineWaveform.tsx` is unused |
 | Fades / loudness targets | `src/dsp/fades.ts`, `src/dsp/loudnessTargets.ts` |
 | Styling | `src/index.css` (SYN2 section at the bottom) |
 
