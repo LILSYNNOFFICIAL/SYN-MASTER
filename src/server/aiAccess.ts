@@ -7,6 +7,7 @@ const RENEW_WITHIN_MS = 2 * 60 * 60 * 1000;
 
 export interface AiGuestSessionOptions {
   secret?: string;
+  providerKey?: string;
   production?: boolean;
   now?: () => number;
 }
@@ -31,8 +32,10 @@ function readCookie(header: string | undefined, name: string): string {
 export function createAiGuestSession(options: AiGuestSessionOptions = {}) {
   const production = options.production === true;
   const now = options.now ?? Date.now;
-  const configuredSecret = String(options.secret ?? '');
-  const secret = configuredSecret.length >= 32
+  const configuredSecret = String(options.secret ?? '').trim();
+  const isPlaceholder = /^(GENERATE_|CHANGE_ME|REPLACE_ME|YOUR_)/i.test(configuredSecret);
+  const reusesProviderKey = Boolean(configuredSecret && options.providerKey && configuredSecret === options.providerKey);
+  const secret = configuredSecret.length >= 32 && !isPlaceholder && !reusesProviderKey
     ? configuredSecret
     : production ? '' : randomBytes(32).toString('hex');
 
