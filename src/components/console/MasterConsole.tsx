@@ -19,6 +19,7 @@ import type {
 } from '../../types/mastering';
 import type { DynamicEqTrace, ProcessorMeterTelemetry } from '../../dsp/offlineDsp';
 import { LOUDNESS_TARGET_PRESETS } from '../../dsp/loudnessTargets';
+import type { FadeSettings } from '../../dsp/fades';
 import { MODULE_CATALOG } from '../studio/moduleCatalog';
 import { ParametricEQ2 } from '../studio/ParametricEQ2';
 // Loaded when the Dynamic EQ tab is first opened (keeps the initial bundle in budget).
@@ -51,6 +52,8 @@ export interface MasterConsoleProps {
   referenceAnalysis: AudioAnalysis | null;
   scopeChannels: Float32Array[] | null;
   waveformPeaks: number[];
+  fades: FadeSettings;
+  onFadesChange: (next: FadeSettings) => void;
   durationSec: number;
   hasTrack: boolean;
   running: boolean;
@@ -454,6 +457,8 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               waveformPeaks={p.blanketPeaks ?? p.waveformPeaks}
               durationSec={p.durationSec}
               onSeek={p.onSeek}
+              fades={p.fades}
+              onFadesChange={p.onFadesChange}
               onAdd={() => add('dynamic-eq')}
               onChange={(next) => { if (dynEq) setParams<DynamicEQParams>(dynEq, next); }}
               onToggle={(on) => { if (dynEq) patch(dynEq.id, { enabled: true, bypassed: !on }); }}
@@ -469,6 +474,8 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
                 waveformPeaks={p.blanketPeaks ?? p.waveformPeaks}
                 durationSec={p.durationSec}
                 onSeek={p.onSeek}
+                fades={p.fades}
+                onFadesChange={p.onFadesChange}
                 preSpectrum={p.source}
                 postSpectrum={p.master}
                 outputGainDb={eq.outputGainDb}
