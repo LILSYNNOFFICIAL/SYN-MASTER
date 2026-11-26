@@ -66,6 +66,7 @@ import {
   runAutonomousDirectorLoop,
   type ExplainableMasterPlan,
 } from './director/directorEngine';
+import { DEFAULT_DIRECTOR_OPERATING_MODE } from './director/operatingModeDefaults';
 import { analyzeTrackIntelligence } from './director/analyzeIntelligence';
 import {
   computeChainFingerprint,
@@ -300,7 +301,7 @@ export default function App() {
   const [auditionTarget, setAuditionTarget] = useState<AuditionTarget>('mastered');
 
   // AI, Mastering Director, Iterative, Battle, QC, Export states
-  const [operatingMode, setOperatingMode] = useState<DirectorOperatingMode>('autonomous');
+  const [operatingMode, setOperatingMode] = useState<DirectorOperatingMode>(DEFAULT_DIRECTOR_OPERATING_MODE);
   const [objectiveId, setObjectiveId] = useState<MasteringObjectiveId>('streaming');
   const objectiveIdRef = useRef<MasteringObjectiveId>(objectiveId);
   objectiveIdRef.current = objectiveId;
