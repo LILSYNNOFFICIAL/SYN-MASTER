@@ -129,6 +129,34 @@ export function repairEdgeClicksChannel(ch: Float32Array, sampleRate: number, ra
   return repairs;
 }
 
+/** Repair stereo file-edge clicks with one shared fade envelope. */
+export function repairEdgeClicksStereo(left: Float32Array, right: Float32Array, sampleRate: number, ratio = 10): number {
+  const n = Math.min(left.length, right.length);
+  if (n < 64) return 0;
+  const pad = Math.max(2, Math.round(sampleRate * 0.0005));
+  const fade = Math.max(8, Math.round(sampleRate * 0.008));
+  let repairs = 0;
+  for (const reverse of [false, true]) {
+    const l = findEdgeClick(left.subarray(0, n), sampleRate, reverse, ratio);
+    const r = findEdgeClick(right.subarray(0, n), sampleRate, reverse, ratio);
+    const hit = Math.max(l.index, r.index);
+    if (hit < 0) continue;
+    const mute = Math.min(n, hit + pad);
+    const idx = (k: number) => (reverse ? n - 1 - k : k);
+    for (let k = 0; k < mute; k++) {
+      left[idx(k)] = 0;
+      right[idx(k)] = 0;
+    }
+    for (let k = 0; k < fade && mute + k < n; k++) {
+      const gain = 0.5 - 0.5 * Math.cos((Math.PI * k) / fade);
+      left[idx(mute + k)] *= gain;
+      right[idx(mute + k)] *= gain;
+    }
+    repairs++;
+  }
+  return repairs;
+}
+
 /** Clamp single-sample spikes that jump far above both neighbours. Returns repairs. */
 export function repairSpikesChannel(ch: Float32Array): number {
   let repairs = 0;
@@ -225,9 +253,10 @@ export function applyRepair(
     clicksRepaired += repairClicksChannel(left, sampleRate, ratio, 0.02, half);
     if (!stereoSame) clicksRepaired += repairClicksChannel(right, sampleRate, ratio, 0.02, half);    // Edge clicks (first/last ~3 ms) use a micro-fade; done on both channels together so
     // the stereo image of the first/last milliseconds stays aligned.
-    const edgeL = repairEdgeClicksChannel(left, sampleRate, ratio);
-    const edgeR = stereoSame ? 0 : repairEdgeClicksChannel(right, sampleRate, ratio);
-    clicksRepaired += Math.max(edgeL, edgeR);
+    const edgeRepairs = stereoSame
+      ? repairEdgeClicksChannel(left, sampleRate, ratio)
+      : repairEdgeClicksStereo(left, right, sampleRate, ratio);
+    clicksRepaired += edgeRepairs;
   }
   const crackle = ((settings.decrackle ?? 0) / 100) * intensityScale;
   if (crackle > 0) {
