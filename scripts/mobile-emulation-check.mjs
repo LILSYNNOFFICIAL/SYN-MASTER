@@ -1,6 +1,6 @@
 // Mobile emulation checks (Chromium device emulation, NOT a real phone).
 // 412×915 (Pixel-class Android) and 390×844 (iPhone-class) with isMobile + touch:
-//   1. touch drag-seek on the TimelinePlayer waveform moves the playhead/time readout,
+//   1. touch drag-seek on the existing EQ waveform moves the playhead/time readout,
 //   2. the header Menu (menubar) dropdowns, the hamburger library drawer and the More
 //      workspace menu stay inside the viewport,
 //   3. prefers-reduced-motion (emulateMedia reducedMotion) leaves no running glow animations,
@@ -50,7 +50,7 @@ const readTime = async (page) => {
   const m = text.match(/(\d+):(\d+(?:\.\d+)?)/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
 };
-const playheadX = (page) => page.locator('.syn-player .syn2-playhead').first().evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).m41);
+const playheadX = (page) => page.locator('.syn-eqx-svg .syn-ceq-playhead').first().evaluate((el) => el.x1.baseVal.value);
 
 async function runViewport(browser, width, height) {
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -60,7 +60,7 @@ async function runViewport(browser, width, height) {
   try {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: /Try the demo mix/i }).click({ timeout: 20000 });
-    await page.locator('.syn-player .syn2-wave').first().waitFor({ state: 'visible', timeout: 30000 });
+    await page.locator('.syn-eqx-svg').first().waitFor({ state: 'visible', timeout: 30000 });
     const docWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     assert.ok(docWidth <= width + 1, `no horizontal page scroll at ${width}px (document ${docWidth}px)`);
 
@@ -83,11 +83,11 @@ async function runViewport(browser, width, height) {
     assert.equal(meter.overlaps, 0, 'meter readouts must not overlap');
     assert.deepEqual(meter.clipped, [], 'meter readout values must not be clipped');
 
-    // 1. Touch drag-seek on the timeline.
-    const wave = page.locator('.syn-player .syn2-wave').first();
+    // 1. Touch drag-seek on the single existing EQ waveform.
+    const wave = page.locator('.syn-eqx-svg').first();
     await wave.scrollIntoViewIfNeeded();
     const box = await wave.boundingBox();
-    assert.ok(box && box.width > 200, 'timeline waveform is measurable');
+    assert.ok(box && box.width > 200, 'existing EQ waveform is measurable');
     assert.ok(box.height >= 44, `timeline touch target ≥ 44 px tall (got ${box.height})`);
     const cdp = await context.newCDPSession(page);
     const y = box.y + box.height * 0.65; // below the fade-handle row
