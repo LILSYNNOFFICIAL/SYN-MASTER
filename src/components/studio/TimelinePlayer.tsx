@@ -46,8 +46,8 @@ const TimeReadout: React.FC<{ durationSec: number }> = ({ durationSec }) => {
 };
 
 const CURVES: { id: FadeCurve; label: string }[] = [
-  { id: 'scurve', label: 'S-curve' },
   { id: 'linear', label: 'Linear' },
+  { id: 'scurve', label: 'S-Curve' },
   { id: 'exp', label: 'Exponential' },
 ];
 
