@@ -2,8 +2,6 @@ export {};
 
 declare global {
   interface Window {
-    synMasterDesktop?: {
-      getAiAccessToken: () => Promise<string | null>;
-    };
+    // No privileged desktop bridge is exposed to the renderer.
   }
 }
