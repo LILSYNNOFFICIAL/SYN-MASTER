@@ -6,6 +6,7 @@ import {
   designDynamicSections, freqToNote, sectionsMagnitudeDb,
 } from '../../dsp/eqDesign';
 import { MAX_DYNAMIC_EQ_BANDS } from '../../dsp/chainValidation';
+import type { FadeSettings } from '../../dsp/fades';
 import { telemetryStore } from '../../engine/telemetryStore';
 import { EqGraph, type AnalyzerMode, type EqGraphNode } from './eq/EqGraph';
 import { EqBandPopover, NumField, SelField } from './eq/EqBandPopover';
@@ -26,6 +27,8 @@ interface Props {
   waveformPeaks?: number[] | null;
   durationSec?: number;
   onSeek?: (sec: number) => void;
+  fades?: FadeSettings;
+  onFadesChange?: (next: FadeSettings) => void;
   trace?: DynamicEqTrace;
   onAdd: () => void;
   onChange: (next: DynamicEQParams) => void;
@@ -76,7 +79,7 @@ const ThresholdMeter: React.FC<{ detectorDb: number; thresholdDb: number; hasTra
 };
 
 /** Shared Ozone-style graph/popover with a stronger cyan/purple glow and real preview traces. */
-export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectrum, postSpectrum, waveformPeaks, durationSec = 0, onSeek, trace, onAdd, onChange, onToggle }) => {
+export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectrum, postSpectrum, waveformPeaks, durationSec = 0, onSeek, fades, onFadesChange, trace, onAdd, onChange, onToggle }) => {
   const [draft, setDraft] = useState<DynamicEQParams | null>(null);
   const params = module?.params as DynamicEQParams | undefined;
   const view = draft ?? params;
@@ -263,6 +266,8 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectru
         waveformPeaks={waveformPeaks}
         durationSec={durationSec}
         onSeek={onSeek}
+        fades={fades}
+        onFadesChange={onFadesChange}
         ariaLabel="Dynamic EQ frequency response graph. Click or drag the waveform background to seek; focus the graph background and use Left/Right to seek (Shift for 1-second steps, Home/End for start/end). Drag a node to change frequency, use the handles or mouse wheel to change Q, and double-click to add a band."
         className="syn-deq-graph"
       >
