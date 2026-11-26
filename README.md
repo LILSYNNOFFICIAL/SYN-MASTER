@@ -148,6 +148,12 @@ The runner prints a JSON summary (before/after LUFS, dBTP, LRA, crest, clicks wi
 
 ---
 
+### SYN-MASTER original issue fixes — November 26, 2026 (implementation in progress)
+
+- [ ] **Integrated fades:** the integrated EQ timeline now mounts the existing waveform/fade editor, reusing the current fade DSP, shared fade state, draggable handles and existing curve selectors. Visual interaction, playback and export parity still require a fresh test run.
+- [ ] **Cloud AI guest access:** the shared bearer token has been removed from Settings, browser storage, browser request headers and the desktop renderer bridge. The server issues signed 12-hour HttpOnly/SameSite=Strict guest cookies, validates same-origin requests, renews sessions, applies IP and session-keyed limits, caps concurrent AI work at 2 per guest / 8 per process, and retains the 4 MiB JSON request limit. Desktop creates its signing secret in the main process and passes it only to the local backend. Current counters are process-local; a shared quota store is required before claiming cross-instance enforcement.
+- [ ] **AI Automatic:** the main Director retains its existing autonomous closed loop; Stem Intelligence now defaults to that mode too, and the visible mode label is AI Automatic. Existing saved project mastering-mode values and the internal autonomous enum are unchanged.
+- [ ] **Verification:** guest-cookie unit/integration coverage and concurrency limiter tests have been added/updated. TypeScript, full tests, production build, bundle budget, browser fade interactions and hosted Cloud Run/AI Studio behaviour have not yet been re-run against this change set.
 ## Current engineering worklist (owner-directed, Nov 23 2026)
 
 This section is the active implementation queue and progress ledger. Update it in the same commit as each meaningful code change. A checkbox is only checked after the corresponding code and regression coverage are present; CI and runtime verification are recorded separately. Do not weaken an objective, detector, regression guard, or test to obtain a pass.
@@ -346,9 +352,9 @@ Cloud AI is provided by SYN-MASTER. Ordinary users do not need a Google AI Studi
 
 ## AI endpoint protections and limits
 
-The AI routes are protected by a process-local fixed-window request limiter: 20 requests per client key per minute. A 429 response includes `Retry-After`.
+The AI routes are protected by a process-local fixed-window IP limiter: 20 requests per IP per minute. A 429 response includes `Retry-After`. Validated anonymous guest-session IDs key the per-session strategy/refine budgets. The server also allows at most 2 active mastering/refinement requests per guest session and 8 per process; these counters are process-local.
 
-Because cloud AI is on by default for FIX ALL, the two routes that spend `GEMINI_API_KEY` (`POST /api/ai/master`, `POST /api/ai/refine`) also have spend caps (`src/server/aiSpendLimiter.mjs`), checked after the access-token guard so unauthenticated traffic never uses the budget:
+Because cloud AI is on by default for FIX ALL, the two routes that spend `GEMINI_API_KEY` (`POST /api/ai/master`, `POST /api/ai/refine`) also have spend caps (`src/server/aiSpendLimiter.mjs`), checked after signed guest-session validation so unauthenticated traffic never uses the budget:
 
 | Limit | Default | Env override |
 | --- | --- | --- |
