@@ -410,6 +410,25 @@ async function runWavExportE2E(browser) {
     const fadeControls = await page.locator('.syn-player-fades').innerText();
     assert.match(fadeControls, /Fade in\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-in');
     assert.match(fadeControls, /Fade out\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-out');
+    const fadeInCurve = page.getByLabel('Fade-in curve');
+    const fadeOutCurve = page.getByLabel('Fade-out curve');
+    assert.deepEqual((await fadeInCurve.locator('option').allTextContents()).map((label) => label.trim()), ['Linear', 'S-Curve', 'Exponential']);
+    assert.deepEqual((await fadeOutCurve.locator('option').allTextContents()).map((label) => label.trim()), ['Linear', 'S-Curve', 'Exponential']);
+    await fadeInCurve.selectOption('exp');
+    await fadeOutCurve.selectOption('scurve');
+    assert.equal(await fadeInCurve.inputValue(), 'exp', 'fade-in curve selection must update the integrated timeline state');
+    assert.equal(await fadeOutCurve.inputValue(), 'scurve', 'fade-out curve selection must update the integrated timeline state');
+
+    // Switching workspaces must not reset the shared fade duration or curve settings.
+    await page.locator('.syn-primary-nav-more').click();
+    await page.locator('.syn-workspace-menu-item').filter({ hasText: 'AI Director' }).click();
+    await page.locator('.syn-ai-hero').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('.syn-primary-nav-item').filter({ hasText: 'Dashboard' }).click();
+    await page.locator('.syn-player .syn2-wave').waitFor({ state: 'visible', timeout: 10000 });
+    assert.equal(await page.getByLabel('Fade-in curve').inputValue(), 'exp', 'fade-in curve must survive a workspace switch');
+    assert.equal(await page.getByLabel('Fade-out curve').inputValue(), 'scurve', 'fade-out curve must survive a workspace switch');
+    assert.match(await page.locator('.syn-player-fades').innerText(), /Fade in\s+0\.10s/i);
+    assert.match(await page.locator('.syn-player-fades').innerText(), /Fade out\s+0\.10s/i);
 
     step('dynamic eq tab');
     await page.locator('.syn-eq-head .syn-seg button').filter({ hasText: 'Dynamic EQ' }).click();
