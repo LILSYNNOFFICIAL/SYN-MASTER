@@ -1,6 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resampleStereoChannels } from './stemSeparation.ts';
+import {
+  estimateStemSeparationOutputBytes,
+  resampleStereoChannels,
+  separateWithDemucs,
+} from './stemSeparation.ts';
+
+test('stem-separation resource estimate accounts for four stereo float stems', () => {
+  assert.equal(estimateStemSeparationOutputBytes(1, 44_100), 44_100 * 8 * Float32Array.BYTES_PER_ELEMENT);
+  assert.throws(() => estimateStemSeparationOutputBytes(0, 44_100), /valid duration and sample rate/);
+});
+
+test('a non-responsive separation worker times out explicitly and is terminated', async () => {
+  const originalWorker = globalThis.Worker;
+  let terminated = false;
+  class HangingWorker {
+    onmessage: Worker['onmessage'] = null;
+    onerror: Worker['onerror'] = null;
+    postMessage(): void {}
+    terminate(): void {
+      terminated = true;
+    }
+  }
+  globalThis.Worker = HangingWorker as unknown as typeof Worker;
+
+  try {
+    await assert.rejects(
+      separateWithDemucs(
+        [new Float32Array([0.1]), new Float32Array([0.1])],
+        new AbortController().signal,
+        () => {},
+        { timeoutMs: 1_000 },
+      ),
+      /Stem separation timed out after 1 seconds/,
+    );
+    assert.equal(terminated, true);
+  } finally {
+    globalThis.Worker = originalWorker;
+  }
+});
 
 test('resampling at the current session rate preserves the original stereo buffers', async () => {
   const channels: [Float32Array, Float32Array] = [

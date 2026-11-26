@@ -3,11 +3,30 @@ import assert from 'node:assert/strict';
 import { analyzeAudioBuffer } from '../dsp/analyzer';
 import { createProcessorModule } from '../dsp/chainValidation';
 import { processChainOffline } from '../dsp/offlineDsp';
-import type { AppliedCorrectionRecord, ProcessorModule } from '../types/mastering';
+import type { AppliedCorrectionRecord, MasterFinalReport, ProcessorModule } from '../types/mastering';
 import { analyzeTrackIntelligence, computeRegionEnergyDb } from './analyzeIntelligence';
-import { deriveGateRepairCommands, findSubBassCorrectionHz, resolveObjectiveTarget, runAutonomousDirectorLoop } from './directorEngine';
+import {
+  deriveGateRepairCommands,
+  findSubBassCorrectionHz,
+  preventUnverifiedConvergence,
+  resolveObjectiveTarget,
+  runAutonomousDirectorLoop,
+} from './directorEngine';
 import { evaluateMasterTargets } from './masterTargets';
-import { computeChainFingerprint, verifyPostFixAnalysis } from './postFixVerification';
+import { computeChainFingerprint, verifyPostFixAnalysis as verifyPostFixAnalysisCore } from './postFixVerification';
+
+let testAnalysisSequence = 0;
+const verifyPostFixAnalysis: typeof verifyPostFixAnalysisCore = (input) => {
+  const testFingerprint = input.currentChainFingerprint ?? input.postChainFingerprint ?? 'test-chain';
+  return verifyPostFixAnalysisCore({
+    ...input,
+    baselineAnalysisId: input.baselineAnalysisId ?? 'test-baseline',
+    postAnalysisId: input.postAnalysisId ?? (input.postAnalysis ? `test-post-${++testAnalysisSequence}` : undefined),
+    currentChainFingerprint: input.currentChainFingerprint ?? (input.postAnalysis ? testFingerprint : undefined),
+    postChainFingerprint: input.postChainFingerprint ?? (input.postAnalysis ? testFingerprint : undefined),
+    postProcessingStatus: input.postProcessingStatus ?? (input.postAnalysis ? 'ready' : 'idle'),
+  });
+};
 
 const SR = 44100;
 
@@ -328,6 +347,71 @@ test('5. Failed or corrupted post-analysis returns UNVERIFIED and never fabricat
   assert.equal(corruptReport.analysisFresh, false);
   assert.equal(corruptReport.resolvedFindings.length, 0);
   assert.ok(corruptReport.activeFindings.every((f) => f.status === 'UNVERIFIED'));
+});
+
+test('post-fix analysis without render identity or chain fingerprints cannot be trusted', () => {
+  const baseline = analyzeAudioBuffer(makeMuddyWithSubAndClipRisk(), SR);
+  const missingIdentity = verifyPostFixAnalysisCore({
+    baselineAnalysis: baseline,
+    postAnalysis: baseline,
+    objective: 'streaming',
+    postProcessingStatus: 'ready',
+  });
+  assert.equal(missingIdentity.analysisFresh, false);
+  assert.match(missingIdentity.verificationError ?? '', /distinct baseline and rendered-analysis identities/);
+
+  const missingFingerprint = verifyPostFixAnalysisCore({
+    baselineAnalysis: baseline,
+    postAnalysis: baseline,
+    objective: 'streaming',
+    baselineAnalysisId: 'baseline',
+    postAnalysisId: 'post',
+    postProcessingStatus: 'ready',
+  });
+  assert.equal(missingFingerprint.analysisFresh, false);
+  assert.match(missingFingerprint.verificationError ?? '', /both active-chain and rendered-chain fingerprints/);
+
+  const unready = verifyPostFixAnalysisCore({
+    baselineAnalysis: baseline,
+    postAnalysis: baseline,
+    objective: 'streaming',
+    baselineAnalysisId: 'baseline',
+    postAnalysisId: 'post',
+    currentChainFingerprint: 'dry:0',
+    postChainFingerprint: 'dry:0',
+  });
+  assert.equal(unready.analysisFresh, false);
+  assert.match(unready.verificationError ?? '', /ready render status/);
+});
+
+test('a converged objective gate is downgraded when vocal correction remains unverified', () => {
+  const report = {
+    status: 'converged',
+    stopReason: 'Objective gate passed.',
+    targetGate: { passed: true },
+    postFixVerification: {
+      analysisFresh: true,
+      baselineAnalysisId: 'baseline',
+      postAnalysisId: 'post',
+      chainFingerprint: 'dry:0',
+      postAnalysis: {},
+      activeFindings: [],
+      newlyIntroducedFindings: [],
+    },
+    vocalBalanceVerification: {
+      status: 'unverified',
+      sourceBalanceDb: -6,
+      referenceBalanceDb: null,
+      postRenderBalanceDb: null,
+      appliedGainDb: 0,
+      summary: 'Reference stem separation timed out.',
+    },
+  } as unknown as MasterFinalReport;
+
+  preventUnverifiedConvergence(report);
+
+  assert.equal(report.status, 'completed');
+  assert.match(report.stopReason, /Full verification incomplete: Reference stem separation timed out/);
 });
 
 test('6 & 7. Baseline metrics remain preserved and stale/cached postAnalysis mismatches are rejected', () => {

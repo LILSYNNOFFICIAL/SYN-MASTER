@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, AudioLines, FileAudio, Layers3, Loader2, Plus, ScanSearch, Sparkles, Trash2, X } from 'lucide-react';
-import { resampleStereoChannels, separateWithDemucs, type StemSeparationProgress } from '../services/stemSeparation';
+import {
+  estimateStemSeparationOutputBytes,
+  resampleStereoChannels,
+  separateWithDemucs,
+  type StemSeparationProgress,
+} from '../services/stemSeparation';
 import { createProcessorModule } from '../dsp/chainValidation';
 import { applyMixtureConsistency } from '../dsp/stemSeparationMath';
 import { renderStemBusMix, type StemBusMixResult } from '../dsp/stemBusRenderer';
@@ -143,7 +148,7 @@ export const StemIntelligencePanel: React.FC = () => {
       }
 
       const deviceMemoryGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-      const estimatedOutputBytes = decoded.duration * Math.max(44_100, sessionSampleRate) * 8 * Float32Array.BYTES_PER_ELEMENT;
+      const estimatedOutputBytes = estimateStemSeparationOutputBytes(decoded.duration, sessionSampleRate);
       const memoryBudgetBytes = Math.min(2_048, Math.max(768, deviceMemoryGb * 512)) * 1024 * 1024;
       if (estimatedOutputBytes > memoryBudgetBytes) {
         const estimatedMb = Math.round(estimatedOutputBytes / (1024 * 1024));

@@ -40,6 +40,7 @@ import type {
   ProjectRecord,
   SavedChainRecord,
   WorkspaceTab,
+  VocalBalanceVerification,
 } from './types/mastering';
 import { analyzeAudioBuffer, extractWaveformPeaks } from './dsp/analyzer';
 import { createProcessorModule, validateChain } from './dsp/chainValidation';
@@ -63,7 +64,11 @@ import {
   type ExplainableMasterPlan,
 } from './director/directorEngine';
 import { analyzeTrackIntelligence } from './director/analyzeIntelligence';
-import { computeChainFingerprint, verifyPostFixAnalysis } from './director/postFixVerification';
+import {
+  computeChainFingerprint,
+  isMasterFullyVerified,
+  verifyPostFixAnalysis,
+} from './director/postFixVerification';
 import { applyStructuredChainCommands } from './director/chainCommands';
 import { inspectPluginInventory } from './director/pluginIntelligence';
 import { validateChainAgainstInventory } from './director/processorInventory';
@@ -133,6 +138,12 @@ import { requestRefine, requestStrategy } from './ai/masteringClient';
 import { AiProviderChip, AiProviderPanel } from './components/AiProviderPanel';
 import { describeProvider } from './ai/providerAdapters';
 import { getActiveProviderConfig, getBuiltinAccessHeaders, runProviderCall } from './ai/providerStore';
+import {
+  getOrCreateVocalBalancePreparation,
+  prepareVocalBalanceAgainstReference,
+  requiresVocalBalancePreparation,
+  type VocalBalancePreparation,
+} from './director/vocalBalance';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -195,6 +206,15 @@ export default function App() {
   const sourceChannelsRef = useRef<Float32Array[] | null>(null);
   const postChannelsRef = useRef<Float32Array[] | null>(null);
   const referenceChannelsRef = useRef<Float32Array[] | null>(null);
+  const vocalSourceOverrideRef = useRef<{
+    trackId: string;
+    referenceTrackId: string;
+    revision: number;
+    channels: [Float32Array, Float32Array];
+    verification: VocalBalanceVerification;
+  } | null>(null);
+  const vocalPreparationCacheRef = useRef(new Map<string, Promise<VocalBalancePreparation>>());
+  const vocalPreparationAbortRef = useRef<AbortController | null>(null);
   const externalParamLatestRef = useRef<Map<string, number>>(new Map());
   const externalParamInFlightRef = useRef<Set<string>>(new Set());
 
@@ -224,6 +244,8 @@ export default function App() {
 
   const [activeTrack, setActiveTrack] = useState<AudioTrackAsset | null>(null);
   const [referenceTrack, setReferenceTrack] = useState<AudioTrackAsset | null>(null);
+  const referenceTrackIdRef = useRef<string | null>(null);
+  referenceTrackIdRef.current = referenceTrack?.id ?? null;
   const [postAnalysis, setPostAnalysis] = useState<AudioAnalysis | null>(null);
   const [postAnalysisState, setPostAnalysisState] = useState<{
     status: 'idle' | 'processing' | 'ready' | 'failed';
@@ -238,6 +260,7 @@ export default function App() {
     error: null,
     timestamp: 0,
   });
+  const [sourceRenderRevision, setSourceRenderRevision] = useState(0);
   const [appliedCorrections, setAppliedCorrections] = useState<AppliedCorrectionRecord[]>([]);
   const [postPeaks, setPostPeaks] = useState<number[] | null>(null);
   const [stageTelemetry, setStageTelemetry] = useState<ProcessorMeterTelemetry[]>([]);
@@ -258,6 +281,8 @@ export default function App() {
   // AI, Mastering Director, Iterative, Battle, QC, Export states
   const [operatingMode, setOperatingMode] = useState<DirectorOperatingMode>('autonomous');
   const [objectiveId, setObjectiveId] = useState<MasteringObjectiveId>('streaming');
+  const objectiveIdRef = useRef<MasteringObjectiveId>(objectiveId);
+  objectiveIdRef.current = objectiveId;
   const [customObjective, setCustomObjective] = useState<CustomObjectiveSpec>({
     targetLufs: -13.0,
     maxTruePeakDb: -1.0,
@@ -407,7 +432,19 @@ export default function App() {
   const sourceRateRef = useRef(44100);
   // Fades are no longer baked into the source: every render applies them AFTER the
   // chain (postFades) so the limiter sees the unfaded signal.
-  const getRenderSource = useCallback((): Float32Array[] | null => sourceChannelsRef.current, []);
+  const getRenderSource = useCallback((): Float32Array[] | null => {
+    const override = vocalSourceOverrideRef.current;
+    if (
+      objectiveIdRef.current === 'vocal-focused' &&
+      override &&
+      override.trackId === activeTrackIdRef.current &&
+      override.referenceTrackId === referenceTrackIdRef.current &&
+      override.revision === sourceRenderRevision
+    ) {
+      return override.channels;
+    }
+    return sourceChannelsRef.current;
+  }, [sourceRenderRevision]);
   const getPostFades = useCallback((): FadeSettings | null => (hasFades(fadesRef.current) ? fadesRef.current : null), []);
 
   const prePeaksHi = useMemo(
@@ -1001,6 +1038,11 @@ export default function App() {
   const loadChannelsAsSource = useCallback(
     (channels: Float32Array[], sampleRate: number, name: string, fileSizeBytes: number, format: string, isDemo = false) => {
       // Cancel any in-flight CHAIN WITH AI run targeting the previous source track
+      vocalPreparationAbortRef.current?.abort();
+      vocalPreparationAbortRef.current = null;
+      vocalPreparationCacheRef.current.clear();
+      vocalSourceOverrideRef.current = null;
+      setSourceRenderRevision((revision) => revision + 1);
       if (directorRunningRef.current) {
         directorStopRef.current = true;
         directorPauseRef.current = false;
@@ -1095,11 +1137,18 @@ export default function App() {
 
   const handleLoadDemoReference = useCallback(() => {
     const stem = generateDemoMasterStem('reference-bright', 44100, 14);
+    vocalPreparationAbortRef.current?.abort();
+    vocalPreparationAbortRef.current = null;
+    vocalPreparationCacheRef.current.clear();
+    vocalSourceOverrideRef.current = null;
+    setSourceRenderRevision((revision) => revision + 1);
     referenceChannelsRef.current = stem.channels;
     engineRef.current!.setReferenceChannels(stem.channels, stem.sampleRate);
     const analysis = analyzeAudioBuffer(stem.channels, stem.sampleRate);
+    const referenceId = `ref-${Date.now()}`;
+    referenceTrackIdRef.current = referenceId;
     setReferenceTrack({
-      id: `ref-${Date.now()}`,
+      id: referenceId,
       name: stem.name,
       fileSizeBytes: stem.channels[0].byteLength * 2,
       format: 'WAV (Ref)',
@@ -1117,11 +1166,18 @@ export default function App() {
   const handleUploadReferenceFile = useCallback(async (file: File) => {
     try {
       const decoded = await engineRef.current!.decodeFile(file);
+      vocalPreparationAbortRef.current?.abort();
+      vocalPreparationAbortRef.current = null;
+      vocalPreparationCacheRef.current.clear();
+      vocalSourceOverrideRef.current = null;
+      setSourceRenderRevision((revision) => revision + 1);
       referenceChannelsRef.current = decoded.channels;
       engineRef.current!.setReferenceChannels(decoded.channels, decoded.sampleRate);
       const analysis = analyzeAudioBuffer(decoded.channels, decoded.sampleRate);
+      const referenceId = `ref-${Date.now()}`;
+      referenceTrackIdRef.current = referenceId;
       setReferenceTrack({
-        id: `ref-${Date.now()}`,
+        id: referenceId,
         name: file.name,
         fileSizeBytes: file.size,
         format: file.name.split('.').pop()?.toUpperCase() ?? 'AUDIO',
@@ -1384,14 +1440,35 @@ export default function App() {
 
   const handleRunMasterDirector = useCallback(async (forceAutonomous = false) => {
     const runOperatingMode: DirectorOperatingMode = forceAutonomous ? 'autonomous' : operatingMode;
-    const src = getRenderSource();
+    let src = getRenderSource();
     if (!src || !activeTrack || directorRunningRef.current) return;
 
     const runId = ++directorRunIdRef.current;
     const sourceTrackId = activeTrack.id;
+    const sourceReferenceTrackId = referenceTrack?.id ?? null;
     const diagnosticCreatedAt = Date.now();
     const diagnosticRunId = `fix-all-${sourceTrackId}-${diagnosticCreatedAt}`;
-    const isStale = () => directorRunIdRef.current !== runId || activeTrackIdRef.current !== sourceTrackId;
+    const isStale = () =>
+      directorRunIdRef.current !== runId ||
+      activeTrackIdRef.current !== sourceTrackId ||
+      referenceTrackIdRef.current !== sourceReferenceTrackId;
+    const releaseCurrentRun = () => {
+      if (directorRunIdRef.current === runId) {
+        directorRunningRef.current = false;
+        directorPauseRef.current = false;
+        setDirectorRunning(false);
+        setDirectorPaused(false);
+        const stoppedByUser = directorStopRef.current;
+        setAiLifecycleState(stoppedByUser ? 'Stopped' : 'Ready');
+        setDirectorStage(stoppedByUser ? 'Stopped' : 'Ready');
+        setStatusNotice(
+          stoppedByUser
+            ? 'Vocal stem preparation was stopped; no vocal correction was applied.'
+            : 'Vocal stem preparation was cancelled because the source or reference changed.',
+        );
+      }
+    };
+    let vocalBalanceVerification: VocalBalanceVerification | undefined;
 
     directorRunningRef.current = true;
     setAiError(null);
@@ -1408,8 +1485,119 @@ export default function App() {
     setDirectorStage('Analyzing');
     setDirectorPass(0);
 
+    if (requiresVocalBalancePreparation(objectiveId)) {
+      const cacheKey = `${sourceTrackId}:${sourceReferenceTrackId ?? 'no-reference'}`;
+      const currentOverride = vocalSourceOverrideRef.current;
+      const currentReferenceChannels = referenceChannelsRef.current;
+      if (
+        currentOverride &&
+        currentOverride.trackId === sourceTrackId &&
+        currentOverride.referenceTrackId === sourceReferenceTrackId
+      ) {
+        vocalBalanceVerification = currentOverride.verification;
+        src = currentOverride.channels;
+      } else {
+        setDirectorStage('Preparing vocal stems');
+        setStatusNotice('Preparing source and reference vocal stems for measured vocal-balance correction…');
+        let controller: AbortController | null = null;
+        const preparation = getOrCreateVocalBalancePreparation(
+          vocalPreparationCacheRef.current,
+          cacheKey,
+          () => {
+            controller = new AbortController();
+            vocalPreparationAbortRef.current = controller;
+            return prepareVocalBalanceAgainstReference({
+              source: {
+                channels: sourceChannelsRef.current ?? [],
+                sampleRate: activeTrack.sampleRate,
+                durationSec: activeTrack.durationSec,
+                fileSizeBytes: activeTrack.fileSizeBytes,
+              },
+              reference: referenceTrack && currentReferenceChannels
+                ? {
+                    channels: currentReferenceChannels,
+                    sampleRate: referenceTrack.sampleRate,
+                    durationSec: referenceTrack.durationSec,
+                    fileSizeBytes: referenceTrack.fileSizeBytes,
+                  }
+                : null,
+              signal: controller.signal,
+              onProgress: (label, progress) => {
+                if (!isStale()) {
+                  setStatusNotice(
+                    `${label === 'source' ? 'Source' : 'Reference'} vocal separation: ${progress.stage} (${Math.round(progress.progress * 100)}%).`,
+                  );
+                }
+              },
+            });
+          },
+        );
+        try {
+          const result = await preparation;
+          if (isStale()) {
+            releaseCurrentRun();
+            return;
+          }
+          vocalBalanceVerification = result.verification;
+          if (result.channels && result.verification.status === 'verified' && referenceTrack && sourceReferenceTrackId) {
+            src = result.channels;
+            vocalSourceOverrideRef.current = {
+              trackId: sourceTrackId,
+              referenceTrackId: sourceReferenceTrackId,
+              revision: sourceRenderRevision + 1,
+              channels: result.channels,
+              verification: result.verification,
+            };
+            setSourceRenderRevision((revision) => revision + 1);
+          } else if (result.verification.status === 'verified') {
+            vocalBalanceVerification = {
+              ...result.verification,
+              status: 'unverified',
+              summary: 'The reference track became unavailable before the verified vocal correction could be installed.',
+            };
+            vocalPreparationCacheRef.current.delete(cacheKey);
+            setStatusNotice(vocalBalanceVerification.summary);
+          } else if (result.verification.status === 'unverified' || result.verification.status === 'unresolved') {
+            setStatusNotice(`Vocal correction not applied: ${result.verification.summary}`);
+          }
+          if (
+            result.verification.status === 'unverified' ||
+            result.verification.status === 'unresolved'
+          ) {
+            vocalPreparationCacheRef.current.delete(cacheKey);
+          }
+        } catch (error) {
+          if (isStale() || (error instanceof DOMException && error.name === 'AbortError')) {
+            releaseCurrentRun();
+            return;
+          }
+          const detail = error instanceof Error ? error.message : 'Unknown stem-separation failure.';
+          vocalBalanceVerification = {
+            status: 'unverified',
+            sourceBalanceDb: null,
+            referenceBalanceDb: null,
+            postRenderBalanceDb: null,
+            appliedGainDb: 0,
+            summary: `Vocal correction could not be verified: ${detail}`,
+          };
+          vocalPreparationCacheRef.current.delete(cacheKey);
+          setStatusNotice(vocalBalanceVerification.summary);
+        } finally {
+          if (controller && vocalPreparationAbortRef.current === controller) {
+            vocalPreparationAbortRef.current = null;
+          }
+        }
+      }
+    }
+
+    if (isStale()) {
+      releaseCurrentRun();
+      return;
+    }
+    const runSourceAnalysis =
+      src === sourceChannelsRef.current ? activeTrack.analysis : analyzeAudioBuffer(src, activeTrack.sampleRate);
     const plan = buildExplainableMasterPlan({
-      analysis: activeTrack.analysis,
+      analysis: runSourceAnalysis,
       objectiveId,
       customSpec: customObjective,
       referenceAnalysis: referenceTrack?.analysis ?? null,
@@ -1431,11 +1619,11 @@ export default function App() {
         const pluginSummary = inspectPluginInventory(
           hostSnapshot.plugins,
           hostSnapshot.status === 'connected',
-          activeTrack.analysis,
+          runSourceAnalysis,
           plan.objective,
         );
         const strategyInput = {
-          analysis: activeTrack.analysis,
+          analysis: runSourceAnalysis,
           mode,
           objective: objectiveId,
           customObjective,
@@ -1519,7 +1707,7 @@ export default function App() {
         operatingMode: runOperatingMode,
         scratchStorage: tempWorkspace.storage,
       });
-      writeTempNote('baseline/analysis.json', activeTrack.analysis);
+      writeTempNote('baseline/analysis.json', runSourceAnalysis);
       writeTempNote('baseline/diagnosis.json', plan.diagnosis);
       writeTempNote('proposed/initial-chain.json', geminiInitialChain ?? plan.chain);
     } catch {
@@ -1536,6 +1724,9 @@ export default function App() {
         qcProfile: activeQcProfile,
         exportConfig,
         referenceAnalysis: referenceTrack?.analysis ?? null,
+        verificationBaselineAnalysis: runSourceAnalysis,
+        verificationBaselineDiagnosis: plan.diagnosis,
+        vocalBalanceVerification,
         externalPlugins: hostSnapshot.plugins,
         hostConnected: hostSnapshot.status === 'connected',
         initialChain: geminiInitialChain ?? (runOperatingMode === 'assisted' ? chain : undefined),
@@ -1587,6 +1778,7 @@ export default function App() {
       });
 
       if (isStale()) return;
+      if (vocalBalanceVerification) report.vocalBalanceVerification = vocalBalanceVerification;
 
       writeTempNote('final/verification.json', {
         status: report.status,
@@ -1597,6 +1789,7 @@ export default function App() {
         postAnalysis: report.postAnalysis,
         qualityControl: report.qcReport,
         postFixVerification: report.postFixVerification,
+        vocalBalanceVerification: report.vocalBalanceVerification,
       });
       writeTempNote('final/report.json', report);
 
@@ -1632,6 +1825,7 @@ export default function App() {
           activityLog: report.activityLog,
           qualityControl: report.qcReport,
           postFixVerification: report.postFixVerification,
+          vocalBalanceVerification: report.vocalBalanceVerification,
           report,
           runConfiguration: {
             forceAutonomous,
@@ -1704,7 +1898,7 @@ export default function App() {
       setStatusNotice(
         `${runOperatingMode === 'manual'
           ? 'Manual Mode: Explainable mastering plan generated without altering rack.'
-          : `CHAIN WITH AI ${report.status}: Best Pass #${report.bestPassNumber} (${report.postAnalysis.integratedLufs.toFixed(1)} LUFS, QC ${report.qcReport.overallStatus.toUpperCase()}).`} ${diagnosticNotice}`,
+          : `CHAIN WITH AI ${isMasterFullyVerified(report) ? 'PASSED' : 'NOT FULLY VERIFIED'}: Best Pass #${report.bestPassNumber} (${report.postAnalysis.integratedLufs.toFixed(1)} LUFS, QC ${report.qcReport.overallStatus.toUpperCase()}). ${report.stopReason}`} ${diagnosticNotice}`,
       );
     } catch (err) {
       const failureMessage = err instanceof Error ? err.message : 'Mastering Director execution failed';
@@ -1730,7 +1924,7 @@ export default function App() {
               trackId: sourceTrackId,
               trackName: activeTrack.name,
               sampleRate: activeTrack.sampleRate,
-              baselineAnalysis: activeTrack.analysis,
+              baselineAnalysis: runSourceAnalysis,
             },
             objectiveId,
             customObjective,
@@ -1783,6 +1977,8 @@ export default function App() {
     }
   }, [
     activeTrack,
+    getRenderSource,
+    sourceRenderRevision,
     chain,
     objectiveId,
     customObjective,
@@ -2373,7 +2569,10 @@ export default function App() {
       maxPasses={10}
       report={directorReport}
       onFix={() => { setOperatingMode('autonomous'); void handleRunMasterDirector(true); }}
-      onStop={() => { directorStopRef.current = true; }}
+      onStop={() => {
+        directorStopRef.current = true;
+        vocalPreparationAbortRef.current?.abort();
+      }}
       onDemo={() => handleLoadDemoSource('main-mix')}
       onImport={handleUploadSourceFile}
       targetPresetId={targetPresetId}
@@ -2389,6 +2588,8 @@ export default function App() {
       onAskAi={() => setActiveTab('ai')}
       onExport={() => setExportModalOpen(true)}
       onSeek={seekTo}
+      isPlaying={isPlaying}
+      onTogglePlay={togglePlay}
       mode={mode}
       onTargetLufs={(lufs) => {
         setTargetPresetId(null);
@@ -3125,6 +3326,7 @@ export default function App() {
               }}
               onStopDirector={() => {
                 directorStopRef.current = true;
+                vocalPreparationAbortRef.current?.abort();
                 directorPauseRef.current = false;
                 setDirectorPaused(false);
               }}

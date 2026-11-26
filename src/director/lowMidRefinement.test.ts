@@ -124,7 +124,16 @@ test('Mud verification reports absolute band changes and warns when Mid fell', (
   const objective = resolveObjectiveTarget('streaming');
   const baseline = analyzeAudioBuffer(makeVocalMix(1.2, 0.6), SR);
   const post = { ...baseline, zoneEnergyDb: { ...baseline.zoneEnergyDb, mid: baseline.zoneEnergyDb.mid - 2.5 } };
-  const report = verifyPostFixAnalysis({ baselineAnalysis: baseline, postAnalysis: post, objective });
+  const report = verifyPostFixAnalysis({
+    baselineAnalysis: baseline,
+    postAnalysis: post,
+    objective,
+    baselineAnalysisId: 'baseline-mud',
+    postAnalysisId: 'post-mud',
+    currentChainFingerprint: 'mud-fingerprint',
+    postChainFingerprint: 'mud-fingerprint',
+    postProcessingStatus: 'ready',
+  });
   const mud = [...report.activeFindings, ...report.resolvedFindings].find((f) => f.findingId === 'diag-mud');
   assert.ok(mud, 'Baseline mud finding must be verified');
   const summary = JSON.stringify(mud);

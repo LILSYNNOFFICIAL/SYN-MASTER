@@ -28,8 +28,14 @@ function makeDrumMix(seconds = 4): Float32Array[] {
 }
 
 test('Click detector ignores drum, snare and hat onsets in a clean mix', () => {
-  const det = detectClicks(makeDrumMix(), SR);
+  const clean = makeDrumMix();
+  const original = clean.map((channel) => new Float32Array(channel));
+  const det = detectClicks(clean, SR);
   assert.equal(det.clickCount, 0, `false positives at ${det.clickTimesSec.join(', ')}`);
+  applyRepair(clean[0], clean[1], SR, { declick: 80 });
+  for (let channel = 0; channel < clean.length; channel++) {
+    assert.deepEqual(clean[channel], original[channel], 'clean musical transients must not trigger repair');
+  }
 });
 
 test('Click detector finds inserted single-sample clicks between hits; de-click removes them and leaves onsets alone', () => {
@@ -52,6 +58,79 @@ test('Click detector finds inserted single-sample clicks between hits; de-click 
     if (!nearClick && Math.abs(L[i] - original[0][i]) > 1e-6) changed++;
   }
   assert.equal(changed, 0, `${changed} samples changed away from the clicks`);
+});
+
+test('stereo de-click uses a shared repair window and preserves continuity at its boundaries', () => {
+  const left = new Float32Array(SR);
+  const right = new Float32Array(SR);
+  for (let i = 0; i < SR; i++) {
+    const sample = 0.12 * Math.sin((2 * Math.PI * 440 * i) / SR);
+    left[i] = sample;
+    right[i] = sample;
+  }
+  const original = new Float32Array(left);
+  const clickAt = Math.floor(SR * 0.5);
+  left[clickAt] += 0.55;
+  right[clickAt + 2] += 0.42;
+  const before = detectClicks([left, right], SR);
+  assert.ok(before.clickCount >= 1);
+  const beforeDiscontinuity = Math.max(
+    Math.abs(left[clickAt] - 2 * left[clickAt - 1] + left[clickAt - 2]),
+    Math.abs(right[clickAt + 2] - 2 * right[clickAt + 1] + right[clickAt]),
+  );
+
+  applyRepair(left, right, SR, { declick: 80 });
+
+  const afterDiscontinuity = Math.max(
+    Math.abs(left[clickAt] - 2 * left[clickAt - 1] + left[clickAt - 2]),
+    Math.abs(right[clickAt + 2] - 2 * right[clickAt + 1] + right[clickAt]),
+  );
+  assert.ok(afterDiscontinuity < beforeDiscontinuity * 0.1);
+  assert.equal(detectClicks([left, right], SR).clickCount, 0);
+
+  let maxBoundaryStep = 0;
+  for (let i = clickAt - 80; i <= clickAt + 80; i++) {
+    maxBoundaryStep = Math.max(maxBoundaryStep, Math.abs(left[i] - left[i - 1]));
+    assert.ok(Math.abs(left[i] - right[i]) < 1e-6, 'same stereo repair window preserves the centered image');
+  }
+  assert.ok(maxBoundaryStep < 0.04, `repair boundary step ${maxBoundaryStep} should remain continuous`);
+  for (let i = 0; i < left.length; i++) {
+    if (Math.abs(i - clickAt) > SR * 0.004) assert.equal(left[i], original[i]);
+  }
+});
+
+test('stereo edge clicks at file start and end are repaired locally without changing the middle', () => {
+  const left = new Float32Array(SR);
+  const right = new Float32Array(SR);
+  for (let i = 0; i < SR; i++) {
+    const edge = Math.min(1, i / (SR * 0.01), (SR - 1 - i) / (SR * 0.01));
+    const sample = edge * 0.12 * Math.sin((2 * Math.PI * 440 * i) / SR);
+    left[i] = sample;
+    right[i] = sample;
+  }
+  left[0] += 0.8;
+  right[SR - 1] -= 0.8;
+  const unaffected = new Float32Array(left);
+  unaffected.set(right.subarray(SR / 2), SR / 2);
+  const before = detectClicks([left, right], SR);
+  assert.equal(before.startClick, true);
+  assert.equal(before.endClick, true);
+  assert.ok(before.startStep > 0.5 && before.endStep > 0.5);
+
+  applyRepair(left, right, SR, { declick: 80 });
+
+  const after = detectClicks([left, right], SR);
+  assert.equal(after.startClick, false);
+  assert.equal(after.endClick, false);
+  assert.ok(after.startStep < before.startStep * 0.1);
+  assert.ok(after.endStep < before.endStep * 0.1);
+  for (let i = SR * 0.02; i < SR * 0.48; i++) {
+    assert.equal(left[i], unaffected[i]);
+  }
+  for (let i = SR * 0.52; i < SR * 0.98; i++) {
+    assert.equal(right[i], unaffected[i]);
+  }
+  for (let i = 0; i < SR; i++) assert.equal(left[i], right[i], 'edge repairs preserve stereo coherence');
 });
 
 test('Dither module quantizes to the chosen word length, deterministically, and blanks digital silence', async () => {

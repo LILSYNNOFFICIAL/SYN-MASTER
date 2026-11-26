@@ -7,6 +7,7 @@ import type {
   ResolvedObjectiveTarget,
 } from '../types/mastering';
 import { evaluateMasterTargets, type MasterTargetGate } from './masterTargets';
+import { hasFreshPostFixVerification, isMasterFullyVerified } from './postFixVerification';
 
 /**
  * Mastering diagnostic log: every problem measured on the track, its target, which
@@ -24,7 +25,7 @@ export interface DiagnosticLogEntry {
   tools: ProcessorType[];
   /** Exact settings of the matching modules in the chain, e.g. "SYN-Restore: declick=55, ..." */
   settings: string[];
-  status: 'open' | 'fixed' | 'not-fixed' | 'advisory';
+  status: 'open' | 'fixed' | 'not-fixed' | 'unverified' | 'advisory';
 }
 
 export interface DiagnosticLog {
@@ -127,12 +128,16 @@ export function buildDiagnosticLog(input: {
   referenceAnalysis?: AudioAnalysis | null;
 }): DiagnosticLog {
   const { source, objective, report } = input;
-  const master = report?.postAnalysis ?? null;
+  const isFresh = hasFreshPostFixVerification(report?.postFixVerification);
+  const master = isFresh ? report?.postAnalysis ?? null : null;
   const chain = report?.finalChain?.length ? report.finalChain : input.chain;
   const sourceGate = evaluateMasterTargets(source, objective, { preAnalysis: source, referenceAnalysis: input.referenceAnalysis });
-  const gate = report?.targetGate ?? (master ? evaluateMasterTargets(master, objective, { preAnalysis: source, referenceAnalysis: input.referenceAnalysis }) : null);
+  const gate = isFresh
+    ? report?.targetGate ?? (master ? evaluateMasterTargets(master, objective, { preAnalysis: source, referenceAnalysis: input.referenceAnalysis }) : null)
+    : null;
   const entries: DiagnosticLogEntry[] = [];
   const statusFromGate = (checkId: string): DiagnosticLogEntry['status'] => {
+    if (!isFresh) return report ? 'unverified' : 'open';
     if (!gate) return 'open';
     const c = gate.checks.find((x) => x.id === checkId);
     if (!c) return 'open';
@@ -189,7 +194,15 @@ export function buildDiagnosticLog(input: {
       target: f.recommendedAction ?? '-',
       tools,
       settings: settingsFor(chain, tools),
-      status: !report ? 'open' : resolvedIds.has(f.id) ? 'fixed' : postFindingIds.has(f.id) ? 'not-fixed' : 'fixed',
+      status: !report
+        ? 'open'
+        : !isFresh
+          ? 'unverified'
+          : resolvedIds.has(f.id)
+            ? 'fixed'
+            : postFindingIds.has(f.id)
+              ? 'not-fixed'
+              : 'unverified',
     });
   }
 
@@ -205,7 +218,7 @@ export function buildDiagnosticLog(input: {
       target: '≤ -4 dB vs mid (genre dependent)',
       tools: ['restore', 'dynamic-eq'],
       settings: settingsFor(chain, ['restore', 'dynamic-eq']),
-      status: master ? (master.zoneEnergyDb.presence - master.zoneEnergyDb.mid <= sib - 0.5 ? 'fixed' : 'advisory') : 'open',
+      status: !report ? 'open' : !isFresh ? 'unverified' : master && master.zoneEnergyDb.presence - master.zoneEnergyDb.mid <= -4 ? 'fixed' : 'not-fixed',
     });
   }
 
@@ -224,7 +237,7 @@ export function buildDiagnosticLog(input: {
       target: 'confidence < 0.60, or side HF reduced ≥ 1 dB after de-shimmer',
       tools: ['restore'],
       settings: [...settingsFor(chain, ['restore']), sh.confidence >= 0.6 ? 'Auto: SYN-Restore deShimmer on (30–80% by confidence)' : 'Suggested if audible: SYN-Restore deShimmer 30–50%'],
-      status: master ? (reducedDb !== null && reducedDb <= -1 ? 'fixed' : 'advisory') : 'open',
+      status: !report ? 'open' : !isFresh ? 'unverified' : master && (msh?.confidence ?? 1) < 0.6 || (reducedDb !== null && reducedDb <= -1) ? 'fixed' : 'advisory',
     });
   } else if (!sh) {
     const hiCorr = source.stereoBandCorrelation?.high;
@@ -244,6 +257,29 @@ export function buildDiagnosticLog(input: {
     }
   }
 
+  const vocalBalance = report?.vocalBalanceVerification;
+  if (vocalBalance) {
+    entries.push({
+      id: 'vocal-balance',
+      issue: 'Vocal balance vs reference',
+      category: 'Spectral',
+      severity: vocalBalance.status === 'unverified' ? 'moderate' : 'low',
+      measured: vocalBalance.sourceBalanceDb === null
+        ? 'UNVERIFIED'
+        : `${vocalBalance.sourceBalanceDb.toFixed(1)} dB source · ${vocalBalance.referenceBalanceDb?.toFixed(1) ?? 'n/a'} dB reference · ${vocalBalance.postRenderBalanceDb?.toFixed(1) ?? 'n/a'} dB rendered`,
+      target: 'Vocal-Focused objective only · source vocal more than 3 dB below accompaniment · maximum +3 dB · rendered balance within 3 dB of reference',
+      tools: [],
+      settings: [`Vocal Rebalance: +${vocalBalance.appliedGainDb.toFixed(1)} dB`, vocalBalance.summary],
+      status: vocalBalance.status === 'verified'
+        ? 'fixed'
+        : vocalBalance.status === 'not-needed'
+          ? 'advisory'
+          : vocalBalance.status === 'unresolved'
+            ? 'not-fixed'
+            : 'unverified',
+    });
+  }
+
   // Sub/Bass excess is emitted by the objective gate above. The gate owns the single <= 0 dB verdict.
 
   const passes = (report?.checkpoints ?? []).map((cp) => ({
@@ -255,11 +291,12 @@ export function buildDiagnosticLog(input: {
     outcome: cp.iterationSummary?.outcome ?? '',
   }));
 
+  const unresolvedEntries = entries.some((entry) => entry.status === 'not-fixed' || entry.status === 'unverified');
   const verdict = !report
     ? `${entries.length} issue(s) measured. Press FIX IT ALL WITH AI to correct and verify.`
-    : gate?.passed
+    : isMasterFullyVerified(report) && !unresolvedEntries
       ? `PASSED: the delivered master was re-measured and meets every objective target (pass ${report.bestPassNumber} of ${report.iterationsExecuted}).`
-      : `NOT PASSED: ${gate?.summary ?? 'no verified render'} — see entries marked not-fixed.`;
+      : `NOT FULLY VERIFIED: ${gate?.summary ?? report.postFixVerification?.verificationError ?? 'no fresh verified render'} — see unresolved or unverified entries.`;
 
   return {
     createdAt: new Date().toISOString(),

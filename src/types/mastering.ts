@@ -990,6 +990,15 @@ export interface StemIntelligenceReport {
   processingChains: Record<string, string[]>;
 }
 
+export interface VocalBalanceVerification {
+  status: 'not-needed' | 'verified' | 'unresolved' | 'unverified';
+  sourceBalanceDb: number | null;
+  referenceBalanceDb: number | null;
+  postRenderBalanceDb: number | null;
+  appliedGainDb: number;
+  summary: string;
+}
+
 export interface MasterFinalReport {
   id: string;
   createdAt: number;
@@ -1019,5 +1028,6 @@ export interface MasterFinalReport {
   preservedCharacteristics: string[];
   postFixVerification?: PostFixVerificationReport;
   stemIntelligence?: StemIntelligenceReport;
+  vocalBalanceVerification?: VocalBalanceVerification;
 }
 

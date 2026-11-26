@@ -6,6 +6,7 @@ import type {
   DirectorDiagnosisReport,
   FindingMetricComparison,
   FindingVerificationStatus,
+  MasterFinalReport,
   MasteringObjectiveId,
   PostFixVerificationReport,
   ProcessorModule,
@@ -791,6 +792,32 @@ export interface VerifyPostFixInput {
   appliedCorrections?: AppliedCorrectionRecord[];
 }
 
+export function hasFreshPostFixVerification(
+  report: PostFixVerificationReport | null | undefined,
+): boolean {
+  return Boolean(
+    report?.analysisFresh &&
+    report.postAnalysis &&
+    report.baselineAnalysisId &&
+    report.postAnalysisId &&
+    report.baselineAnalysisId !== report.postAnalysisId &&
+    report.chainFingerprint &&
+    report.chainFingerprint !== 'unknown',
+  );
+}
+
+export function isMasterFullyVerified(report: MasterFinalReport | null | undefined): boolean {
+  const verification = report?.postFixVerification;
+  return Boolean(
+    report?.targetGate?.passed &&
+    hasFreshPostFixVerification(verification) &&
+    verification?.activeFindings.length === 0 &&
+    verification.newlyIntroducedFindings.length === 0 &&
+    report.vocalBalanceVerification?.status !== 'unresolved' &&
+    report.vocalBalanceVerification?.status !== 'unverified',
+  );
+}
+
 /**
  * Reanalyzes the actual resulting processed audio and independently verifies whether
  * every baseline technical problem is RESOLVED, IMPROVED, PARTIALLY_RESOLVED,
@@ -828,14 +855,13 @@ export function verifyPostFixAnalysis(input: VerifyPostFixInput): PostFixVerific
     verificationError =
       input.postProcessingError ||
       'Post-processing render or audio reanalysis failed; findings cannot be marked resolved.';
-  } else if (!input.postAnalysis) {
+  } else if (input.postProcessingStatus !== 'ready') {
     analysisFresh = false;
     verificationError =
-      input.postProcessingStatus === 'processing'
-        ? 'Reanalyzing processed audio signal...'
-        : appliedCorrections.length > 0
-          ? 'Correction applied without completed post-fix audio reanalysis.'
-          : 'Processed audio has not been analyzed yet.';
+      'Post-fix analysis is not tied to a completed render; a ready render status is required.';
+  } else if (!input.postAnalysis) {
+    analysisFresh = false;
+    verificationError = 'A completed render has no post-fix audio analysis.';
   } else if (!isAnalysisMeasurementReliable(input.postAnalysis)) {
     analysisFresh = false;
     verificationError =
@@ -849,14 +875,26 @@ export function verifyPostFixAnalysis(input: VerifyPostFixInput): PostFixVerific
     verificationError =
       'Post-analysis telemetry belongs to an outdated mastering chain and does not match active parameters.';
   } else if (
-    input.postAnalysisId &&
-    input.baselineAnalysisId &&
-    input.postAnalysisId === input.baselineAnalysisId &&
-    appliedCorrections.length > 0
+    !input.baselineAnalysisId ||
+    !input.postAnalysisId ||
+    input.postAnalysisId === input.baselineAnalysisId
   ) {
     analysisFresh = false;
     verificationError =
-      'Detected cached baseline analysis ID instead of fresh post-fix processed audio.';
+      'Fresh post-fix analysis requires distinct baseline and rendered-analysis identities.';
+  } else if (
+    !input.currentChainFingerprint ||
+    !input.postChainFingerprint
+  ) {
+    analysisFresh = false;
+    verificationError =
+      'Fresh post-fix analysis requires both active-chain and rendered-chain fingerprints.';
+  } else if (
+    input.postChainFingerprint !== input.currentChainFingerprint
+  ) {
+    analysisFresh = false;
+    verificationError =
+      'Post-analysis telemetry belongs to an outdated mastering chain and does not match active parameters.';
   }
 
   // If stale / failed / missing / unreliable: never report RESOLVED and never fabricate after metrics

@@ -47,6 +47,7 @@ import type {
   ReferenceComparisonReport,
   ResolvedObjectiveTarget,
   StemIntelligenceReport,
+  VocalBalanceVerification,
 } from '../types/mastering';
 import { validateChain } from '../dsp/chainValidation';
 import type { StemInput, StemSetAnalysis } from '../dsp/stemAnalysis';
@@ -54,12 +55,18 @@ import { renderStemBusMix } from '../dsp/stemBusRenderer';
 import { type ExternalPluginProcessCallback } from '../dsp/mixedChainRenderer';
 import { renderAndAnalyzeOffThread } from '../dsp/workerClient';
 import { QC_TARGET_PROFILES, runQualityControl } from '../dsp/qc';
-import { analyzeTrackIntelligence, computeRegionEnergyDb, getDiagnosisThresholds } from './analyzeIntelligence';
+import {
+  analyzeTrackIntelligence,
+  computeRegionEnergyDb,
+  getDiagnosisThresholds,
+  isAnalysisMeasurementReliable,
+} from './analyzeIntelligence';
 import { MUD_CORRECTION_HZ, MUD_REGION_HZ } from '../dsp/bandMap';
 import { applyStructuredChainCommands } from './chainCommands';
 import { inspectPluginInventory } from './pluginIntelligence';
 import { validateChainAgainstInventory } from './processorInventory';
-import { computeChainFingerprint, verifyPostFixAnalysis } from './postFixVerification';
+import { computeChainFingerprint, isMasterFullyVerified, verifyPostFixAnalysis } from './postFixVerification';
+import { deriveReferenceMatchBands } from './referenceMatch';
 
 export function resolveObjectiveTarget(
   objectiveId: MasteringObjectiveId,
@@ -445,6 +452,17 @@ export function buildExplainableMasterPlan(input: {
     gain: number;
     q: number;
   }> = [];
+  const eqReasons: string[] = [];
+  const hasValidReference = isAnalysisMeasurementReliable(referenceAnalysis);
+  const referenceMatchBands = hasValidReference
+    ? deriveReferenceMatchBands(analysis, referenceAnalysis)
+    : [];
+  if (referenceMatchBands.length > 0) {
+    bands.push(...referenceMatchBands);
+    eqReasons.push(
+      `Reference spectral contour: ${referenceMatchBands.length} measured band(s), level-neutral and capped at ±2.5 dB`,
+    );
+  }
 
   const needsSubHpf =
     analysis.dcOffset >= 0.002 ||
@@ -463,7 +481,6 @@ export function buildExplainableMasterPlan(input: {
     });
   }
 
-  const eqReasons: string[] = [];
   let eqBassGain = 0;
   const eqBassLimit =
     objective.id === 'hip-hop' ||
@@ -472,7 +489,7 @@ export function buildExplainableMasterPlan(input: {
     objective.id === 'cinematic'
       ? 13.5
       : 11.0;
-  if (referenceAnalysis) {
+  if (hasValidReference && referenceMatchBands.length === 0) {
     // Compare bass relative to the midrange so a reference's overall mastering level
     // cannot masquerade as a tonal deficit or trigger an unnecessary low-shelf move.
     const referenceBassMidDiff = referenceAnalysis.zoneEnergyDb.bass - referenceAnalysis.zoneEnergyDb.mid;
@@ -486,7 +503,7 @@ export function buildExplainableMasterPlan(input: {
     eqBassGain = objective.id === 'hip-hop' || objective.id === 'electronic' ? 1.5 : 1.1;
     eqReasons.push(`Lean low-end (Bass-Mid ${bassMidDiff.toFixed(1)} dB)`);
   }
-  if (Math.abs(eqBassGain) >= 0.3) {
+  if (Math.abs(eqBassGain) >= 0.3 && referenceMatchBands.length === 0) {
     bands.push({ id: 'b2', enabled: true, shape: 'lowshelf', freq: 88, gain: eqBassGain, q: 0.71 });
   }
 
@@ -508,13 +525,8 @@ export function buildExplainableMasterPlan(input: {
     eqReasons.push(`Low-mid buildup (+${lowMidBuildup.toFixed(1)} dB) -> ${mudCut} dB @ 300 Hz`);
   }
 
-  if (objective.id === 'vocal-focused' && analysis.zoneEnergyDb.mid - analysis.zoneEnergyDb.bass < -3.0) {
-    bands.push({ id: 'b-vox', enabled: true, shape: 'bell', freq: 2400, gain: 1.1, q: 1.0 });
-    eqReasons.push('Vocal pocket articulation (+1.1 dB @ 2.4 kHz)');
-  }
-
   let highAirGain = 0;
-  if (referenceAnalysis) {
+  if (hasValidReference && referenceMatchBands.length === 0) {
     // Match air relative to the midrange, not absolute dBFS. This preserves real
     // brightness differences while cancelling a uniform reference level offset.
     const referenceAirMidDiff = referenceAnalysis.zoneEnergyDb.air - referenceAnalysis.zoneEnergyDb.mid;
@@ -528,7 +540,7 @@ export function buildExplainableMasterPlan(input: {
   } else if (analysis.spectralSlopeDbPerOct < -3.8) {
     highAirGain = 1.1;
   }
-  if (Math.abs(highAirGain) >= 0.3) {
+  if (Math.abs(highAirGain) >= 0.3 && referenceMatchBands.length === 0) {
     bands.push({ id: 'b4', enabled: true, shape: 'highshelf', freq: 11200, gain: highAirGain, q: 0.71 });
     eqReasons.push(`Tilt (${analysis.spectralSlopeDbPerOct.toFixed(2)} dB/oct) + ${objective.tonalBias} bias -> ${highAirGain > 0 ? '+' : ''}${highAirGain} dB @ 11.2 kHz`);
   }
@@ -895,7 +907,9 @@ export function buildExplainableMasterPlan(input: {
     genre: diagnosis.artisticProfile,
     musicalStyle: `${objective.label} Objective`,
     instrumentationSummary: `Centroid ${analysis.spectralCentroidHz} Hz · Transient ${(analysis.transientDensity * 100).toFixed(0)}% · DR ${analysis.dynamicRangeDb.toFixed(1)} dB`,
-    vocalPresence: analysis.zoneEnergyDb.mid > analysis.zoneEnergyDb.bass - 5 ? 'Forward / Present' : 'Embedded in Mix',
+    vocalPresence: input.stemAnalysis?.stems.some((stem) => stem.role === 'vocals')
+      ? 'Separated vocal stem supplied; balance requires vocal/reference measurements'
+      : 'Unverified; no separated vocal stem measurement',
     tonalCharacteristics: `Slope ${analysis.spectralSlopeDbPerOct.toFixed(2)} dB/oct · Width ${(analysis.stereoWidth * 100).toFixed(0)}% · Noise ${nf.toFixed(1)} dBFS`,
     issuesDetected: diagnosis.findings
       .filter((f) => f.kind === 'technical-problem')
@@ -1762,6 +1776,9 @@ export interface RunAutonomousDirectorOptions {
   qcProfile?: QCTargetProfile | null;
   exportConfig?: ExportConfig | null;
   referenceAnalysis?: AudioAnalysis | null;
+  verificationBaselineAnalysis?: AudioAnalysis;
+  verificationBaselineDiagnosis?: DirectorDiagnosisReport;
+  vocalBalanceVerification?: VocalBalanceVerification;
   stemAnalysis?: StemSetAnalysis | null;
   stemBuses?: StemInput[];
   stemChainsById?: Record<string, ProcessorModule[]>;
@@ -1876,6 +1893,9 @@ function buildFinalReportFromState(params: {
   rolledBack: boolean;
   preAnalysis: AudioAnalysis;
   referenceAnalysis?: AudioAnalysis | null;
+  verificationBaselineAnalysis?: AudioAnalysis;
+  verificationBaselineDiagnosis?: DirectorDiagnosisReport;
+  vocalBalanceVerification?: VocalBalanceVerification;
   stemAnalysis?: StemSetAnalysis | null;
   stemChainsById?: Record<string, ProcessorModule[]>;
   stemProcessingApplied?: boolean;
@@ -1887,6 +1907,8 @@ function buildFinalReportFromState(params: {
 }): MasterFinalReport {
   const { preAnalysis, bestCheckpoint, diagnosis } = params;
   const postAnalysis = bestCheckpoint.analysis;
+  const verificationBaseline = params.verificationBaselineAnalysis ?? preAnalysis;
+  const verificationDiagnosis = params.verificationBaselineDiagnosis ?? diagnosis;
   const verifiedImprovements: string[] = [];
   const remainingTradeoffs: string[] = [];
   const resolvedProblems: string[] = [];
@@ -1908,8 +1930,8 @@ function buildFinalReportFromState(params: {
   const hasExecutedProcessing = params.iterationsExecuted > 0 && bestCheckpoint.passNumber > 0;
   const chainFp = computeChainFingerprint(bestCheckpoint.chain);
   const postFixVerification = verifyPostFixAnalysis({
-    baselineAnalysis: preAnalysis,
-    baselineDiagnosis: diagnosis,
+    baselineAnalysis: verificationBaseline,
+    baselineDiagnosis: verificationDiagnosis,
     postAnalysis: hasExecutedProcessing ? postAnalysis : null,
     objective: params.objective,
     referenceAnalysis: params.referenceAnalysis,
@@ -2008,7 +2030,21 @@ function buildFinalReportFromState(params: {
     preservedCharacteristics,
     postFixVerification,
     stemIntelligence: toStemIntelligenceReport(params.stemAnalysis, params.stemChainsById, params.stemProcessingApplied),
+    vocalBalanceVerification: params.vocalBalanceVerification,
   };
+}
+
+export function preventUnverifiedConvergence(report: MasterFinalReport): void {
+  if (report.status !== 'converged' || isMasterFullyVerified(report)) return;
+  report.status = 'completed';
+  const vocalIncomplete =
+    report.vocalBalanceVerification?.status === 'unresolved' ||
+    report.vocalBalanceVerification?.status === 'unverified';
+  report.stopReason = `${report.stopReason} Full verification incomplete: ${
+    vocalIncomplete
+      ? report.vocalBalanceVerification?.summary
+      : 'one or more measured findings remain active, newly introduced, or unverified.'
+  }`;
 }
 
 /**
@@ -2195,6 +2231,9 @@ export async function runAutonomousDirectorLoop(
       rolledBack: false,
       preAnalysis,
       referenceAnalysis: opts.referenceAnalysis,
+      verificationBaselineAnalysis: opts.verificationBaselineAnalysis,
+      verificationBaselineDiagnosis: opts.verificationBaselineDiagnosis,
+      vocalBalanceVerification: opts.vocalBalanceVerification,
       stemAnalysis: resolvedStemAnalysis,
       stemChainsById: opts.stemChainsById,
       stemProcessingApplied,
@@ -2739,6 +2778,9 @@ export async function runAutonomousDirectorLoop(
     rolledBack,
     preAnalysis,
     referenceAnalysis: opts.referenceAnalysis,
+    verificationBaselineAnalysis: opts.verificationBaselineAnalysis,
+    verificationBaselineDiagnosis: opts.verificationBaselineDiagnosis,
+    vocalBalanceVerification: opts.vocalBalanceVerification,
     stemAnalysis: resolvedStemAnalysis,
     stemChainsById: opts.stemChainsById,
     stemProcessingApplied,
@@ -2749,6 +2791,7 @@ export async function runAutonomousDirectorLoop(
     activityLog,
   });
   finalReport.targetGate = finalGate;
+  preventUnverifiedConvergence(finalReport);
   return finalReport;
 }
 

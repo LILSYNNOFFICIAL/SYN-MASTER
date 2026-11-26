@@ -70,6 +70,67 @@ export function repairClicksChannel(
   return repairs;
 }
 
+function findClickCandidates(
+  ch: Float32Array,
+  sampleRate: number,
+  ratio: number,
+  floor: number,
+  halfWidth: number,
+): number[] {
+  const n = ch.length;
+  if (n < 32) return [];
+  const alpha = 1 - Math.exp(-1 / Math.max(1, sampleRate * 0.005));
+  let env = 0;
+  const prime = Math.min(n, Math.round(sampleRate * 0.01));
+  for (let i = 2; i < prime; i++) env += d2(ch, i);
+  env = prime > 2 ? env / (prime - 2) : 0;
+  const candidates: number[] = [];
+  for (let i = 2; i < n; i++) {
+    const value = d2(ch, i);
+    if (value > floor && value > ratio * (env + 1e-6) && isIsolatedClick(ch, i, sampleRate)) {
+      candidates.push(i);
+      i += Math.max(1, halfWidth);
+      continue;
+    }
+    env += alpha * (value - env);
+  }
+  return candidates;
+}
+
+function repairStereoClicks(
+  left: Float32Array,
+  right: Float32Array,
+  sampleRate: number,
+  ratio: number,
+  floor: number,
+  halfWidth: number,
+): number {
+  if (left.length !== right.length) throw new RangeError('Stereo repair requires equal-length channels.');
+  const candidates = [
+    ...findClickCandidates(left, sampleRate, ratio, floor, halfWidth),
+    ...findClickCandidates(right, sampleRate, ratio, floor, halfWidth),
+  ].sort((a, b) => a - b);
+  const groups: number[][] = [];
+  const groupRadius = Math.max(2, halfWidth * 2);
+  for (const candidate of candidates) {
+    const previous = groups[groups.length - 1];
+    if (previous && candidate - previous[previous.length - 1] <= groupRadius) previous.push(candidate);
+    else groups.push([candidate]);
+  }
+
+  let repairs = 0;
+  for (const group of groups) {
+    const center = Math.round(group.reduce((sum, index) => sum + index, 0) / group.length);
+    const a = Math.max(2, center - halfWidth);
+    const b = Math.min(left.length - 3, center + halfWidth);
+    if (a < 5 || b > left.length - 6) continue;
+    bridgeHermite(left, a, b);
+    bridgeHermite(right, a, b);
+    repairs++;
+  }
+  return repairs;
+}
+
 /**
  * Replace samples (a, b) exclusive with a cubic Hermite curve. End slopes are averaged
  * over 4 samples and the result is clamped to the level of the surrounding audio, so a
@@ -117,6 +178,39 @@ export function repairEdgeClicksChannel(ch: Float32Array, sampleRate: number, ra
     const idx = (k: number) => (reverse ? n - 1 - k : k);
     for (let k = 0; k < mute; k++) ch[idx(k)] = 0;
     for (let k = 0; k < fade && mute + k < n; k++) ch[idx(mute + k)] *= 0.5 - 0.5 * Math.cos((Math.PI * k) / fade);
+    repairs++;
+  }
+  return repairs;
+}
+
+function repairStereoEdgeClicks(
+  left: Float32Array,
+  right: Float32Array,
+  sampleRate: number,
+  ratio: number,
+): number {
+  if (left.length !== right.length) throw new RangeError('Stereo repair requires equal-length channels.');
+  const n = left.length;
+  if (n < 64) return 0;
+  const pad = Math.max(2, Math.round(sampleRate * 0.0005));
+  const fade = Math.max(8, Math.round(sampleRate * 0.002));
+  let repairs = 0;
+  for (const reverse of [false, true]) {
+    const leftHit = findEdgeClick(left, sampleRate, reverse, ratio);
+    const rightHit = findEdgeClick(right, sampleRate, reverse, ratio);
+    const indices = [leftHit.index, rightHit.index].filter((index) => index >= 0);
+    if (indices.length === 0) continue;
+    const mute = Math.min(n, Math.max(...indices) + pad);
+    const indexAt = (k: number) => reverse ? n - 1 - k : k;
+    for (let k = 0; k < mute; k++) {
+      left[indexAt(k)] = 0;
+      right[indexAt(k)] = 0;
+    }
+    for (let k = 0; k < fade && mute + k < n; k++) {
+      const gain = 0.5 - 0.5 * Math.cos((Math.PI * k) / fade);
+      left[indexAt(mute + k)] *= gain;
+      right[indexAt(mute + k)] *= gain;
+    }
     repairs++;
   }
   return repairs;
@@ -215,19 +309,22 @@ export function applyRepair(
     // Higher strength = lower ratio (more sensitive) and wider repair window.
     const ratio = 20 - 12 * declick;
     const half = Math.max(2, Math.round(sampleRate * (0.0005 + 0.001 * declick)));
-    clicksRepaired += repairClicksChannel(left, sampleRate, ratio, 0.02, half);
-    if (!stereoSame) clicksRepaired += repairClicksChannel(right, sampleRate, ratio, 0.02, half);    // Edge clicks (first/last ~3 ms) use a micro-fade; done on both channels together so
-    // the stereo image of the first/last milliseconds stays aligned.
-    const edgeL = repairEdgeClicksChannel(left, sampleRate, ratio);
-    const edgeR = stereoSame ? 0 : repairEdgeClicksChannel(right, sampleRate, ratio);
-    clicksRepaired += Math.max(edgeL, edgeR);
+    clicksRepaired += stereoSame
+      ? repairClicksChannel(left, sampleRate, ratio, 0.02, half)
+      : repairStereoClicks(left, right, sampleRate, ratio, 0.02, half);
+    // Both channels share the same edge window so a one-sided defect does not shift
+    // the stereo image at the file boundary.
+    clicksRepaired += stereoSame
+      ? repairEdgeClicksChannel(left, sampleRate, ratio)
+      : repairStereoEdgeClicks(left, right, sampleRate, ratio);
   }
   const crackle = ((settings.decrackle ?? 0) / 100) * intensityScale;
   if (crackle > 0) {
     const ratio = 16 - 5 * crackle;
     const half = Math.max(1, Math.round(sampleRate * 0.0002));
-    clicksRepaired += repairClicksChannel(left, sampleRate, ratio, 0.006, half);
-    if (!stereoSame) clicksRepaired += repairClicksChannel(right, sampleRate, ratio, 0.006, half);
+    clicksRepaired += stereoSame
+      ? repairClicksChannel(left, sampleRate, ratio, 0.006, half)
+      : repairStereoClicks(left, right, sampleRate, ratio, 0.006, half);
   }
   const shimmer = ((settings.deShimmer ?? 0) / 100) * intensityScale;
   const shimmerGrDb = shimmer > 0 && !stereoSame ? reduceShimmer(left, right, sampleRate, shimmer) : 0;

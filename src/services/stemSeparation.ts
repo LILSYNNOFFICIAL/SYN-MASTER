@@ -20,6 +20,54 @@ type WorkerResponse =
   | { type: 'cancelled'; jobId: string }
   | { type: 'error'; jobId: string; message: string };
 
+export interface StemSeparationResourceInput {
+  durationSec: number;
+  sampleRate: number;
+  fileSizeBytes: number;
+}
+
+export function estimateStemSeparationOutputBytes(durationSec: number, sampleRate: number): number {
+  if (!Number.isFinite(durationSec) || durationSec <= 0 ||
+    !Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 384000) {
+    throw new RangeError('Stem separation requires a valid duration and sample rate.');
+  }
+  return Math.ceil(durationSec * Math.max(44_100, sampleRate) * 8 * Float32Array.BYTES_PER_ELEMENT);
+}
+
+/** Preflight browser resources before launching a stem-separation job. */
+export async function assessStemSeparationResources(inputs: StemSeparationResourceInput[]): Promise<void> {
+  if (inputs.length === 0) throw new RangeError('At least one track is required for stem separation.');
+  for (const input of inputs) {
+    if (!Number.isFinite(input.fileSizeBytes) || input.fileSizeBytes < 0 || input.fileSizeBytes > 512 * 1024 * 1024) {
+      throw new Error('A source or reference file exceeds the 512 MB browser separation limit.');
+    }
+  }
+  const estimatedBytes = inputs.reduce(
+    (sum, input) => sum + estimateStemSeparationOutputBytes(input.durationSec, input.sampleRate),
+    0,
+  );
+  const deviceMemoryGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+  const memoryBudgetBytes = Math.min(2_048, Math.max(768, deviceMemoryGb * 512)) * 1024 * 1024;
+  if (estimatedBytes > memoryBudgetBytes) {
+    throw new Error(
+      `Source/reference stem separation needs about ${Math.ceil(estimatedBytes / (1024 * 1024))} MB, above this device's estimated ${Math.floor(memoryBudgetBytes / (1024 * 1024))} MB safe working budget.`,
+    );
+  }
+  if (!navigator.storage?.getDirectory || !navigator.storage?.estimate) {
+    throw new Error('This browser does not support the temporary disk storage required for safe stem separation.');
+  }
+  const storageEstimate = await navigator.storage.estimate();
+  const requiredStorageBytes = Math.ceil(
+    Math.max(...inputs.map((input) => estimateStemSeparationOutputBytes(input.durationSec, input.sampleRate))) * 1.15,
+  );
+  const availableStorageBytes = Math.max(0, (storageEstimate.quota ?? 0) - (storageEstimate.usage ?? 0));
+  if (availableStorageBytes < requiredStorageBytes) {
+    throw new Error(
+      `Not enough browser temporary storage for source/reference stem separation. About ${Math.ceil(requiredStorageBytes / (1024 * 1024))} MB is required, but only ${Math.floor(availableStorageBytes / (1024 * 1024))} MB is available.`,
+    );
+  }
+}
+
 async function cleanupTemporaryStems(jobId: string): Promise<void> {
   try {
     const storage = await navigator.storage?.getDirectory?.();
@@ -91,7 +139,7 @@ export function separateWithDemucs(
   channels: [Float32Array, Float32Array],
   signal: AbortSignal,
   onProgress: (progress: StemSeparationProgress) => void,
-  options: { highQuality?: boolean } = {},
+  options: { highQuality?: boolean; timeoutMs?: number } = {},
 ): Promise<SeparatedAudioStem[]> {
   if (signal.aborted) return Promise.reject(new DOMException('Separation cancelled.', 'AbortError'));
   if (channels[0].length < 1 || channels[0].length !== channels[1].length) {
@@ -102,10 +150,13 @@ export function separateWithDemucs(
     const worker = new Worker(new URL('../workers/demucsSeparation.worker.ts', import.meta.url), { type: 'module' });
     const jobId = globalThis.crypto?.randomUUID?.() ?? `demucs-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let settled = false;
+    const timeoutMs = Math.max(1_000, options.timeoutMs ?? 600_000);
+    let timeout: ReturnType<typeof setTimeout> | null = null;
 
     const finish = (callback: () => void) => {
       if (settled) return;
       settled = true;
+      if (timeout !== null) clearTimeout(timeout);
       signal.removeEventListener('abort', abort);
       worker.terminate();
       callback();
@@ -142,6 +193,11 @@ export function separateWithDemucs(
       void cleanupTemporaryStems(jobId).finally(() => reject(new Error(event.message || 'The separation worker crashed.')));
     });
     signal.addEventListener('abort', abort, { once: true });
+    timeout = setTimeout(() => finish(() => {
+      void cleanupTemporaryStems(jobId).finally(() =>
+        reject(new Error(`Stem separation timed out after ${Math.ceil(timeoutMs / 1000)} seconds.`)),
+      );
+    }), timeoutMs);
     if (signal.aborted) {
       finish(() => reject(new DOMException('Separation cancelled.', 'AbortError')));
       return;

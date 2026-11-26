@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BrainCircuit, Download, MessageSquareText, Plus, Square, Upload } from 'lucide-react';
+import { BrainCircuit, Download, MessageSquareText, Pause, Play, Plus, SkipBack, SkipForward, Square, Upload } from 'lucide-react';
 import type {
   AudioAnalysis,
   CompressorParams,
@@ -26,6 +26,7 @@ import { GlowFader } from './GlowFader';
 import { LightRibbons } from './LightRibbons';
 import { StereoMeters, StereoScope } from './StereoScope';
 import { telemetryStore, type RuntimeTelemetryState } from '../../engine/telemetryStore';
+import { isMasterFullyVerified } from '../../director/postFixVerification';
 
 /**
  * SYN-MASTER console (reference-mockup layout). A presentation layer only: every control
@@ -76,6 +77,8 @@ export interface MasterConsoleProps {
   onExport?: () => void;
   /** Seek the shared playback position (live spectrum / spectrogram playhead drag). */
   onSeek?: (sec: number) => void;
+  isPlaying: boolean;
+  onTogglePlay: () => void;
   /** Session "Mode" from the ribbon (MasteringMode). Shown on the console and used to suggest a preset. */
   mode?: string;
   /** Drag the target marker on the loudness meter: sets a custom integrated-loudness target. */
@@ -298,7 +301,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
   const statusLine = p.running
     ? `${p.stage || 'Working'} · pass ${p.pass}/${p.maxPasses}`
     : gate
-      ? gate.passed
+      ? isMasterFullyVerified(p.report)
         ? 'Verified · every target met'
         : 'Not fully verified · see details'
       : p.master
@@ -417,10 +420,23 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               <h2 className="syn-eq-title">SYN EQ</h2>
               <p className="syn-eq-sub">{eq ? eq.name : 'Precision · Color · Balance'}{p.sampleRate ? ` · ${(p.sampleRate / 1000).toFixed(1)} kHz` : ''}</p>
             </div>
-            <div className="syn-seg" role="group" aria-label="EQ view">
-              {([['eq', 'EQ'], ['dyneq', 'Dynamic EQ'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
-                <button key={id} type="button" aria-pressed={eqView === id} className={eqView === id ? 'is-on' : ''} onClick={() => setEqView(id)}>{label}</button>
-              ))}
+            <div className="syn-eq-head-controls">
+              <div className="syn-eq-transport" role="group" aria-label="EQ transport">
+                <button type="button" onClick={() => p.onSeek?.(0)} disabled={!p.hasTrack} aria-label="Seek to beginning" title="Beginning">
+                  <SkipBack aria-hidden="true" />
+                </button>
+                <button type="button" className="syn-eq-transport-play" onClick={p.onTogglePlay} disabled={!p.hasTrack} aria-label={p.isPlaying ? 'Pause' : 'Play'} title={p.isPlaying ? 'Pause' : 'Play'}>
+                  {p.isPlaying ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
+                </button>
+                <button type="button" onClick={() => p.onSeek?.(p.durationSec)} disabled={!p.hasTrack} aria-label="Seek to end" title="End">
+                  <SkipForward aria-hidden="true" />
+                </button>
+              </div>
+              <div className="syn-seg" role="group" aria-label="EQ view">
+                {([['eq', 'EQ'], ['dyneq', 'Dynamic EQ'], ['spectrum', 'Live spectrum'], ['spectrogram', 'Spectrogram']] as const).map(([id, label]) => (
+                  <button key={id} type="button" aria-pressed={eqView === id} className={eqView === id ? 'is-on' : ''} onClick={() => setEqView(id)}>{label}</button>
+                ))}
+              </div>
             </div>
           </div>
           {eqView === 'dyneq' ? (
