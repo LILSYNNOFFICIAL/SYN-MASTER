@@ -54,6 +54,7 @@ function aiRateLimiter(
 // Apply the AI limiter before JSON parsing so malformed or oversized requests are rate-limited too.
 const aiGuestSession = createAiGuestSession({
   secret: process.env.SYN_MASTER_SESSION_SECRET,
+  providerKey: process.env.GEMINI_API_KEY,
   production: process.env.NODE_ENV === 'production',
 });
 const guestBootstrapLimiter = createRateLimiter({ limit: 20, windowMs: 60_000, maxKeys: 10_000 });
