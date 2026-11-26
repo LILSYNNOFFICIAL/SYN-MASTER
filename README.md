@@ -338,6 +338,12 @@ GEMINI_API_KEY=your_key_here
 
 The `GET /api/health` endpoint reports whether the server process has a non-empty `GEMINI_API_KEY`. It does not verify that the key is valid or that Gemini accepts requests.
 
+## Cloud AI
+
+Cloud AI is provided by SYN-MASTER. Ordinary users do not need a Google AI Studio account, a Gemini API key, a GitHub account or an operator access token. The browser requests an anonymous guest session; the server signs it with SYN_MASTER_SESSION_SECRET and sets an HttpOnly, SameSite=Strict cookie. The Gemini key and signing secret remain backend-only. If Cloud AI is unavailable or a usage limit is reached, local DSP mastering remains available.
+
+**Operator deployment secrets:** configure GEMINI_API_KEY and a high-entropy SYN_MASTER_SESSION_SECRET in backend secret storage. Never expose either value through VITE_*, frontend bundles, browser storage or browser requests. Guest sessions expire after 12 hours and are renewed by the app. Current rate-limit counters are process-local; deployments with multiple instances need a shared quota store for cross-instance enforcement.
+
 ## AI endpoint protections and limits
 
 The AI routes are protected by a process-local fixed-window request limiter: 20 requests per client key per minute. A 429 response includes `Retry-After`.
@@ -432,8 +438,7 @@ The live `/api/health` response only verifies configuration presence, not full A
 
 ## Parallel execution update — November 23, 2026
 
-- [x] **Production Gemini access gate:** server-side bearer validation, built-in Gemini Settings token entry, session/local persistence controls, and non-billable production-mode route tests are committed. The Gemini key remains server-only. Production secret configuration and hosted Cloud Run/AI Studio validation remain open.
-- [ ] **Hosted deployment verification:** set the separate `SYN_MASTER_AI_ACCESS_TOKEN` deployment secret, sync the source into AI Studio, inspect Cloud Run/IAM/IAP, and verify unauthorized calls are rejected without billable Gemini usage.
+- [ ] **Production Gemini guest-session verification:** signed HttpOnly cookie sessions replace the shared bearer credential. Run the updated integration tests, configure backend-only GEMINI_API_KEY and SYN_MASTER_SESSION_SECRET secrets, sync the source into AI Studio, inspect Cloud Run/IAM/IAP, and verify guest-session renewal, rejection, limits and local fallback.
 
 
 
@@ -444,7 +449,7 @@ The client-entered cloud token is a shared bearer credential, not individual use
 
 ## Parallel execution status — November 23, 2026
 
-- [x] **Hosted AI access protection (source):** bearer-token guard, settings field, and unit coverage are committed. This intentionally fails closed in production when `SYN_MASTER_AI_ACCESS_TOKEN` is not configured. Set a cryptographically random token (for example, `openssl rand -hex 32`) as a deployment secret and enter the same value under Settings → AI Provider → Built-in Gemini → Cloud AI access token. Do not use the Gemini API key as this token.
+- [ ] **Hosted AI guest access:** users no longer enter an operator token. The server issues signed anonymous guest sessions using a backend-only SYN_MASTER_SESSION_SECRET; Gemini and session-signing secrets must never appear in Vite variables, frontend bundles, renderer code, browser storage or browser requests. Tests and hosted deployment verification are pending.
 - [x] **Browser installability foundation:** web manifest, self-hosted black/gold SVG icon, and production service worker are committed. The service worker only handles same-origin GET navigation/static assets and explicitly bypasses `/api/`, ONNX, ORT, Demucs and model paths. This is a PWA foundation, not a verified APK or TWA.
 - [x] **Bundle regression guard:** `npm run check:bundle` is part of Web CI; it enforces a largest-chunk ceiling of 800 KiB raw / 250 KiB gzip. The prior measured entry chunk (~732.16 kB raw / 218.19 kB gzip) is within this guard, but still exceeds Vite's default 500 kB warning. This guard prevents growth; it does not itself split the bundle.
 - [ ] **P0 deployment verification:** configure the secret and verify live hosted AI access controls, Cloud Run/IAM/IAP, and AI Studio sync. Do not send a paid Gemini request merely to test the gate.
@@ -453,10 +458,10 @@ The client-entered cloud token is a shared bearer credential, not individual use
 - [ ] **Windows application:** the existing native VST3 companion CI is green, but this is not a complete workstation EXE. `docs/packaging/WINDOWS.md` records the server/FFmpeg/native-host/installer/signing lifecycle and a provisional Electron packaging spike. A signed installer and end-to-end installed-app test remain open.
 
 
-**CI hardening follow-up:** Web CI now runs the JavaScript bundle budget check after production build and starts production with a throwaway test-only `SYN_MASTER_AI_ACCESS_TOKEN`. Its smoke test posts empty (invalid, non-billable) payloads to both `/api/ai/master` and `/api/ai/refine`: unauthenticated requests must receive 401, while the valid test bearer token must pass the gate and reach payload validation (400). This validates the server boundary without sending a Gemini request. The test-only token is not a repository secret and is not reused for deployment.
+**CI hardening follow-up:** Web CI runs the JavaScript bundle budget check after production build. The AI route integration tests bootstrap a test guest session and exercise cookie-authenticated requests without sending a Gemini request. A fresh CI run is required to verify this updated path.
 
 
-- [x] **Windows desktop packaging scaffold:** Electron shell, bundled Express runtime build, staged native VST3 companions, NSIS x64 installer config, CI installer job, localhost-only server binding, per-launch AI token, automatic VST3 pairing, and authenticated graceful host shutdown are committed. The Windows job is now building this package; only a successful uploaded installer artifact will count as build-verified. Code signing, installed-app smoke tests, and physical Windows acceptance remain open.
+- [x] **Windows desktop packaging scaffold:** Electron shell, bundled Express runtime build, staged native VST3 companions, NSIS x64 installer config, CI installer job, localhost-only server binding, anonymous guest-session cookie authentication, automatic VST3 pairing, and authenticated graceful host shutdown are committed. The Windows job is now building this package; only a successful uploaded installer artifact will count as build-verified. Code signing, installed-app smoke tests, and physical Windows acceptance remain open.
 
 
 **Desktop runtime resilience:** the Electron shell waits for the native host HTTP listener after reading the pairing file (the native host writes that file before listening), and continues in browser-only mastering mode with a visible warning if the VST3 companion cannot start. The loopback port allocator retries distinct ports without leaving its Promise pending.
