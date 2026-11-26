@@ -135,6 +135,7 @@ async function runViewport(browser, width, height, mobile) {
       const cloudHelpButton = page.getByRole('button', { name: /Cloud AI is included/i });
       await cloudHelpButton.click({ timeout: 15000 });
       const cloudHelpDialog = page.getByRole('dialog', { name: /Cloud AI is included/i });
+      await cloudHelpDialog.waitFor({ state: 'visible', timeout: 5000 });
       assert.equal(await cloudHelpDialog.isVisible(), true, 'First-use Import screen must expose the Cloud AI help dialog');
       const cloudHelpLink = cloudHelpDialog.getByRole('link', { name: /Cloud AI help and usage limits/i });
       assert.match(await cloudHelpLink.getAttribute('href') ?? '', /#cloud-ai$/, 'First-use dialog must link to the Cloud AI guide');
@@ -182,8 +183,11 @@ async function runViewport(browser, width, height, mobile) {
     await page.locator('.syn2-stage').waitFor({ state: 'visible', timeout: 30000 });
     await page.locator('.syn-meter-bridge').waitFor({ state: 'visible', timeout: 10000 });
     // The rack UI is code-split (prefetched on mount); wait for it rather than sampling once.
-    await page.locator('[data-syn-skin="instrument"][data-workspace="rack"]').waitFor({ state: 'visible', timeout: 10000 });
-    assert.equal(await page.locator('[data-syn-skin="instrument"][data-workspace="rack"]').isVisible(), true, 'Mastering Rack must use the shared instrument surface');
+    const rackSurface = page.locator('[data-syn-skin="instrument"][data-workspace="rack"]');
+    await rackSurface.waitFor({ state: 'visible', timeout: 10000 });
+    assert.equal(await rackSurface.isVisible(), true, 'Mastering Rack must use the shared instrument surface');
+    assert.equal(await rackSurface.getByText('AI Automatic Director', { exact: true }).isVisible(), true, 'Mastering Rack must use the AI Automatic label');
+    assert.equal(await rackSurface.getByText('Autonomous Director', { exact: true }).count(), 0, 'No visible Mastering Rack label may still say Autonomous Director');
     assert.equal(await page.locator('#syn-library-drawer [data-syn-skin="instrument"][data-workspace="library"]').count(), 1, 'Audio Library must use the shared instrument surface inside the library drawer');
 
     if (!mobile) {

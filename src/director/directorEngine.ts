@@ -2060,7 +2060,7 @@ function buildFinalReportFromState(params: {
         ? [{
             id: `corr-dir-${bestCheckpoint.passNumber}`,
             timestamp: bestCheckpoint.timestamp,
-            label: `Autonomous Director Pass #${bestCheckpoint.passNumber}`,
+            label: `AI Automatic Pass #${bestCheckpoint.passNumber}`,
             processorTypes: bestCheckpoint.chain.map((module) => module.type),
             chainFingerprint: chainFp,
           }]

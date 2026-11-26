@@ -198,7 +198,7 @@ export const MasteringRack: React.FC<Props> = React.memo(
           <div className="px-3.5 py-2 border-b border-[#222530] bg-[#0F1117] flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[10px] font-mono-tabular uppercase tracking-wider text-[#9CA3AF]">
-                Autonomous Director
+                AI Automatic Director
               </div>
               <div className="text-[11px] font-mono-tabular font-semibold text-[#F2CA52] truncate">
                 State: {aiLifecycleState}
