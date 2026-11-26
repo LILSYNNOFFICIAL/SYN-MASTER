@@ -2128,7 +2128,7 @@ export function mergeAiChainWithMeasuredPlan(
   for (const type of ['dynamic-eq', 'match-eq'] as const) {
     if (hasEffective(merged, type)) continue;
     const measured = measuredPlanChain.find((module) =>
-      module.type === type && module.enabled && !module.bypassed && module.wetDry > 0 && module.intensity > 0,
+      module.type === type && hasEffective([module], type),
     );
     if (!measured) continue;
     // Remove empty/no-op AI placeholders, then place the measured processor before
