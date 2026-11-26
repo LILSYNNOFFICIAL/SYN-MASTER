@@ -106,8 +106,12 @@ export function createAiSpendMiddleware(limiter, { routes = { '/master': 'strate
     const routePath = String(req.path || '').toLowerCase().replace(/\/+$/, '');
     const kind = req.method === 'POST' && Object.hasOwn(routes, routePath) ? routes[routePath] : undefined;
     if (!kind) return next();
-    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-    const result = limiter.consume(ip, kind);
+    const sessionId = String(res.locals?.guestSessionId ?? '');
+    if (!sessionId) {
+      res.status(401).json({ error: 'A valid Cloud AI guest session is required.' });
+      return;
+    }
+    const result = limiter.consume(sessionId, kind);
     if (!result.allowed) {
       const retryAfterSec = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
       res.setHeader('Retry-After', String(retryAfterSec));
