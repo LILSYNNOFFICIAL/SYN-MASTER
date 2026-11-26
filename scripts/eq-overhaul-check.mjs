@@ -12,7 +12,7 @@ const baseUrl = `http://127.0.0.1:${port}`;
 const shots = process.env.SYN_EQ_SHOTS ?? '';
 const server = spawn(process.execPath, ['server.ts'], {
   stdio: 'ignore',
-  env: { ...process.env, NODE_ENV: 'production', PORT: port, HOST: '127.0.0.1', SYN_MASTER_AI_ACCESS_TOKEN: 'eq-overhaul-check-token-0123456789abcdef0123' },
+  env: { ...process.env, NODE_ENV: 'production', PORT: port, HOST: '127.0.0.1', SYN_MASTER_SESSION_SECRET: 'eq-overhaul-session-secret-0123456789abcdef' },
 });
 
 async function waitForServer() {
