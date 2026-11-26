@@ -34,8 +34,10 @@ function safeStorage(kind: 'session' | 'local'): Storage | null {
 function purgeLegacyServerTokens() {
   for (const kind of ['session', 'local'] as const) {
     const storage = safeStorage(kind);
-    const raw = storage?.getItem(STORAGE_KEY);
-    if (!storage || !raw || !raw.includes('"serverAccessToken"')) continue;
+    if (!storage) continue;
+    let raw: string | null = null;
+    try { raw = storage.getItem(STORAGE_KEY); } catch { continue; }
+    if (!raw || !raw.includes('"serverAccessToken"')) continue;
     try {
       const parsed = JSON.parse(raw) as Partial<ProviderSettings>;
       const presetId = getPreset(parsed.presetId).id;
@@ -45,14 +47,15 @@ function purgeLegacyServerTokens() {
       if (isDefault) storage.removeItem(STORAGE_KEY);
       else storage.setItem(STORAGE_KEY, JSON.stringify({ presetId, overrides, keys }));
     } catch {
-      storage.removeItem(STORAGE_KEY);
+      try { storage.removeItem(STORAGE_KEY); } catch { /* blocked storage */ }
     }
   }
 }
 
 function load(): ProviderSettings {
   for (const kind of ['session', 'local'] as const) {
-    const raw = safeStorage(kind)?.getItem(STORAGE_KEY);
+    let raw: string | null = null;
+    try { raw = safeStorage(kind)?.getItem(STORAGE_KEY) ?? null; } catch { continue; }
     if (!raw) continue;
     try {
       const parsed = JSON.parse(raw) as Partial<ProviderSettings>;
