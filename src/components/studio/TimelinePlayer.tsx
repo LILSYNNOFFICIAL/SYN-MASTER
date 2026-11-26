@@ -23,6 +23,10 @@ interface Props {
   disabled?: boolean;
   /** Render only transport/fade controls; the waveform is already overlaid behind the EQ graph. */
   integrated?: boolean;
+  /** Render only the transport controls for placement in the EQ header. */
+  transportOnly?: boolean;
+  /** Hide the transport here when a header-mounted copy is rendered. */
+  hideTransport?: boolean;
   /** Optional compact control rendered under the transport (Platform Preview selector). */
   extra?: React.ReactNode;
 }
@@ -54,34 +58,8 @@ const CURVES: { id: FadeCurve; label: string }[] = [
 
 export const TimelinePlayer: React.FC<Props> = (p) => {
   const hasTrack = p.durationSec > 0;
-  return (
-    <section className={`syn-card syn-player syn-area-player${p.integrated ? ' syn-player-integrated' : ''}`} aria-label={p.integrated ? 'Integrated EQ timeline transport and fades' : 'Timeline player and fades'}>
-      {p.integrated ? (
-        <div className="syn-player-integrated-readout"><span>TRACK POSITION</span><TimeReadout durationSec={p.durationSec} /></div>
-      ) : (
-        <>
-          <div className="syn-player-head">
-            <h3 className="syn-card-title">Timeline</h3>
-            <span className="syn-player-hint">Click or drag to seek · drag the end knobs to fade</span>
-            <TimeReadout durationSec={p.durationSec} />
-          </div>
-          {hasTrack ? (
-            <TimelineWaveform
-              prePeaks={p.prePeaks}
-              postPeaks={p.postPeaks}
-              durationSec={p.durationSec}
-              showPost={p.showPost}
-              fades={p.fades}
-              onFadesChange={p.onFadesChange}
-              onSeek={p.onSeek}
-              heightPx={112}
-            />
-          ) : (
-            <div className="syn-player-empty">Import a track to see its waveform</div>
-          )}
-        </>
-      )}
-      <div className="syn-player-transport" role="group" aria-label="Transport">
+  const transport = (
+    <div className="syn-player-transport" role="group" aria-label="Transport">
         <button type="button" className="syn-player-btn syn-player-icon" onClick={() => p.onSeek(0)} disabled={!hasTrack} aria-label="Jump to start">
             <SkipBack className="w-3.5 h-3.5" />
           </button>
@@ -92,6 +70,9 @@ export const TimelinePlayer: React.FC<Props> = (p) => {
             <SkipForward className="w-3.5 h-3.5" />
           </button>
       </div>
+  );
+  if (p.transportOnly) return transport;
+  return (      {!p.hideTransport && transport}
       {p.extra}
       <div className="syn-player-controls">
         <label className="syn-player-btn syn-player-import">
