@@ -66,6 +66,9 @@ test('local Director adds one conservative Match EQ only when a reference is lea
 
 test('hydration fills AI Match EQ from the profile, clamps it, and keeps user-learned modules', () => {
   const ai = createProcessorModule('match-eq', { params: { amount: 100, maxBoostDb: 12, maxCutDb: 12, smoothing: 24 } as MatchEqParams });
+  const conservativeAi = createProcessorModule('match-eq', {
+    params: { amount: 48, maxBoostDb: 2.5, maxCutDb: 2, smoothing: 6, lowHz: 40, highHz: 15000, channel: 'side', phase: 'minimum' },
+  });
   const user = createProcessorModule('match-eq', { params: { amount: 100, maxBoostDb: 9, maxCutDb: 9, smoothing: 12, lowHz: 30, highHz: 18000, channel: 'stereo', phase: 'linear', source: profile.reference, reference: profile.source } });
   const out = hydrateMatchEqChain([ai, user], profile, { dropUnlearned: true, conservative: true });
   const a = out[0].params as MatchEqParams;
@@ -75,6 +78,13 @@ test('hydration fills AI Match EQ from the profile, clamps it, and keeps user-le
   assert.equal(a.smoothing, 6);
   assert.equal(a.referenceName, 'Bright Ref');
   assert.equal(out[1], user, 'user-learned Match EQ untouched');
+  const conservative = hydrateMatchEqChain([conservativeAi], profile, { dropUnlearned: true, conservative: true })[0].params as MatchEqParams;
+  assert.equal(conservative.amount, 48);
+  assert.equal(conservative.maxBoostDb, 2.5);
+  assert.equal(conservative.maxCutDb, 2);
+  assert.equal(conservative.smoothing, 6);
+  assert.equal(conservative.channel, 'side');
+  assert.equal(conservative.phase, 'minimum');
   assert.deepEqual(hydrateMatchEqChain([ai], null, { dropUnlearned: true }), [], 'no reference: unlearned Match EQ dropped');
 });
 

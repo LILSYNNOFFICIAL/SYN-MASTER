@@ -1793,6 +1793,7 @@ export default function App() {
           operatingMode: runOperatingMode,
           targetLufs: plan.objective.targetLufs,
           referenceAnalysis: referenceTrack?.analysis ?? null,
+          vocalBalanceVerification,
           availablePlugins: pluginSummary.matches.map((m) => ({
             name: m.name,
             role: m.role,
@@ -1954,7 +1955,11 @@ export default function App() {
         aiRefineCallback:
           useGeminiCloud && runOperatingMode === 'autonomous'
             ? async (ctx) => {
-                const refineCtx = vocalBalance.stemsCached ? { ...ctx, vocalBalance } : ctx;
+                const refineCtx = {
+                  ...ctx,
+                  ...(vocalBalance.stemsCached ? { vocalBalance } : {}),
+                  ...(vocalBalanceVerification ? { vocalBalanceVerification } : {}),
+                };
                 const builtinRefine = async () => {
                   assertCloudAiAvailable();
                   const res = await fetch('/api/ai/refine', {

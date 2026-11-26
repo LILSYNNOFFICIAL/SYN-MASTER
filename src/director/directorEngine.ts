@@ -1870,6 +1870,15 @@ export interface RunAutonomousDirectorOptions {
     preAnalysis: AudioAnalysis;
     postAnalysis: AudioAnalysis;
     currentChain: ProcessorModule[];
+    referenceAnalysis?: AudioAnalysis | null;
+    remainingFindings?: Array<{
+      findingId: string;
+      title: string;
+      status: string;
+      detail: string;
+      recommendedAction?: string;
+      measurementReliable: boolean;
+    }>;
     targetLufs: number;
     targetTruePeakDb: number;
     preserveDynamics: boolean;
@@ -2138,48 +2147,17 @@ export function preventUnverifiedConvergence(report: MasterFinalReport): void {
 }
 
 /**
- * Preserve measured local corrections when a cloud AI seed chain is supplied.
- * AI suggestions are a starting point, not permission to discard deterministic,
- * evidence-backed Dynamic EQ / Match EQ stages or local stem-balance corrections.
+ * Preserve only caller-required lead modules when an AI supplies a complete chain.
+ * Tool selection and settings stay under AI control; Match EQ is separately
+ * hydrated/bounded by a real learned reference before rendering.
  */
-export function mergeAiChainWithMeasuredPlan(
+export function mergeAiChainWithRequiredModules(
   aiChain: ProcessorModule[],
-  leadModules: ProcessorModule[],
-  measuredPlanChain: ProcessorModule[],
+  requiredModules: ProcessorModule[],
 ): ProcessorModule[] {
-  const hasEffective = (chain: ProcessorModule[], type: 'dynamic-eq' | 'match-eq') =>
-    chain.some((module) => {
-      if (module.type !== type || !module.enabled || module.bypassed || module.wetDry <= 0 || module.intensity <= 0) return false;
-      const params = module.params as unknown as { bands?: Array<{ enabled?: boolean; maxCutDb?: number }>; amount?: number };
-      if (type === 'dynamic-eq') {
-        return (params.bands ?? []).some((band) => band.enabled !== false && Math.abs(band.maxCutDb ?? 0) > 0.05);
-      }
-      return (params.amount ?? 0) > 0;
-    });
-
-  // Do not validate/truncate the AI chain until required measured stages have been
-  // merged. validateChain caps chains at 12 modules, which could otherwise discard
-  // the final limiter when one or two evidence-backed EQ stages are added.
-  let merged = [...structuredClone(leadModules), ...structuredClone(aiChain)];
-  for (const type of ['dynamic-eq', 'match-eq'] as const) {
-    const measured = measuredPlanChain.find((module) =>
-      module.type === type && hasEffective([module], type),
-    );
-    if (!measured && hasEffective(merged, type)) continue;
-    // A measured local configuration takes precedence over an AI placeholder or
-    // generic setting. If no measured plan exists, retain a genuinely configured AI
-    // stage, but discard an empty/no-op stage rather than counting it as a correction.
-    merged = merged.filter((module) => module.type !== type);
-    if (!measured) continue;
-    // Place the measured processor before compression and loudness stages so its
-    // detector sees the intended source signal.
-    const beforeLoudnessTypes = new Set<string>([
-      'compressor', 'multiband-comp', 'clipper', 'limiter', 'maximizer', 'multiband-maximizer', 'dither',
-    ]);
-    const insertAt = merged.findIndex((module) => beforeLoudnessTypes.has(module.type));
-    const at = insertAt < 0 ? merged.length : insertAt;
-    merged.splice(at, 0, structuredClone(measured));
-  }
+  // Keep the 12-stage safety limit without silently losing the AI's limiter or
+  // evidence-critical processor because a caller prepended a required lead stage.
+  const merged = [...structuredClone(requiredModules), ...structuredClone(aiChain)];
   const protectedTypes = new Set<string>(['vocal-rebalance', 'dynamic-eq', 'match-eq', 'restore', 'limiter', 'maximizer', 'dither']);
   while (merged.length > 12) {
     let dropAt = -1;
@@ -2407,7 +2385,7 @@ export async function runAutonomousDirectorLoop(
     hydrateMatchEqChain(c, matchEqProfile, { dropUnlearned: true, conservative: fromAi });
   let workingChain: ProcessorModule[] =
     opts.initialChain && opts.initialChain.length > 0
-      ? prepareChain(mergeAiChainWithMeasuredPlan(opts.initialChain, opts.leadModules ?? [], plan.chain), true)
+      ? prepareChain(mergeAiChainWithRequiredModules(opts.initialChain, opts.leadModules ?? []), true)
       : opts.leadModules && opts.leadModules.length > 0
         ? validateChain([...structuredClone(opts.leadModules), ...structuredClone(plan.chain)])
         : structuredClone(plan.chain);
@@ -2753,12 +2731,32 @@ export async function runAutonomousDirectorLoop(
       emit('Optimizing', pass, undefined, undefined, workingChain, 'Optimizing');
       let nextChainFromAi: ProcessorModule[] | null = null;
       let aiProducedBy = 'cloud AI';
+      const remainingFindings = [
+        ...passVerification.activeFindings.map((finding) => ({
+          findingId: finding.findingId,
+          title: finding.originalFinding.title,
+          status: finding.status,
+          detail: finding.remainingDeviation ?? finding.verificationSummary,
+          recommendedAction: finding.nextRecommendedAction ?? finding.originalFinding.recommendedAction,
+          measurementReliable: finding.measurementReliable,
+        })),
+        ...passVerification.newlyIntroducedFindings.map((finding) => ({
+          findingId: finding.id,
+          title: finding.title,
+          status: 'NEW',
+          detail: finding.evidence.join(' · ') || finding.explanation,
+          recommendedAction: finding.recommendedAction,
+          measurementReliable: true,
+        })),
+      ];
       if (opts.aiRefineCallback) {
         try {
           const rawSuggestion = await opts.aiRefineCallback({
             preAnalysis,
             postAnalysis: post,
             currentChain: workingChain,
+            referenceAnalysis: opts.referenceAnalysis,
+            remainingFindings,
             targetLufs: objective.targetLufs,
             targetTruePeakDb: objective.maxTruePeakDb,
             preserveDynamics: objective.preserveTransients,
@@ -2778,7 +2776,10 @@ export async function runAutonomousDirectorLoop(
           if (candidateAiChain) {
             const invCheck = validateChainAgainstInventory(candidateAiChain);
             if (invCheck.valid) {
-              nextChainFromAi = prepareChain(invCheck.sanitizedChain, true);
+              nextChainFromAi = prepareChain(
+                mergeAiChainWithRequiredModules(invCheck.sanitizedChain, opts.leadModules ?? []),
+                true,
+              );
             } else {
               emit(
                 'Optimizing',

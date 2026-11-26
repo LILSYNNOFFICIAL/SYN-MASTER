@@ -13,6 +13,7 @@ import type {
   MasteringObjectiveId,
   ProcessorModule,
   QCReport,
+  VocalBalanceVerification,
 } from '../types/mastering.ts';
 import { validateChainAgainstInventory } from '../director/processorInventory.ts';
 import { summarizeVocalBalanceForPrompt, type VocalBalanceContext } from './vocalBalancePrompt.ts';
@@ -28,6 +29,7 @@ export interface StrategyPromptInput {
   targetLufs?: number;
   userGenreOverride?: string;
   referenceAnalysis?: AudioAnalysis | null;
+  vocalBalanceVerification?: VocalBalanceVerification;
   availablePlugins?: Array<{ name: string; role: string; manufacturer: string }>;
   /** Vocal Rebalance context: whether stems are cached and the measured vocal balance. */
   vocalBalance?: VocalBalanceContext | null;
@@ -37,6 +39,16 @@ export interface RefinePromptInput {
   preAnalysis: AudioAnalysis;
   postAnalysis: AudioAnalysis;
   currentChain: ProcessorModule[];
+  referenceAnalysis?: AudioAnalysis | null;
+  vocalBalanceVerification?: VocalBalanceVerification;
+  remainingFindings?: Array<{
+    findingId: string;
+    title: string;
+    status: string;
+    detail: string;
+    recommendedAction?: string;
+    measurementReliable: boolean;
+  }>;
   targetLufs: number;
   targetTruePeakDb: number;
   preserveDynamics: boolean;
@@ -69,6 +81,8 @@ Distinguish intentional artistic tonal/stereo character from technical defects (
 Use ONLY needed processors; keep EQ moves surgical (+/- 4 dB max unless correcting severe imbalance) and protect musical transients.
 
 PROCESSOR SELECTION IS PART OF THE TASK, NOT AN OPTIONAL SUGGESTION:
+- All 16 supported native processors below are available choices, not a required rack template. Select only tools justified by this track's measurements; do not omit a suitable tool just because it was not used in a prior run.
+- On every refinement, compare the latest rendered measurements with the current chain and its settings. Retune the relevant existing processor when it has not met its measured target, remove it when evidence no longer supports it, or select a different complementary tool when that better addresses the remaining evidence. Never repeat unchanged settings when the same measured failure persists, and never call a track mastered because a processor was merely added.
 - Select and configure Dynamic EQ when measurements show frequency-dependent problems that vary over time (isolated resonances, sibilance, or low-mid buildup that appears only in dense passages). Set detector threshold, maxCutDb, ratio, attack and release from the measured severity; do not add empty/default Dynamic EQ bands.
 - Select Match EQ only when a real, analyzed reference track/profile is supplied and the measured tonal difference is meaningful. Configure amount, smoothing, frequency limits and channel from that reference. Never invent a reference or use Match EQ as a generic tone control.
 - Select Vocal Rebalance only when vocal stems are present or the measured/diagnosed vocal-to-music balance requires stem-level gain correction. If the diagnosis requires it but stems are not yet available, request/trigger stem separation before applying the processor; do not silently discard the correction or claim it was applied.
@@ -118,6 +132,19 @@ export function formatMatchEqAvailability(referenceLoaded: boolean): string {
     : 'Match EQ: NOT AVAILABLE (no reference track loaded). Do not use "match-eq".';
 }
 
+function formatVocalBalanceVerification(verification?: VocalBalanceVerification): string {
+  if (!verification) return '';
+  const measured = (value: number | null) => value === null ? 'unavailable' : `${value.toFixed(1)} dB`;
+  return [
+    'VOCAL-FOCUSED PRE-CHAIN VERIFICATION:',
+    `- Status: ${verification.status}. Source ${measured(verification.sourceBalanceDb)}; reference ${measured(verification.referenceBalanceDb)}; independently rendered ${measured(verification.postRenderBalanceDb)}; applied gain ${verification.appliedGainDb >= 0 ? '+' : ''}${verification.appliedGainDb.toFixed(1)} dB.`,
+    `- ${verification.summary}`,
+    verification.status === 'verified' || verification.status === 'not-needed'
+      ? 'This preparation has already been measured; do not duplicate the correction.'
+      : 'This preparation was not verified; do not claim it fixed vocal balance. Any further Vocal Rebalance requires valid stems and evidence.',
+  ].join('\n');
+}
+
 /** Chain JSON for prompts: Match EQ learned spectra (hundreds of numbers) are summarised, not sent. */
 export function chainForPrompt(chain: ProcessorModule[]) {
   return chain.map((m) => {
@@ -145,6 +172,7 @@ export function buildStrategyUserPrompt(input: StrategyPromptInput): string {
       ? summarizeAnalysisForPrompt('REFERENCE TRACK MEASUREMENTS', input.referenceAnalysis)
       : '',
     formatMatchEqAvailability(Boolean(input.referenceAnalysis)),
+    formatVocalBalanceVerification(input.vocalBalanceVerification),
     input.vocalBalance !== undefined ? summarizeVocalBalanceForPrompt(input.vocalBalance) : '',
     'Design an optimal, explainable surgical mastering chain ending with a limiter or maximizer, explicitly stating supporting telemetry and potential tradeoffs in each processor reason.',
   ].filter(Boolean);
@@ -165,17 +193,28 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
         .map((check) => `- ${check.status.toUpperCase()} [${check.label}]: measured ${check.measured}; target ${check.target}${check.fix ? ` -> ${check.fix}` : ''}`)
         .join('\n')
     : 'OBJECTIVE GATE: not supplied. Use the measured telemetry and stated mastering objectives.';
+  const findingsSummary = input.remainingFindings
+    ? `REMAINING TECHNICAL FINDINGS:\n${input.remainingFindings.length > 0
+      ? input.remainingFindings.map((finding) =>
+          `- ${finding.findingId} [${finding.status}; ${finding.measurementReliable ? 'reliable' : 'unverified'}]: ${finding.title}. ${finding.detail}${finding.recommendedAction ? ` Next action: ${finding.recommendedAction}` : ''}`,
+        ).join('\n')
+      : 'None currently active or newly introduced.'}`
+    : '';
 
   const prompt = [
     summarizeAnalysisForPrompt('ORIGINAL SOURCE', input.preAnalysis),
     summarizeAnalysisForPrompt('CURRENT PROCESSED PASS', input.postAnalysis),
+    input.referenceAnalysis ? summarizeAnalysisForPrompt('REFERENCE TRACK MEASUREMENTS', input.referenceAnalysis) : '',
+    formatMatchEqAvailability(Boolean(input.referenceAnalysis)),
+    formatVocalBalanceVerification(input.vocalBalanceVerification),
+    findingsSummary,
     `INDEPENDENT SYN-QC EVALUATION:\n${qcSummary}`,
     objectiveGateSummary,
     formatPlatformHintsForPrompt(input.qcReport?.platformHints),
     `Current Chain JSON:\n${JSON.stringify(chainForPrompt(input.currentChain))}`,
     `Objectives: Target LUFS=${input.targetLufs}, Max True Peak=${input.targetTruePeakDb} dBTP, Preserve Dynamics=${input.preserveDynamics}`,
     ...(input.vocalBalance !== undefined ? [summarizeVocalBalanceForPrompt(input.vocalBalance)] : []),
-    'Resolve every FAIL in OBJECTIVE GATE and every blocking QC failure. Prioritize the measured failed targets, use the available processors that fit the diagnosis (including Parametric EQ, Dynamic EQ, multiband processing, stereo control and limiting), preserve every passing target, and output a complete refined chain. Never substitute a generic tonal change for a named failed gate.',
+    'Resolve every FAIL in OBJECTIVE GATE and every blocking QC failure. All 16 supported native processors in the system schema are available; select only those that fit this track\'s evidence. Compare every current processor and setting with the latest render: retune it when its target remains unmet, remove it when no longer justified, or add a different complementary tool when measurements support that choice. Preserve passing targets, output the complete refined chain, and never repeat unchanged settings for a persistent failure or substitute generic tone shaping for a named failed gate.',
   ].filter(Boolean).join('\n\n');
   return prompt;
 }

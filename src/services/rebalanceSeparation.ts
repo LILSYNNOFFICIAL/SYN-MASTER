@@ -7,7 +7,12 @@
  */
 import { applyMixtureConsistency } from '../dsp/stemSeparationMath.ts';
 import { fingerprintStereo, type RebalanceStemSet } from '../dsp/vocalRebalance.ts';
-import { resampleStereoChannels, separateWithDemucs, type StemSeparationProgress } from './stemSeparation.ts';
+import {
+  requestSharedStemSeparation,
+  resampleStereoChannels,
+  type SharedStemSeparationResult,
+  type StemSeparationProgress,
+} from './stemSeparation.ts';
 
 export interface RebalanceSeparationProgress {
   stage: 'preparing' | StemSeparationProgress['stage'] | 'aligning';
@@ -20,8 +25,8 @@ export interface RebalanceSeparationProgress {
 
 const MODEL_RATE = 44_100;
 
-function fit(channel: Float32Array, length: number): Float32Array {
-  if (channel.length === length) return channel;
+function fit(channel: Float32Array, length: number, copyIfEqual = false): Float32Array {
+  if (channel.length === length) return copyIfEqual ? channel.slice() : channel;
   if (channel.length > length) return channel.slice(0, length);
   const out = new Float32Array(length);
   out.set(channel);
@@ -46,6 +51,7 @@ export async function separateForRebalance(
   signal: AbortSignal,
   onProgress: (progress: RebalanceSeparationProgress) => void,
   options: { highQuality?: boolean } = {},
+  requestSeparation: typeof requestSharedStemSeparation = requestSharedStemSeparation,
 ): Promise<RebalanceStemSet> {
   const length = left.length;
   const fingerprint = fingerprintStereo(left, right, sampleRate);
@@ -56,26 +62,32 @@ export async function separateForRebalance(
   // Copies: the Demucs worker takes ownership of what it is given.
   const atModelRate = await resampleStereoChannels([left.slice(), right.slice()], sampleRate, MODEL_RATE);
   abortIfNeeded();
-  const separated = await separateWithDemucs(
-    atModelRate,
+  const { stems }: SharedStemSeparationResult = await requestSeparation({
+    channels: atModelRate,
+    sampleRate: MODEL_RATE,
+    resource: {
+      durationSec: length / sampleRate,
+      sampleRate,
+      fileSizeBytes: left.byteLength + right.byteLength,
+    },
     signal,
-    (update) => onProgress({ ...update, overall: overallSeparationProgress(update) }),
-    { highQuality: options.highQuality === true },
-  );
+    onProgress: (update) => onProgress({ ...update, overall: overallSeparationProgress(update) }),
+    highQuality: options.highQuality === true,
+  });
   abortIfNeeded();
 
   const byId = new Map<string, [Float32Array, Float32Array]>();
-  for (let i = 0; i < separated.length; i++) {
-    const stem = separated[i];
+  for (let i = 0; i < stems.length; i++) {
+    const stem = stems[i];
     const back = await resampleStereoChannels(stem.channels, MODEL_RATE, sampleRate);
     abortIfNeeded();
-    byId.set(stem.id, [fit(back[0], length), fit(back[1], length)]);
-    stem.channels = [new Float32Array(0), new Float32Array(0)];
+    const copySharedChannels = sampleRate === MODEL_RATE;
+    byId.set(stem.id, [fit(back[0], length, copySharedChannels), fit(back[1], length, copySharedChannels)]);
     onProgress({
       stage: 'resampling',
-      overall: overallSeparationProgress({ stage: 'resampling', progress: (i + 1) / separated.length }),
+      overall: overallSeparationProgress({ stage: 'resampling', progress: (i + 1) / stems.length }),
       completedChunks: i + 1,
-      totalChunks: separated.length,
+      totalChunks: stems.length,
     });
   }
   const vocals = byId.get('vocals');
