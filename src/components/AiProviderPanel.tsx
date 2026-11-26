@@ -142,7 +142,7 @@ export const AiProviderPanel: React.FC = () => {
       {isBuiltin ? (
         <div id="cloud-ai-help" className="flex flex-col gap-2 text-[11px] text-[#9CA3AF]">
           <p><strong className="text-[#E5E7EB]">Cloud AI is provided by SYN-MASTER.</strong> No Google AI Studio account, Gemini API key, GitHub account, operator token, or account setup is required. The app creates an anonymous guest session automatically.</p>
-          <p>Your audio is still mastered locally by SYN-DSP. If Cloud AI is unavailable or a usage limit is reached, SYN-MASTER continues with its local mastering planner and shows a notice.</p>
+          <p>Your audio is still mastered locally by SYN-DSP. If Cloud AI is unavailable or a usage limit is reached, SYN-MASTER continues with local mastering and shows a clear message.</p>
           <a href="https://github.com/LILSYNNOFFICIAL/SYN-MASTER#cloud-ai" target="_blank" rel="noreferrer" className="text-[#3FE0FF] underline underline-offset-2">Cloud AI help and usage limits</a>
         </div>
       ) : (
