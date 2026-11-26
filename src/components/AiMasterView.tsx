@@ -408,7 +408,7 @@ export const AiMasterView: React.FC<Props> = ({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-mono-tabular uppercase tracking-wider text-[#D4AF37]">
-                Autonomous Mastering Intelligence
+                AI Automatic Mastering Intelligence
               </span>
               <span
                 data-testid="ai-lifecycle-badge"
@@ -662,7 +662,7 @@ export const AiMasterView: React.FC<Props> = ({
                 <label className="flex items-center gap-1.5 text-[#C5CDD8]">
                   Max Passes:
                   <select
-                    aria-label="Max Autonomous Iterations"
+                    aria-label="Max AI Automatic Iterations"
                     value={maxIterations}
                     onChange={(e) => onChangeMaxIterations(Number(e.target.value))}
                     className="bg-[#161820] border border-[#2B2E3A] rounded px-2 py-1 font-mono-tabular text-[#F7F8FA]"
@@ -815,7 +815,7 @@ export const AiMasterView: React.FC<Props> = ({
 
               {/* Active Technical Findings (only unresolved / improved / partially resolved / unverified / active) */}
               <div data-testid="active-findings-section" className="flex flex-col gap-2">
-                <p className="text-[10px] text-[#9CA3AF]">Run an autonomous repair pass against the original track. SYN-MASTER applies the best validated chain, then re-analyzes the result so unresolved issues stay visible.</p>
+                <p className="text-[10px] text-[#9CA3AF]">Run an AI Automatic repair pass against the original track. SYN-MASTER applies the best validated chain, then re-analyzes the result so unresolved issues stay visible.</p>
                 <div className="text-[11px] font-bold uppercase tracking-wider text-[#F7F8FA] flex items-center justify-between">
                   <span>
                     Remaining Active Problems ({actionableActiveFindings.length})
