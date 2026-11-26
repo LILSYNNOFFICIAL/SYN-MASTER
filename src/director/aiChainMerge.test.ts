@@ -27,14 +27,16 @@ test('AI seed chain retains measured Dynamic EQ and Match EQ corrections plus lo
 });
 
 test('an already configured AI Dynamic EQ is not duplicated', () => {
-  const aiDynamic = createProcessorModule('dynamic-eq');
+  const aiDynamic = createProcessorModule('dynamic-eq', { intensity: 40 });
+  const measuredDynamic = createProcessorModule('dynamic-eq', { intensity: 85 });
   const merged = mergeAiChainWithMeasuredPlan(
     [aiDynamic, createProcessorModule('limiter')],
     [],
-    [createProcessorModule('dynamic-eq'), createProcessorModule('match-eq')],
+    [measuredDynamic, createProcessorModule('match-eq')],
   );
   assert.equal(merged.filter((module) => module.type === 'dynamic-eq').length, 1);
   assert.equal(merged.filter((module) => module.type === 'match-eq').length, 1);
+  assert.equal(merged.find((module) => module.type === 'dynamic-eq')?.intensity, 85);
 });
 
 test('Match EQ is not invented when no measured reference plan exists', () => {
