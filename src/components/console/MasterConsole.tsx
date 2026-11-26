@@ -80,6 +80,8 @@ export interface MasterConsoleProps {
   blanketPeaks?: number[] | null;
   /** Transport/fade controls rendered inside the unified waveform + EQ canvas. */
   timeline?: React.ReactNode;
+  /** Compact transport controls shown in the EQ header beside the view selector. */
+  timelineTransport?: React.ReactNode;
   /** Opens the AI Assistant (Mastering Director) workspace. Planning / explanations, not the one-click fix. */
   onAskAi?: () => void;
   /** Opens the Export Master dialog (step 4 of the guided flow). */
@@ -418,6 +420,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
                 <button key={id} type="button" aria-pressed={eqView === id} className={eqView === id ? 'is-on' : ''} onClick={() => setEqView(id)}>{label}</button>
               ))}
             </div>
+            {p.timelineTransport}
           </div>
           {eqView === 'matcheq' ? (
             <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading Match EQ…</p></div>}>
