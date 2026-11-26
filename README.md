@@ -236,7 +236,7 @@ This section is the active implementation queue and progress ledger. Update it i
 - Unified mastering workspace with dedicated navigation for the main mastering workflow and Stem Studio.
 - Track analysis and objective-based mastering workflows.
 - Explainable mastering plans with proposed processing stages and rationale.
-- Assisted and autonomous AI Mastering Director operating modes.
+- Manual, Assisted and AI Automatic Mastering Director operating modes.
 - Multi-objective evaluation and iterative DSP refinement.
 - **FIX ALL & VERIFY** runs the autonomous refinement workflow against the active track and reports remaining findings instead of assuming every issue can be corrected.
 - Post-fix verification compares the baseline and processed analysis, reports resolved or partially resolved findings, and identifies remaining deviations.
@@ -495,7 +495,7 @@ Anonymous guest sessions provide short-lived session identity without user regis
 - [x] **Compact command header:** below 1024 px, the application header keeps the SYN MASTER lockup, a single Menu disclosure for File/Edit/Workspace/View/Tools, and a persistent Export action. Selecting a command closes the menu.
 - [x] **Consistent workspace layout:** every workspace tab now uses the same main layout container. Non-studio workspaces use a single content column; the full two-lane mastering cockpit is retained at 1024 px and wider.
 - [x] **Mastering Control Desk:** long track names wrap, measurement summaries remain readable, and Analyze/Fix/Export actions wrap instead of clipping.
-- [x] **AI Director:** Manual/Assisted/Autonomous cards stack below 768 px and return to three columns at 768 px; measured before/after telemetry uses two columns on mobile and three from 768 px upward.
+- [x] **AI Director:** Manual/Assisted/AI Automatic cards stack below 768 px and return to three columns at 768 px; measured before/after telemetry uses two columns on mobile and three from 768 px upward.
 - [x] **Analysis Lab:** spectral zone balance and resonance panels stack until the 1024 px desktop breakpoint. Frequency-band values and resonance rows use constrained grid columns to prevent overlap.
 - [x] **Other workspace safeguards:** quality-control summary cards stack on narrow screens; nested workstation grid items, the Mastering Rack processor selector, and the Fix It target dropdown can shrink instead of forcing page-width overflow. Stem and plugin diagnostic tables retain their own contained horizontal scrollers.
 - [x] **Spectrum analyzer:** frequency ticks now cover 30 Hz through 20 kHz, with smaller edge-aware labels on narrow canvases and a 240 px minimum mobile canvas height.
