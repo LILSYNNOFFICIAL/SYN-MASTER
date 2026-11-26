@@ -2144,7 +2144,7 @@ export function mergeAiChainWithMeasuredPlan(
     const at = insertAt < 0 ? merged.length : insertAt;
     merged.splice(at, 0, structuredClone(measured));
   }
-  const protectedTypes = new Set(['vocal-rebalance', 'dynamic-eq', 'match-eq', 'restore', 'limiter', 'maximizer', 'dither']);
+  const protectedTypes = new Set<string>(['vocal-rebalance', 'dynamic-eq', 'match-eq', 'restore', 'limiter', 'maximizer', 'dither']);
   while (merged.length > 12) {
     let dropAt = -1;
     for (let i = merged.length - 1; i >= 0; i--) {
