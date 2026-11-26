@@ -1,4 +1,8 @@
 import type {
+  AiCallSource,
+  AiFallbackReason,
+  AiPassTrace,
+  AiTimeoutHit,
   AnalysisFinding,
   AudioAnalysis,
   MasterFinalReport,
@@ -6,6 +10,7 @@ import type {
   ProcessorType,
   ResolvedObjectiveTarget,
 } from '../types/mastering';
+export type { AiCallSource, AiFallbackReason, AiPassTrace, AiTimeoutHit };
 import { evaluateMasterTargets, type MasterTargetGate } from './masterTargets';
 import { hasFreshPostFixVerification, isMasterFullyVerified } from './postFixVerification';
 
@@ -37,9 +42,40 @@ export interface DiagnosticLog {
   master: Record<string, number | string> | null;
   gate: MasterTargetGate | null;
   passes: Array<{ pass: number; lufs: number; truePeakDb: number; clicks: number; gatePassed: boolean | null; outcome: string }>;
+  aiPasses: AiPassTrace[];
+  aiFallbackBanner: string | null;
   entries: DiagnosticLogEntry[];
   chain: Array<{ name: string; type: ProcessorType; bypassed: boolean; settings: string }>;
   verdict: string;
+}
+
+export function formatFallbackReasonText(reason: AiFallbackReason, detail?: string): string {
+  const base: Record<AiFallbackReason, string> = {
+    '429': 'Cloud AI rate or spend limit reached (HTTP 429)',
+    'guest-session': 'Cloud AI guest session setup or validation failed',
+    timeout: 'Cloud AI request timed out',
+    'missing-key': 'Cloud AI API key is not configured on this server',
+    'server-error': 'Cloud AI server returned an error',
+    parse: 'Cloud AI returned malformed JSON',
+    validation: 'Cloud AI returned an invalid or empty processor chain',
+    'user-disabled': 'Cloud AI is turned off in settings',
+  };
+  const label = base[reason] ?? reason;
+  const trimmed = detail?.trim();
+  if (!trimmed || trimmed.toLowerCase() === label.toLowerCase()) return label;
+  return `${label} (${trimmed})`;
+}
+
+export function summarizeAiFallbackBanner(aiPasses?: AiPassTrace[] | null): string | null {
+  if (!aiPasses || aiPasses.length === 0) return null;
+  const fallbacks = aiPasses.filter((p): p is AiPassTrace & { fallbackReason: AiFallbackReason } => p.fallbackReason !== null);
+  if (fallbacks.length === 0) return null;
+  const uniqueReasons: string[] = [];
+  for (const fb of fallbacks) {
+    const reasonText = formatFallbackReasonText(fb.fallbackReason, fb.fallbackDetail);
+    if (!uniqueReasons.includes(reasonText)) uniqueReasons.push(reasonText);
+  }
+  return `Cloud AI was not used for this pass because: ${uniqueReasons.join('; ')}.`;
 }
 
 /** Map verification evidence to a display status. Missing evidence is never a successful fix. */
@@ -148,6 +184,7 @@ export function buildDiagnosticLog(input: {
   chain: ProcessorModule[];
   report?: MasterFinalReport | null;
   referenceAnalysis?: AudioAnalysis | null;
+  aiPasses?: AiPassTrace[];
 }): DiagnosticLog {
   const { source, objective, report } = input;
   const isFresh = hasFreshPostFixVerification(report?.postFixVerification);
@@ -326,6 +363,13 @@ export function buildDiagnosticLog(input: {
         ? `NOT FULLY VERIFIED: OBJECTIVE TARGETS MET, BUT ${outstanding} technical issue(s) remain unresolved or unverified. Review the individual evidence below (pass ${report.bestPassNumber} of ${report.iterationsExecuted}).`
         : `NOT FULLY VERIFIED: ${gate?.summary ?? report.postFixVerification?.verificationError ?? 'no fresh verified render'} — see unresolved or unverified entries.`;
 
+  const aiPasses = report?.aiPasses
+    ? structuredClone(report.aiPasses)
+    : input.aiPasses
+      ? structuredClone(input.aiPasses)
+      : [];
+  const aiFallbackBanner = summarizeAiFallbackBanner(aiPasses);
+
   return {
     createdAt: new Date().toISOString(),
     trackName: input.trackName,
@@ -335,6 +379,8 @@ export function buildDiagnosticLog(input: {
     master: master ? metricsOf(master) : null,
     gate,
     passes,
+    aiPasses,
+    aiFallbackBanner,
     entries,
     chain: chain.map((m) => ({ name: m.name, type: m.type, bypassed: m.bypassed || !m.enabled, settings: describeModuleSettings(m) })),
     verdict,
@@ -365,6 +411,24 @@ export function diagnosticLogToText(log: DiagnosticLog): string {
     L.push('');
     L.push('== Passes ==');
     for (const p of log.passes) L.push(`  #${p.pass}: ${p.lufs.toFixed(1)} LUFS, ${p.truePeakDb.toFixed(2)} dBTP, clicks ${p.clicks}, gate ${p.gatePassed === null ? '-' : p.gatePassed ? 'PASS' : 'FAIL'} (${p.outcome})`);
+  }
+  if (log.aiPasses.length > 0 || log.aiFallbackBanner) {
+    L.push('');
+    L.push('== AI & Fallback Provenance ==');
+    if (log.aiFallbackBanner) L.push(`  Notice: ${log.aiFallbackBanner}`);
+    for (const a of log.aiPasses) {
+      const label = a.stage === 'strategy' ? 'Strategy (Pass #0 → #1)' : `Refine (after Pass #${a.pass})`;
+      const timeStr = a.responseTimeMs !== null ? `${a.responseTimeMs} ms` : 'n/a';
+      const promptStr = a.promptChars !== null ? `${a.promptChars} chars` : 'n/a';
+      const modelStr = a.modelName ?? 'none';
+      const timeoutStr = a.timeoutHit ?? 'none';
+      const fbStr = a.fallbackReason ? `${a.fallbackReason}${a.fallbackDetail ? ` (${a.fallbackDetail})` : ''}` : 'none';
+      const aiMods = a.aiReturnedModules.join(', ') || 'none';
+      const finalMods = a.finalRenderedModules.join(', ') || 'none';
+      L.push(`  ${label}: source=${a.source} | model=${modelStr} | responseTime=${timeStr} | prompt=${promptStr} | timeoutHit=${timeoutStr} | fallback=${fbStr}`);
+      L.push(`    AI returned:    [${aiMods}]`);
+      L.push(`    Final rendered: [${finalMods}]`);
+    }
   }
   L.push('');
   L.push('== Issues and fixes ==');

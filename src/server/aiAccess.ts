@@ -92,11 +92,17 @@ export function createAiGuestSession(options: AiGuestSessionOptions = {}) {
 
   function bootstrap(req: Request, res: Response): void {
     if (!secret) {
-      res.status(503).json({ error: 'Cloud AI is unavailable because the server-side Gemini connection is not configured. Local DSP mastering remains available.' });
+      res.status(503).json({
+        error: 'Cloud AI is unavailable because the server-side Gemini connection is not configured. Local DSP mastering remains available.',
+        code: !providerKey ? 'missing_key' : 'guest_session',
+      });
       return;
     }
     if (!sameOrigin(req)) {
-      res.status(403).json({ error: 'Cloud AI sessions can only be created from the SYN-MASTER application.' });
+      res.status(403).json({
+        error: 'Cloud AI sessions can only be created from the SYN-MASTER application.',
+        code: 'guest_session',
+      });
       return;
     }
     const existing = parse(req);
@@ -107,16 +113,25 @@ export function createAiGuestSession(options: AiGuestSessionOptions = {}) {
 
   function middleware(req: Request, res: Response, next: NextFunction): void {
     if (!secret) {
-      res.status(503).json({ error: 'Cloud AI is unavailable because the server-side Gemini connection is not configured. Local DSP mastering remains available.' });
+      res.status(503).json({
+        error: 'Cloud AI is unavailable because the server-side Gemini connection is not configured. Local DSP mastering remains available.',
+        code: !providerKey ? 'missing_key' : 'guest_session',
+      });
       return;
     }
     if (!sameOrigin(req)) {
-      res.status(403).json({ error: 'Cloud AI requests must originate from the SYN-MASTER application.' });
+      res.status(403).json({
+        error: 'Cloud AI requests must originate from the SYN-MASTER application.',
+        code: 'guest_session',
+      });
       return;
     }
     const session = parse(req);
     if (!session) {
-      res.status(401).json({ error: 'Your Cloud AI session expired. Retry the request to start a new guest session.' });
+      res.status(401).json({
+        error: 'Your Cloud AI session expired. Retry the request to start a new guest session.',
+        code: 'guest_session',
+      });
       return;
     }
     res.locals.guestSessionId = session.id;

@@ -1,4 +1,6 @@
-import type { AudioAnalysis } from '../types/mastering.ts';
+import type { AudioAnalysis, MasteringMode, MasteringObjectiveId } from '../types/mastering.ts';
+import { MASTERING_OBJECTIVE_IDS } from '../director/postFixVerification.ts';
+import { MODE_MEANINGS } from '../ai/masteringPrompt.ts';
 
 export interface SafeAvailablePlugin {
   name: string;
@@ -149,3 +151,18 @@ export function sanitizeVocalBalance(value: unknown): SafeVocalBalance | undefin
   }
   return { stemsCached: value.stemsCached === true, measurement, range: { low, high } };
 }
+
+const VALID_OBJECTIVE_SET = new Set<string>(MASTERING_OBJECTIVE_IDS);
+
+export function sanitizeObjectiveId(value: unknown): MasteringObjectiveId | undefined {
+  return typeof value === 'string' && VALID_OBJECTIVE_SET.has(value)
+    ? (value as MasteringObjectiveId)
+    : undefined;
+}
+
+export function sanitizeMasteringMode(value: unknown): MasteringMode | undefined {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(MODE_MEANINGS, value)
+    ? (value as MasteringMode)
+    : undefined;
+}
+

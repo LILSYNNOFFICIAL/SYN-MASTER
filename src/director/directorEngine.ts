@@ -23,8 +23,12 @@ import type { FadeSettings } from '../dsp/fades';
 import { evaluateMasterTargets, type MasterTargetGate } from './masterTargets';
 import type { RestoreParams } from '../types/mastering';
 import type {
+  AiCallSource,
   AiChainLifecycleState,
+  AiFallbackReason,
   AIMasteringStrategy,
+  AiPassTrace,
+  AiTimeoutHit,
   AudioAnalysis,
   ChainCommand,
   CustomObjectiveSpec,
@@ -37,6 +41,7 @@ import type {
   ExportConfig,
   ExternalPluginRecord,
   MasterFinalReport,
+  MasteringMode,
   MasteringObjectiveId,
   MultiObjectiveDimension,
   MultiObjectiveEvaluation,
@@ -1834,6 +1839,7 @@ export interface RunAutonomousDirectorOptions {
   sampleRate: number;
   operatingMode: DirectorOperatingMode;
   objectiveId: MasteringObjectiveId;
+  mode?: MasteringMode;
   customSpec?: Partial<CustomObjectiveSpec> | null;
   qcProfile?: QCTargetProfile | null;
   exportConfig?: ExportConfig | null;
@@ -1870,6 +1876,8 @@ export interface RunAutonomousDirectorOptions {
     preAnalysis: AudioAnalysis;
     postAnalysis: AudioAnalysis;
     currentChain: ProcessorModule[];
+    mode?: MasteringMode;
+    objective?: MasteringObjectiveId;
     referenceAnalysis?: AudioAnalysis | null;
     remainingFindings?: Array<{
       findingId: string;
@@ -1885,6 +1893,7 @@ export interface RunAutonomousDirectorOptions {
     qcReport: QCReport;
     targetGate: MasterTargetGate;
   }) => Promise<ProcessorModule[] | null | AiRefineSuggestion>;
+  initialAiTrace?: AiPassTrace;
   maxIterations?: number;
   maxCpuBudgetMs?: number;
   convergenceThreshold?: number;
@@ -1910,6 +1919,16 @@ export interface AiRefineSuggestion {
   chain: ProcessorModule[] | null;
   producedBy?: string | null;
   notices?: string[];
+  trace?: {
+    source?: AiCallSource;
+    fallbackReason?: AiFallbackReason | null;
+    fallbackDetail?: string;
+    modelName?: string | null;
+    responseTimeMs?: number | null;
+    promptChars?: number | null;
+    timeoutHit?: AiTimeoutHit;
+    aiReturnedModules?: ProcessorModule['type'][];
+  };
 }
 
 const SOURCE_LIMITATION_FINDING_IDS = new Set(['diag-clipping', 'diag-overcompressed', 'diag-thd']);
@@ -2003,6 +2022,7 @@ function buildFinalReportFromState(params: {
   pluginSummary: PluginIntelligenceSummary;
   checkpoints: DirectorCheckpoint[];
   activityLog: DirectorActivityEntry[];
+  aiPasses?: AiPassTrace[];
 }): MasterFinalReport {
   const { preAnalysis, bestCheckpoint, diagnosis } = params;
   const postAnalysis = bestCheckpoint.analysis;
@@ -2130,6 +2150,7 @@ function buildFinalReportFromState(params: {
     postFixVerification,
     stemIntelligence: toStemIntelligenceReport(params.stemAnalysis, params.stemChainsById, params.stemProcessingApplied),
     vocalBalanceVerification: params.vocalBalanceVerification,
+    ...(params.aiPasses && params.aiPasses.length > 0 ? { aiPasses: params.aiPasses } : {}),
   };
 }
 
@@ -2375,6 +2396,7 @@ export async function runAutonomousDirectorLoop(
       pluginSummary: plan.pluginSummary,
       checkpoints,
       activityLog,
+      aiPasses: opts.initialAiTrace ? [structuredClone(opts.initialAiTrace)] : undefined,
     });
   }
 
@@ -2407,6 +2429,9 @@ export async function runAutonomousDirectorLoop(
 
   // In Assisted mode, render pass 1 only (verify hypothesis + QC) then hand control back to engineer
   const loopMax = opts.operatingMode === 'assisted' ? 1 : maxIterations;
+
+  const aiPasses: AiPassTrace[] = opts.initialAiTrace ? [structuredClone(opts.initialAiTrace)] : [];
+  let pendingAiTrace: AiPassTrace | null = aiPasses[0] ?? null;
 
   let bestCheckpoint: DirectorCheckpoint = baseCheckpoint;
   const safeFallbackCandidates: SafeFallbackCandidate[] = [];
@@ -2629,6 +2654,10 @@ export async function runAutonomousDirectorLoop(
       },
     };
     checkpoints.push(cp);
+    if (pendingAiTrace) {
+      pendingAiTrace.finalRenderedModules = cp.chain.map((m) => m.type);
+      pendingAiTrace = null;
+    }
     safeFallbackCandidates.push({
       checkpoint: cp,
       hardRegressionReasons: [...hardRegressionReasons],
@@ -2749,12 +2778,19 @@ export async function runAutonomousDirectorLoop(
           measurementReliable: true,
         })),
       ];
+      let stoppedDuringAiRefine = false;
+      let refineTraceMeta: AiRefineSuggestion['trace'] | undefined;
+      let refineValidationFailedDetail: string | undefined;
+      let refineErrorDetail: string | undefined;
+      let refineAiReturnedModules: ProcessorModule['type'][] = [];
       if (opts.aiRefineCallback) {
         try {
           const rawSuggestion = await opts.aiRefineCallback({
             preAnalysis,
             postAnalysis: post,
             currentChain: workingChain,
+            objective: opts.objectiveId,
+            ...(opts.mode ? { mode: opts.mode } : {}),
             referenceAnalysis: opts.referenceAnalysis,
             remainingFindings,
             targetLufs: objective.targetLufs,
@@ -2763,54 +2799,78 @@ export async function runAutonomousDirectorLoop(
             qcReport,
             targetGate,
           });
-          const suggestion: AiRefineSuggestion = Array.isArray(rawSuggestion) || rawSuggestion === null
-            ? { chain: rawSuggestion }
-            : rawSuggestion;
-          for (const notice of suggestion.notices ?? []) {
-            emit('Optimizing', pass, makeActivity(pass, 'refine', 'warning', notice), undefined, undefined, 'Optimizing');
-          }
-          if (suggestion.producedBy) {
-            aiProducedBy = suggestion.producedBy;
-          }
-          const candidateAiChain = suggestion.chain;
-          if (candidateAiChain) {
-            const invCheck = validateChainAgainstInventory(candidateAiChain);
-            if (invCheck.valid) {
-              nextChainFromAi = prepareChain(
-                mergeAiChainWithRequiredModules(invCheck.sanitizedChain, opts.leadModules ?? []),
-                true,
-              );
-            } else {
-              emit(
-                'Optimizing',
-                pass,
-                makeActivity(
+          if (opts.shouldStop?.()) {
+            stoppedDuringAiRefine = true;
+          } else {
+            const suggestion: AiRefineSuggestion = Array.isArray(rawSuggestion) || rawSuggestion === null
+              ? { chain: rawSuggestion }
+              : rawSuggestion;
+            refineTraceMeta = suggestion.trace;
+            if (refineTraceMeta?.aiReturnedModules) {
+              refineAiReturnedModules = [...refineTraceMeta.aiReturnedModules];
+            }
+            for (const notice of suggestion.notices ?? []) {
+              emit('Optimizing', pass, makeActivity(pass, 'refine', 'warning', notice), undefined, undefined, 'Optimizing');
+            }
+            if (suggestion.producedBy) {
+              aiProducedBy = suggestion.producedBy;
+            }
+            const candidateAiChain = suggestion.chain;
+            if (candidateAiChain) {
+              if (refineAiReturnedModules.length === 0) {
+                refineAiReturnedModules = candidateAiChain.map((m) => m.type);
+              }
+              const invCheck = validateChainAgainstInventory(candidateAiChain);
+              if (invCheck.valid) {
+                nextChainFromAi = prepareChain(
+                  mergeAiChainWithRequiredModules(invCheck.sanitizedChain, opts.leadModules ?? []),
+                  true,
+                );
+              } else {
+                refineValidationFailedDetail = invCheck.errors[0] ?? 'schema violation';
+                emit(
+                  'Optimizing',
                   pass,
-                  'refine',
-                  'warning',
-                  `Rejected out-of-inventory AI refinement (${invCheck.errors[0] ?? 'schema violation'}); falling back to deterministic DSP Director.`,
-                ),
-                undefined,
-                undefined,
-                'Optimizing',
-              );
+                  makeActivity(
+                    pass,
+                    'refine',
+                    'warning',
+                    `Rejected out-of-inventory AI refinement (${refineValidationFailedDetail}); falling back to deterministic DSP Director.`,
+                  ),
+                  undefined,
+                  undefined,
+                  'Optimizing',
+                );
+              }
             }
           }
         } catch (err) {
-          emit(
-            'Optimizing',
-            pass,
-            makeActivity(
+          if (opts.shouldStop?.()) {
+            stoppedDuringAiRefine = true;
+          } else {
+            refineErrorDetail = err instanceof Error ? err.message : 'unavailable';
+            emit(
+              'Optimizing',
               pass,
-              'refine',
-              'warning',
-              `AI refinement skipped (${err instanceof Error ? err.message : 'unavailable'}); continuing with deterministic DSP Director remediation.`,
-            ),
-            undefined,
-            undefined,
-            'Optimizing',
-          );
+              makeActivity(
+                pass,
+                'refine',
+                'warning',
+                `AI refinement skipped (${refineErrorDetail}); continuing with deterministic DSP Director remediation.`,
+              ),
+              undefined,
+              undefined,
+              'Optimizing',
+            );
+          }
         }
+      }
+
+      if (stoppedDuringAiRefine || opts.shouldStop?.()) {
+        finalStatus = 'stopped-by-user';
+        stopReason = `Stopped by engineer override after pass ${pass}.`;
+        emit('Stopped', pass, makeActivity(pass, 'halted', 'warning', stopReason), undefined, undefined, 'Stopped');
+        break;
       }
 
       if (nextChainFromAi && nextChainFromAi.length > 0) {
@@ -2838,7 +2898,24 @@ export async function runAutonomousDirectorLoop(
             );
           }
         }
+        const defaultSource: AiCallSource = aiProducedBy.toLowerCase().includes('gemini') ? 'gemini-cloud' : 'byo-provider';
+        const refineTrace: AiPassTrace = {
+          pass,
+          stage: 'refine',
+          source: refineTraceMeta?.source ?? defaultSource,
+          fallbackReason: refineTraceMeta?.fallbackReason ?? null,
+          ...(refineTraceMeta?.fallbackDetail ? { fallbackDetail: refineTraceMeta.fallbackDetail } : {}),
+          modelName: refineTraceMeta?.modelName ?? null,
+          responseTimeMs: refineTraceMeta?.responseTimeMs ?? null,
+          promptChars: refineTraceMeta?.promptChars ?? null,
+          timeoutHit: refineTraceMeta?.timeoutHit ?? null,
+          aiReturnedModules: refineAiReturnedModules,
+          finalRenderedModules: nextChainFromAi.map((m) => m.type),
+        };
+        aiPasses.push(refineTrace);
+        pendingAiTrace = refineTrace;
         if (renderedChainKeys.has(chainRenderKey(nextChainFromAi))) {
+          pendingAiTrace = null;
           finalStatus = 'completed';
           const remainingQcFailures = qcReport.checks.filter((check) => check.status === 'fail');
           const qcDetail = remainingQcFailures.length > 0
@@ -2864,6 +2941,30 @@ export async function runAutonomousDirectorLoop(
         const refinementSourceQc = bestCheckpoint.passNumber > 0 ? bestCheckpoint.qcReport : qcReport;
         const refinementSourceEval = bestCheckpoint.passNumber > 0 ? bestCheckpoint.multiObjective : multiObjective;
 
+        const inferredFallbackReason: AiFallbackReason = !opts.aiRefineCallback
+          ? 'user-disabled'
+          : refineValidationFailedDetail
+            ? 'validation'
+            : refineTraceMeta?.fallbackReason ?? 'server-error';
+        const inferredFallbackDetail = !opts.aiRefineCallback
+          ? 'Cloud AI is turned off'
+          : refineValidationFailedDetail ?? refineTraceMeta?.fallbackDetail ?? refineErrorDetail;
+        const fallbackTrace: AiPassTrace = {
+          pass,
+          stage: 'refine',
+          source: 'deterministic-director',
+          fallbackReason: inferredFallbackReason,
+          ...(inferredFallbackDetail ? { fallbackDetail: inferredFallbackDetail } : {}),
+          modelName: refineTraceMeta?.modelName ?? null,
+          responseTimeMs: refineTraceMeta?.responseTimeMs ?? null,
+          promptChars: refineTraceMeta?.promptChars ?? null,
+          timeoutHit: refineTraceMeta?.timeoutHit ?? null,
+          aiReturnedModules: refineAiReturnedModules,
+          finalRenderedModules: refinementSourceChain.map((m) => m.type),
+        };
+        aiPasses.push(fallbackTrace);
+        pendingAiTrace = fallbackTrace;
+
         // eslint-disable-next-line prefer-const
         let { commands, hypothesis } = deriveRefinementCommands(
           preAnalysis,
@@ -2883,6 +2984,7 @@ export async function runAutonomousDirectorLoop(
         }
 
         if (commands.length === 0) {
+          pendingAiTrace = null;
           finalStatus = 'completed';
           stopReason = `No additional safe parameter corrections were identified after Pass ${pass}. Any remaining deviations are reported for engineer review; the audio is not marked as perfect.`;
           emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
@@ -2890,7 +2992,9 @@ export async function runAutonomousDirectorLoop(
         }
         emit('Optimizing', pass, makeActivity(pass, 'refine', 'hypothesis', hypothesis), undefined, undefined, 'Optimizing');
         const applied = applyStructuredChainCommands(refinementSourceChain, commands);
+        fallbackTrace.finalRenderedModules = applied.chain.map((m) => m.type);
         if (renderedChainKeys.has(chainRenderKey(applied.chain))) {
+          pendingAiTrace = null;
           finalStatus = 'completed';
           stopReason = `Stopped after Pass ${pass}: the next correction would re-render a chain that was already measured (its parameters are at their limits), so another pass cannot change the result.`;
           emit('Completed', pass, makeActivity(pass, 'complete', 'verified-result', stopReason), undefined, undefined, 'Completed');
@@ -3043,6 +3147,7 @@ export async function runAutonomousDirectorLoop(
     pluginSummary: plan.pluginSummary,
     checkpoints,
     activityLog,
+    aiPasses,
   });
   finalReport.targetGate = finalGate;
   preventUnverifiedConvergence(finalReport);

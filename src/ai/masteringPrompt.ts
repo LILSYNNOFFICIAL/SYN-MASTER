@@ -16,6 +16,7 @@ import type {
   VocalBalanceVerification,
 } from '../types/mastering.ts';
 import { validateChainAgainstInventory } from '../director/processorInventory.ts';
+import { PROCESSOR_PARAM_LIMITS } from '../dsp/chainValidation.ts';
 import { summarizeVocalBalanceForPrompt, type VocalBalanceContext } from './vocalBalancePrompt.ts';
 import { formatPlatformHintsForPrompt } from '../dsp/platformRules.ts';
 import type { MasterTargetGate } from '../director/masterTargets.ts';
@@ -39,6 +40,8 @@ export interface RefinePromptInput {
   preAnalysis: AudioAnalysis;
   postAnalysis: AudioAnalysis;
   currentChain: ProcessorModule[];
+  mode?: MasteringMode;
+  objective?: MasteringObjectiveId;
   referenceAnalysis?: AudioAnalysis | null;
   vocalBalanceVerification?: VocalBalanceVerification;
   remainingFindings?: Array<{
@@ -58,17 +61,90 @@ export interface RefinePromptInput {
 }
 
 export function summarizeAnalysisForPrompt(label: string, a: AudioAnalysis): string {
+  const bandCorrObj =
+    a.stereoBandCorrelation && typeof a.stereoBandCorrelation === 'object'
+      ? a.stereoBandCorrelation
+      : null;
+  const bandCorrSummary = bandCorrObj
+    ? `low=${bandCorrObj.low}, mid=${bandCorrObj.mid}, high=${bandCorrObj.high}`
+    : 'unavailable';
+  const clickCountText =
+    typeof a.clickCount === 'number' && Number.isFinite(a.clickCount)
+      ? String(a.clickCount)
+      : 'unavailable';
+  const clickTimes = Array.isArray(a.clickTimesSec)
+    ? a.clickTimesSec.filter((t) => typeof t === 'number' && Number.isFinite(t))
+    : [];
+  const clickTimesText = clickTimes.length > 0
+    ? ` (timestamps: ${clickTimes.slice(0, 12).map((t) => `${t.toFixed(2)}s`).join(', ')}${clickTimes.length > 12 ? `, +${clickTimes.length - 12} more` : ''})`
+    : '';
+  const shimmerSummary =
+    a.shimmer && typeof a.shimmer === 'object'
+      ? `score=${a.shimmer.score}, confidence=${a.shimmer.confidence}`
+      : 'unavailable';
+
   return [
     `${label}:`,
     `- Duration: ${a.durationSec}s | SampleRate: ${a.sampleRate}Hz | Channels: ${a.channels}`,
-    `- Integrated LUFS: ${a.integratedLufs} | Short-Term Max: ${a.shortTermLufsMax} | LRA: ${a.loudnessRangeLu} LU`,
+    `- Integrated LUFS: ${a.integratedLufs} | Short-Term Max: ${a.shortTermLufsMax} | Momentary Max: ${a.momentaryLufsMax} | LRA: ${a.loudnessRangeLu} LU`,
     `- Sample Peak: ${a.samplePeakDb} dBFS | True Peak: ${a.truePeakDb} dBTP | RMS: ${a.rmsDb} dBFS`,
     `- Dynamic Range: ${a.dynamicRangeDb} dB | Crest Factor: ${a.crestFactorDb} dB | PLR: ${a.plrDb} dB | Transient Density: ${a.transientDensity}`,
     `- Spectral Centroid: ${a.spectralCentroidHz} Hz | Spectral Slope: ${a.spectralSlopeDbPerOct} dB/oct`,
     `- Zones (dB): Sub=${a.zoneEnergyDb.sub}, Bass=${a.zoneEnergyDb.bass}, LowMid=${a.zoneEnergyDb.lowMid}, Mid=${a.zoneEnergyDb.mid}, HighMid=${a.zoneEnergyDb.highMid}, Presence=${a.zoneEnergyDb.presence}, Air=${a.zoneEnergyDb.air}`,
     `- Detected Resonances: ${a.resonances.length ? a.resonances.map((r) => `${r.freqHz}Hz (+${r.excessDb}dB)`).join(', ') : 'None significant'}`,
-    `- Stereo Width: ${a.stereoWidth} | M/S Ratio: ${a.midSideRatioDb} dB | Phase Corr: ${a.phaseCorrelation} | Low-End Corr: ${a.lowEndCorrelation} | L/R Balance: ${a.lrBalanceDb} dB | Mono Score: ${a.monoCompatibilityScore}/100`,
+    `- Stereo Width: ${a.stereoWidth} | M/S Ratio: ${a.midSideRatioDb} dB | Phase Corr: ${a.phaseCorrelation} | Low-End Corr: ${a.lowEndCorrelation} | Band Corr (low/mid/high): ${bandCorrSummary} | L/R Balance: ${a.lrBalanceDb} dB | Mono Score: ${a.monoCompatibilityScore}/100`,
     `- Integrity & Noise: Clipped=${a.clippedSamples} | ISP=${a.interSamplePeaks} | THD=${a.thdEstimatePercent}% | NoiseFloor=${a.noiseFloorDb ?? -72} dBFS | DC Offset=${a.dcOffset}`,
+    `- Artifacts & Restoration Telemetry: clickCount=${clickCountText}${clickTimesText} | shimmer: ${shimmerSummary}`,
+  ].join('\n');
+}
+
+function fmtRange([min, max]: readonly [number, number]): string {
+  return `${min}..${max}`;
+}
+
+function fmtEnum(values: readonly (string | number)[]): string {
+  return values.map((v) => (typeof v === 'string' ? `"${v}"` : String(v))).join('|');
+}
+
+function buildProcessorSchemasPrompt(): string {
+  const L = PROCESSOR_PARAM_LIMITS;
+  const peq = L['parametric-eq'];
+  const deq = L['dynamic-eq'];
+  const comp = L.compressor;
+  const mbComp = L['multiband-comp'];
+  const sat = L.saturation;
+  const img = L['stereo-imager'];
+  const res = L.restore;
+  const bass = L['bass-enhancer'];
+  const lim = L.limiter;
+  const max = L.maximizer;
+  const tr = L['transient-shaper'];
+  const clip = L.clipper;
+  const mbMax = L['multiband-maximizer'];
+  const dith = L.dither;
+  const meq = L['match-eq'];
+  const vox = L['vocal-rebalance'];
+
+  const mbCompBand = `{"thresholdDb":${fmtRange(mbComp.band.thresholdDb)},"ratio":${fmtRange(mbComp.band.ratio)},"attackMs":${fmtRange(mbComp.band.attackMs)},"releaseMs":${fmtRange(mbComp.band.releaseMs)},"gainDb":${fmtRange(mbComp.band.gainDb)},"bypass":boolean}`;
+  const mbMaxBand = `{"preGainDb":${fmtRange(mbMax.band.preGainDb)},"thresholdDb":${fmtRange(mbMax.band.thresholdDb)},"ratio":${fmtRange(mbMax.band.ratio)},"attackMs":${fmtRange(mbMax.band.attackMs)},"releaseMs":${fmtRange(mbMax.band.releaseMs)},"postGainDb":${fmtRange(mbMax.band.postGainDb)},"bypass":boolean}`;
+
+  return [
+    `1. "parametric-eq": {"phaseMode":${fmtEnum(peq.phaseMode)},"msMode":${fmtEnum(peq.msMode)},"tiltDb":${fmtRange(peq.tiltDb)},"autoGain"?:boolean,"bands":[{"id":string,"enabled":boolean,"shape":${fmtEnum(peq.band.shape)},"subtype"?:string,"slope"?:${fmtEnum(peq.band.slope)},"channel"?:${fmtEnum(peq.band.channel)},"freq":${fmtRange(peq.band.freq)},"gain":${fmtRange(peq.band.gain)},"q":${fmtRange(peq.band.q)}}]} (max ${peq.maxBands} bands. subtype by shape: bell -> "bell" (default) | "proportional" (Q narrows as gain rises: wide gentle moves, narrow deep cuts) | "band-shelf" (flat-top band); lowshelf/highshelf -> "analog" (default) | "baxandall" (gentle wide tone shelf) | "vintage" (Pultec-style shelf with opposite dip) | "resonant" (shelf with overshoot); lowpass/highpass -> "flat" (default Butterworth) | "resonant" (peak at cutoff) | "brickwall" (very steep, fixed). slope: pass flat 6-96, pass resonant 12-96, shelf analog 6|12|24, shelf resonant 12|24; omit for the 12 dB/oct default. channel overrides msMode per band: e.g. "side" highpass ~100-150 Hz to mono the lows, "mid" bell for vocal presence. autoGain trims output to cancel the curve's loudness change; omit to keep level changes. Omit optional fields you do not need.)`,
+    `2. "dynamic-eq": {"bands":[{"id":string,"enabled":boolean,"type"?:${fmtEnum(deq.band.type)},"freq":${fmtRange(deq.band.freq)},"q":${fmtRange(deq.band.q)},"thresholdDb":${fmtRange(deq.band.thresholdDb)},"maxCutDb":${fmtRange(deq.band.maxCutDbCut)} (cut) | ${fmtRange(deq.band.maxCutDbBoost)} (boost),"ratio":${fmtRange(deq.band.ratio)},"mode":${fmtEnum(deq.band.mode)},"kneeDb"?:${fmtRange(deq.band.kneeDb)},"attackMs":${fmtRange(deq.band.attackMs)},"releaseMs":${fmtRange(deq.band.releaseMs)},"channel"?:${fmtEnum(deq.band.channel)},"sidechain"?:{"mode":${fmtEnum(deq.band.sidechainMode)},"freq":${fmtRange(deq.band.sidechainFreq)},"q":${fmtRange(deq.band.sidechainQ)}},"lookaheadMs"?:${fmtRange(deq.band.lookaheadMs)}}]} (max ${deq.maxBands} bands; maxCutDb is ${fmtRange(deq.band.maxCutDbCut)} for cut, ${fmtRange(deq.band.maxCutDbBoost)} for boost; sidechain "custom" lets the detector listen at its own freq/Q, e.g. duck 2-4 kHz on the mid only when sibilance at 6-8 kHz fires.)`,
+    `3. "compressor": {"mode":${fmtEnum(comp.mode)},"thresholdDb":${fmtRange(comp.thresholdDb)},"ratio":${fmtRange(comp.ratio)},"attackMs":${fmtRange(comp.attackMs)},"releaseMs":${fmtRange(comp.releaseMs)},"kneeDb":${fmtRange(comp.kneeDb)},"makeupDb":${fmtRange(comp.makeupDb)},"scHpfHz":${fmtRange(comp.scHpfHz)}}`,
+    `4. "multiband-comp": {"lowCrossHz":${fmtRange(mbComp.lowCrossHz)},"highCrossHz":${mbComp.lowCrossHz[0] + mbComp.highCrossMinOffsetHz}..${mbComp.highCrossMaxHz} (min lowCrossHz+${mbComp.highCrossMinOffsetHz}),"low":${mbCompBand},"mid":${mbCompBand},"high":${mbCompBand}}`,
+    `5. "saturation": {"flavor":${fmtEnum(sat.flavor)},"drive":${fmtRange(sat.drive)},"tone":${fmtRange(sat.tone)},"harmonics":${fmtEnum(sat.harmonics)},"oversampling":${fmtEnum(sat.oversampling)}}`,
+    `6. "stereo-imager": {"lowWidth":${fmtRange(img.lowWidth)},"midWidth":${fmtRange(img.midWidth)},"highWidth":${fmtRange(img.highWidth)},"lowCrossHz":${fmtRange(img.lowCrossHz)},"highCrossHz":${img.lowCrossHz[0] + img.highCrossMinOffsetHz}..${img.highCrossMaxHz} (min lowCrossHz+${img.highCrossMinOffsetHz}),"monoBassBelowHz":${fmtRange(img.monoBassBelowHz)},"lrBalanceDb":${fmtRange(img.lrBalanceDb)},"midSideGainDb":${fmtRange(img.midSideGainDb)}}`,
+    `7. "restore": {"dcOffset":boolean,"humRemovalHz":${fmtEnum(res.humRemovalHz)},"hissReduction":${fmtRange(res.hissReduction)},"deEssAmount":${fmtRange(res.deEssAmount)},"deEssFreqHz":${fmtRange(res.deEssFreqHz)},"resonanceSuppress":${fmtRange(res.resonanceSuppress)},"mode":${fmtEnum(res.mode)},"declick":${fmtRange(res.declick)},"decrackle":${fmtRange(res.decrackle)},"spikeRepair":boolean,"deShimmer":${fmtRange(res.deShimmer)}} (declick/decrackle/spikeRepair fix measured clickCount; deShimmer reduces metallic AI-generation artifacts above 9 kHz)`,
+    `8. "bass-enhancer": {"subFreqHz":${fmtRange(bass.subFreqHz)},"subGainDb":${fmtRange(bass.subGainDb)},"harmonicDrive":${fmtRange(bass.harmonicDrive)},"tightness":${fmtRange(bass.tightness)},"monoFocus":boolean}`,
+    `9. "limiter": {"ceilingDb":${fmtRange(lim.ceilingDb)},"thresholdDb":${fmtRange(lim.thresholdDb)},"releaseMs":${fmtRange(lim.releaseMs)},"lookaheadMs":${fmtRange(lim.lookaheadMs)},"truePeak":boolean,"oversampling":${fmtEnum(lim.oversampling)}}`,
+    `10. "maximizer": {"character":${fmtEnum(max.character)},"targetLufs":${fmtRange(max.targetLufs)},"ceilingDb":${fmtRange(max.ceilingDb)},"transientEmphasis":${fmtRange(max.transientEmphasis)},"truePeak":boolean}`,
+    `11. "transient-shaper": {"attackDb":${fmtRange(tr.attackDb)},"sustainDb":${fmtRange(tr.sustainDb)},"speedMs":${fmtRange(tr.speedMs)},"lowCutHz":${fmtRange(tr.lowCutHz)}}`,
+    `12. "clipper": {"ceilingDb":${fmtRange(clip.ceilingDb)},"driveDb":${fmtRange(clip.driveDb)},"softness":${fmtRange(clip.softness)},"oversampling":${fmtEnum(clip.oversampling)}} (place before the limiter)`,
+    `13. "multiband-maximizer": {"lowCrossHz":${fmtRange(mbMax.lowCrossHz)},"highCrossHz":${mbMax.lowCrossHz[0] + mbMax.highCrossMinOffsetHz}..${mbMax.highCrossMaxHz} (min lowCrossHz+${mbMax.highCrossMinOffsetHz}),"low":${mbMaxBand},"mid":${mbMaxBand},"high":${mbMaxBand},"ceilingDb":${fmtRange(mbMax.ceilingDb)},"releaseMs":${fmtRange(mbMax.releaseMs)}}`,
+    `14. "dither": {"bitDepth":${fmtEnum(dith.bitDepth)},"shape":${fmtEnum(dith.shape)},"autoBlank":boolean} (always LAST; only when delivering below 32-bit float)`,
+    `15. "match-eq": {"amount":${fmtRange(meq.amount)},"smoothing":${fmtEnum(meq.smoothing)},"maxBoostDb":${fmtRange(meq.maxBoostDb)},"maxCutDb":${fmtRange(meq.maxCutDb)},"lowHz":${fmtRange(meq.lowHz)},"highHz":${fmtRange(meq.highHz)} (min max(${meq.highHz[0]}, 2*lowHz)),"channel":${fmtEnum(meq.channel)},"phase":${fmtEnum(meq.phase)}} (Ozone-style Match EQ: the engine learns the long-term average spectrum of the source and of the loaded REFERENCE track and applies amount% of the smoothed difference, limited to maxBoostDb / maxCutDb and faded out below lowHz / above highHz; it matches tonal shape, not loudness. ONLY when the prompt says Match EQ is AVAILABLE; at most one; place it early (after restore, before other EQ and dynamics). Stay conservative: amount 30-60, smoothing 3 or wider (1/3 octave or 1/1-1/2 for broad tilt), maxBoostDb/maxCutDb 1.5-3, lowHz >= 30, highHz <= 16000, "stereo" unless the reference differs mainly in side/mid balance. Never send learned spectra; the engine supplies them.)`,
+    `16. "vocal-rebalance": {"vocalGainDb":${fmtRange(vox.vocalGainDb)},"bassEnabled":boolean,"bassGainDb":${fmtRange(vox.bassGainDb)},"drumsEnabled":boolean,"drumsGainDb":${fmtRange(vox.drumsGainDb)},"sensitivity":${fmtRange(vox.sensitivity)},"smoothingMs":${fmtRange(vox.smoothingMs)}} (Ozone Master Rebalance style: raises/lowers the vocal, and optionally bass/drums, inside the finished mix using cached AI stems; phase-preserving, 0 dB = untouched. Use ONLY when the VOCAL REBALANCE block says stems are cached and the vocal is buried or too loud for the objective; keep moves small; always FIRST in the chain.)`,
   ].join('\n');
 }
 
@@ -89,23 +165,8 @@ PROCESSOR SELECTION IS PART OF THE TASK, NOT AN OPTIONAL SUGGESTION:
 - Combine processors when they address distinct measured defects (for example, Dynamic EQ for time-varying harshness plus Match EQ for broad reference-relative tonal balance). Avoid duplicate stages that solve the same problem, and explain why each selected processor is needed.
 - Do not equate adding a processor with fixing a defect. Every correction must be checked against fresh post-render measurements; if the evidence is missing or the target remains unmet, report it as unverified or unresolved.
 
-Valid paramsJson schemas by processor type:
-1. "parametric-eq": {"phaseMode":"minimum"|"linear","msMode":"stereo"|"mid-side","tiltDb":number,"autoGain"?:boolean,"bands":[{"id":"b1","enabled":true,"shape":"bell"|"lowshelf"|"highshelf"|"lowpass"|"highpass"|"notch"|"bandpass"|"tilt","subtype"?:string,"slope"?:6|12|18|24|36|48|72|96,"channel"?:"stereo"|"mid"|"side"|"left"|"right","freq":number,"gain":number,"q":number}]} (max 8 bands; gain -12..12 dB; q 0.25..12. subtype by shape: bell -> "bell" (default) | "proportional" (Q narrows as gain rises: wide gentle moves, narrow deep cuts) | "band-shelf" (flat-top band); lowshelf/highshelf -> "analog" (default) | "baxandall" (gentle wide tone shelf) | "vintage" (Pultec-style shelf with opposite dip) | "resonant" (shelf with overshoot); lowpass/highpass -> "flat" (default Butterworth) | "resonant" (peak at cutoff) | "brickwall" (very steep, fixed). slope: pass flat 6-96, pass resonant 12-96, shelf analog 6|12|24, shelf resonant 12|24; omit for the 12 dB/oct default. channel overrides msMode per band: e.g. "side" highpass ~100-150 Hz to mono the lows, "mid" bell for vocal presence. autoGain trims output to cancel the curve's loudness change; omit to keep level changes. Omit optional fields you do not need.)
-2. "dynamic-eq": {"bands":[{"id":"d1","enabled":true,"type"?:"bell"|"proportional"|"band-shelf"|"baxandall-bass"|"baxandall-treble"|"low-shelf"|"high-shelf","freq":number,"q":number,"thresholdDb":number,"maxCutDb":number,"ratio":number,"mode":"cut"|"boost","kneeDb"?:number,"attackMs":number,"releaseMs":number,"channel"?:"stereo"|"mid"|"side"|"left"|"right","sidechain"?:{"mode":"band"|"custom","freq":number,"q":number},"lookaheadMs"?:number}]} (max 8 bands; maxCutDb is the range: -12..0 for cut, 0..12 for boost; ratio 1-20; kneeDb 0-24; lookaheadMs 0-10; sidechain "custom" lets the detector listen at its own freq/Q, e.g. duck 2-4 kHz on the mid only when sibilance at 6-8 kHz fires.)
-3. "compressor": {"mode":"downward"|"upward"|"parallel","thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"kneeDb":number,"makeupDb":number,"scHpfHz":number}
-4. "multiband-comp": {"lowCrossHz":number,"highCrossHz":number,"low":{"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"gainDb":number,"bypass":false},"mid":{"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"gainDb":number,"bypass":false},"high":{"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"gainDb":number,"bypass":false}}
-5. "saturation": {"flavor":"tube"|"tape"|"soft-clip"|"hard-clip"|"exciter","drive":number,"tone":number,"harmonics":"even"|"odd"|"balanced","oversampling":2}
-6. "stereo-imager": {"lowWidth":number,"midWidth":number,"highWidth":number,"lowCrossHz":number,"highCrossHz":number,"monoBassBelowHz":number,"lrBalanceDb":number,"midSideGainDb":number}
-7. "restore": {"dcOffset":boolean,"humRemovalHz":0|50|60,"hissReduction":number,"deEssAmount":number,"deEssFreqHz":number,"resonanceSuppress":number,"mode":"conservative"|"aggressive","declick":0-100,"decrackle":0-100,"spikeRepair":boolean,"deShimmer":0-100} (declick/decrackle/spikeRepair fix measured clickCount; deShimmer reduces metallic AI-generation artifacts above 9 kHz)
-8. "bass-enhancer": {"subFreqHz":number,"subGainDb":number,"harmonicDrive":number,"tightness":number,"monoFocus":boolean}
-9. "limiter": {"ceilingDb":number,"thresholdDb":number,"releaseMs":number,"lookaheadMs":number,"truePeak":true,"oversampling":4}
-10. "maximizer": {"character":"transparent"|"punchy"|"aggressive"|"smooth","targetLufs":number,"ceilingDb":number,"transientEmphasis":number,"truePeak":true}
-11. "transient-shaper": {"attackDb":-12..12,"sustainDb":-12..12,"speedMs":2..60,"lowCutHz":20..300}
-12. "clipper": {"ceilingDb":-6..0,"driveDb":0..12,"softness":0..100,"oversampling":1|2|4} (place before the limiter)
-13. "multiband-maximizer": {"lowCrossHz":number,"highCrossHz":number,"low":{"preGainDb":number,"thresholdDb":number,"ratio":number,"attackMs":number,"releaseMs":number,"postGainDb":number,"bypass":false},"mid":{...same},"high":{...same},"ceilingDb":number,"releaseMs":number}
-14. "dither": {"bitDepth":16|20|24,"shape":"tpdf"|"tpdf-hp"|"shaped","autoBlank":true} (always LAST; only when delivering below 32-bit float)
-15. "match-eq": {"amount":0-100,"smoothing":1|2|3|6|12|24,"maxBoostDb":0-12,"maxCutDb":0-12,"lowHz":20-2000,"highHz":1000-20000,"channel":"stereo"|"mid"|"side","phase":"linear"|"minimum"} (Ozone-style Match EQ: the engine learns the long-term average spectrum of the source and of the loaded REFERENCE track and applies amount% of the smoothed difference, limited to maxBoostDb / maxCutDb and faded out below lowHz / above highHz; it matches tonal shape, not loudness. ONLY when the prompt says Match EQ is AVAILABLE; at most one; place it early (after restore, before other EQ and dynamics). Stay conservative: amount 30-60, smoothing 3 or wider (1/3 octave or 1/1-1/2 for broad tilt), maxBoostDb/maxCutDb 1.5-3, lowHz >= 30, highHz <= 16000, "stereo" unless the reference differs mainly in side/mid balance. Never send learned spectra; the engine supplies them.)
-16. "vocal-rebalance": {"vocalGainDb":-12..6,"bassEnabled":boolean,"bassGainDb":-12..6,"drumsEnabled":boolean,"drumsGainDb":-12..6,"sensitivity":0..100,"smoothingMs":5..500} (Ozone Master Rebalance style: raises/lowers the vocal, and optionally bass/drums, inside the finished mix using cached AI stems; phase-preserving, 0 dB = untouched. Use ONLY when the VOCAL REBALANCE block says stems are cached and the vocal is buried or too loud for the objective; keep moves small; always FIRST in the chain.)`;
+Valid paramsJson schemas by processor type (module intensity=${fmtRange(PROCESSOR_PARAM_LIMITS.module.intensity)}, wetDry=${fmtRange(PROCESSOR_PARAM_LIMITS.module.wetDry)}, inputGainDb=${fmtRange(PROCESSOR_PARAM_LIMITS.module.inputGainDb)}, outputGainDb=${fmtRange(PROCESSOR_PARAM_LIMITS.module.outputGainDb)}):
+${buildProcessorSchemasPrompt()}`;
 
 /** What each user-selected Mode asks of the strategy. Sent as its own line next to the Objective. */
 export const MODE_MEANINGS: Record<MasteringMode, string> = {
@@ -201,7 +262,10 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
       : 'None currently active or newly introduced.'}`
     : '';
 
+  const objectiveLabel = input.objective ?? input.mode;
   const prompt = [
+    objectiveLabel ? `Mastering Objective: ${objectiveLabel.toUpperCase()}` : '',
+    input.mode ? formatModeLine(input.mode) : '',
     summarizeAnalysisForPrompt('ORIGINAL SOURCE', input.preAnalysis),
     summarizeAnalysisForPrompt('CURRENT PROCESSED PASS', input.postAnalysis),
     input.referenceAnalysis ? summarizeAnalysisForPrompt('REFERENCE TRACK MEASUREMENTS', input.referenceAnalysis) : '',

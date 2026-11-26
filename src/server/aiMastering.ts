@@ -31,6 +31,7 @@ export class AiTimeoutError extends Error {
   }
 }
 
+export const BUILTIN_GEMINI_MODEL = 'gemini-4-hydrogen';
 const GEMINI_TIMEOUT_MS = 25_000;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -133,10 +134,12 @@ export async function generateGeminiMasterStrategy(input: {
 }) {
   const ai = getAiClient();
   const prompt = buildStrategyUserPrompt(input);
+  const promptChars = SYSTEM_PROMPT.length + prompt.length;
+  const startedMs = performance.now();
 
   const response = await withTimeout(
     ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
+      model: BUILTIN_GEMINI_MODEL,
       contents: prompt,
       config: {
         systemInstruction: SYSTEM_PROMPT,
@@ -149,9 +152,12 @@ export async function generateGeminiMasterStrategy(input: {
     'AI mastering strategy timed out after 25s.',
   );
 
+  const responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));
   const rawText = (response.text ?? '{}').trim();
   const data = JSON.parse(rawText);
-  const { chain, reasoning } = parseAiChain(data.processors ?? []);
+  const rawProcessors = Array.isArray(data.processors) ? data.processors : [];
+  const aiReturnedModules = rawProcessors.map((p: { type?: unknown }) => String(p?.type ?? '')).filter(Boolean);
+  const { chain, reasoning } = parseAiChain(rawProcessors);
 
   return {
     id: `ai-${Date.now()}`,
@@ -168,6 +174,12 @@ export async function generateGeminiMasterStrategy(input: {
     targetTruePeakDb: Number(data.targetTruePeakDb ?? -1.0),
     reasoningPerProcessor: reasoning,
     chain,
+    aiMeta: {
+      modelName: BUILTIN_GEMINI_MODEL,
+      responseTimeMs,
+      promptChars,
+      aiReturnedModules,
+    },
   };
 }
 
@@ -175,6 +187,8 @@ export async function refineGeminiIteration(input: {
   preAnalysis: AudioAnalysis;
   postAnalysis: AudioAnalysis;
   currentChain: ProcessorModule[];
+  mode?: MasteringMode;
+  objective?: MasteringObjectiveId;
   targetLufs: number;
   targetTruePeakDb: number;
   preserveDynamics: boolean;
@@ -184,10 +198,12 @@ export async function refineGeminiIteration(input: {
 }) {
   const ai = getAiClient();
   const prompt = buildRefineUserPrompt(input);
+  const promptChars = SYSTEM_PROMPT.length + prompt.length;
+  const startedMs = performance.now();
 
   const response = await withTimeout(
     ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
+      model: BUILTIN_GEMINI_MODEL,
       contents: prompt,
       config: {
         systemInstruction: SYSTEM_PROMPT,
@@ -200,13 +216,22 @@ export async function refineGeminiIteration(input: {
     'AI refinement pass timed out after 25s.',
   );
 
+  const responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));
   const data = JSON.parse((response.text ?? '{}').trim());
-  const { chain, reasoning } = parseAiChain(data.processors ?? []);
+  const rawProcessors = Array.isArray(data.processors) ? data.processors : [];
+  const aiReturnedModules = rawProcessors.map((p: { type?: unknown }) => String(p?.type ?? '')).filter(Boolean);
+  const { chain, reasoning } = parseAiChain(rawProcessors);
 
   return {
     strategySummary: String(data.strategySummary || 'Refined mastering pass parameters.'),
     issuesDetected: Array.isArray(data.issuesDetected) ? data.issuesDetected.map(String) : [],
     reasoningPerProcessor: reasoning,
     chain: chain.length > 0 ? chain : input.currentChain,
+    aiMeta: {
+      modelName: BUILTIN_GEMINI_MODEL,
+      responseTimeMs,
+      promptChars,
+      aiReturnedModules,
+    },
   };
 }

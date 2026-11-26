@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from 'react';
 import { BUILTIN_PROVIDER_ID, getPreset } from './providerPresets.ts';
 import { describeProvider, type ProviderConfig } from './providerAdapters.ts';
+import { CloudAiHttpError, CloudAiRateLimitError, classifyBuiltinHttpFailure, noteCloudAiRateLimited } from './cloudRateLimit.ts';
 
 export interface ProviderSettings {
   presetId: string;
@@ -93,10 +94,38 @@ export function getProviderSettings(): ProviderSettings { return settings; }
 /** Create or renew the anonymous HttpOnly session before a built-in Gemini request. */
 export async function getBuiltinAccessHeaders(): Promise<Record<string, string>> {
   if (typeof window === 'undefined') return {};
-  const response = await fetch('/api/ai/session', { method: 'POST', credentials: 'same-origin' });
+  let response: Response;
+  try {
+    response = await fetch('/api/ai/session', { method: 'POST', credentials: 'same-origin' });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'Network error';
+    throw new CloudAiHttpError(`Cloud AI session request failed (${detail}). Local mastering remains available.`, {
+      status: 0,
+      code: 'guest_session',
+      fallbackReason: 'guest-session',
+    });
+  }
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(body?.error ?? 'Cloud AI session setup failed (HTTP ' + response.status + '). Local mastering remains available.');
+    const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (response.status === 429) {
+      const retryAfterSec = Math.max(1, Math.ceil(Number(body?.retryAfterSec ?? response.headers.get('retry-after')) || 60));
+      const err = new CloudAiRateLimitError(
+        typeof body?.error === 'string' ? body.error : 'Cloud AI session setup is temporarily rate-limited.',
+        'client-minute',
+        retryAfterSec,
+      );
+      noteCloudAiRateLimited(err);
+      throw err;
+    }
+    const message = typeof body?.error === 'string'
+      ? body.error
+      : 'Cloud AI session setup failed (HTTP ' + response.status + '). Local mastering remains available.';
+    const classified = classifyBuiltinHttpFailure(response.status, body ?? {}, message);
+    throw new CloudAiHttpError(message, {
+      status: response.status,
+      code: typeof body?.code === 'string' ? body.code : 'guest_session',
+      fallbackReason: classified.fallbackReason === 'server-error' ? 'guest-session' : classified.fallbackReason,
+    });
   }
   return {};
 }

@@ -17,6 +17,7 @@ import {
 import type {
   AiChainLifecycleState,
   AIMasteringStrategy,
+  AiPassTrace,
   AppliedCorrectionRecord,
   AppSettings,
   AudioAnalysis,
@@ -37,6 +38,7 @@ import type {
   MasteringPreset,
   LabSubTab,
   ProcessorModule,
+  ProcessorType,
   ProjectRecord,
   SavedChainRecord,
   WorkspaceTab,
@@ -146,18 +148,27 @@ const PlatformPreviewSelector = React.lazy(() => import('./components/platform/P
 import { compressorMakeupDb, getPlatformRule, predictForPlatform, type MasterLevels } from './dsp/platformRules';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
-import { buildDiagnosticLog } from './director/diagnosticLog';
-import { requestRefine, requestStrategy } from './ai/masteringClient';
+import { buildDiagnosticLog, summarizeAiFallbackBanner } from './director/diagnosticLog';
+import { BUILTIN_LABEL, requestRefine, requestStrategy } from './ai/masteringClient';
+import { SYSTEM_PROMPT, buildRefineUserPrompt, buildStrategyUserPrompt } from './ai/masteringPrompt';
 import { AiProviderChip, AiProviderPanel } from './components/AiProviderPanel';
 import { describeProvider } from './ai/providerAdapters';
-import { getActiveProviderConfig, getBuiltinAccessHeaders, runProviderCall } from './ai/providerStore';
+import { getActiveAiCall, getActiveProviderConfig, getBuiltinAccessHeaders, runProviderCall } from './ai/providerStore';
 import {
   getOrCreateVocalBalancePreparation,
   prepareVocalBalanceAgainstReference,
   requiresVocalBalancePreparation,
   type VocalBalancePreparation,
 } from './director/vocalBalance';
-import { CloudAiRateLimitError, assertCloudAiAvailable, friendlyCloudAiLimitNotice, readBuiltinAiResponse } from './ai/cloudRateLimit';
+import {
+  CLOUD_AI_TIMEOUT_MS,
+  CloudAiRateLimitError,
+  assertCloudAiAvailable,
+  classifyBuiltinAiError,
+  createCloudAiRequestSignal,
+  friendlyCloudAiLimitNotice,
+  readBuiltinAiResponse,
+} from './ai/cloudRateLimit';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -356,6 +367,7 @@ export default function App() {
   const [aiError, setAiError] = useState<string | null>(null);
   // Friendly, non-error notice (for example the cloud AI spend limit: FIX ALL fell back to the local planner).
   const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const [aiFallbackBanner, setAiFallbackBanner] = useState<string | null>(null);
   const [iterations, setIterations] = useState<IterationPass[]>([]);
   const [battleCandidates, setBattleCandidates] = useState<BattleCandidate[]>([]);
   const [battleGenerating, setBattleGenerating] = useState(false);
@@ -1107,6 +1119,7 @@ export default function App() {
       setSourceRenderRevision((revision) => revision + 1);
       if (directorRunningRef.current) {
         directorStopRef.current = true;
+        getActiveAiCall()?.cancel();
         directorPauseRef.current = false;
         directorRunningRef.current = false;
       }
@@ -1587,6 +1600,7 @@ export default function App() {
     directorRunningRef.current = true;
     setAiError(null);
     setAiNotice(null);
+    setAiFallbackBanner(null);
     setAiChainAccepted(null);
     const preRunChain = structuredClone(chain);
     setPreAiChainSnapshot(preRunChain);
@@ -1778,53 +1792,131 @@ export default function App() {
         aiProviderLog.push(`Vocal Rebalance unavailable: ${separationState.error ?? separationState.assessment?.message ?? 'stem separation did not produce usable stems'}; no vocal correction will be claimed.`);
       }
     }
+    let initialAiTrace: AiPassTrace | undefined =
+      !useGeminiCloud && runOperatingMode !== 'manual'
+        ? {
+            pass: 0,
+            stage: 'strategy',
+            source: 'local-dsp-planner',
+            fallbackReason: 'user-disabled',
+            fallbackDetail: 'Cloud AI is turned off',
+            modelName: null,
+            responseTimeMs: null,
+            promptChars: null,
+            timeoutHit: null,
+            aiReturnedModules: [],
+            finalRenderedModules: [],
+          }
+        : undefined;
+
     if (useGeminiCloud && runOperatingMode !== 'manual') {
       setAiLoading(true);
       setAiLifecycleState('Planning');
+      setDirectorStage('AI is thinking…');
+      const pluginSummary = inspectPluginInventory(
+        hostSnapshot.plugins,
+        hostSnapshot.status === 'connected',
+        runSourceAnalysis,
+        plan.objective,
+      );
+      const strategyInput = {
+        analysis: runSourceAnalysis,
+        mode,
+        objective: objectiveId,
+        customObjective,
+        operatingMode: runOperatingMode,
+        targetLufs: plan.objective.targetLufs,
+        referenceAnalysis: referenceTrack?.analysis ?? null,
+        vocalBalanceVerification,
+        availablePlugins: pluginSummary.matches.map((m) => ({
+          name: m.name,
+          role: m.role,
+          manufacturer: m.manufacturer,
+        })),
+        // Only sent when stems are cached, so prompts for tracks without stems are unchanged.
+        ...(vocalBalance.stemsCached ? { vocalBalance } : {}),
+      };
+      const strategyPromptChars = SYSTEM_PROMPT.length + buildStrategyUserPrompt(strategyInput).length;
+      const builtinStrategyAttempt: {
+        current: {
+          modelName: string | null;
+          responseTimeMs: number | null;
+          promptChars: number;
+          aiReturnedModules: ProcessorType[];
+          timedOut: boolean;
+        } | null;
+      } = { current: null };
       try {
-        const pluginSummary = inspectPluginInventory(
-          hostSnapshot.plugins,
-          hostSnapshot.status === 'connected',
-          runSourceAnalysis,
-          plan.objective,
-        );
-        const strategyInput = {
-          analysis: runSourceAnalysis,
-          mode,
-          objective: objectiveId,
-          customObjective,
-          operatingMode: runOperatingMode,
-          targetLufs: plan.objective.targetLufs,
-          referenceAnalysis: referenceTrack?.analysis ?? null,
-          vocalBalanceVerification,
-          availablePlugins: pluginSummary.matches.map((m) => ({
-            name: m.name,
-            role: m.role,
-            manufacturer: m.manufacturer,
-          })),
-          // Only sent when stems are cached, so prompts for tracks without stems are unchanged.
-          ...(vocalBalance.stemsCached ? { vocalBalance } : {}),
-        };
-        // Built-in Gemini (default): exactly the existing server call.
-        const builtinStrategy = async () => {
-          // While the server's spend limit cooldown runs, skip the request entirely.
+        // Built-in Gemini (default): client timeout (30s) exceeds server's 25s Gemini timeout,
+        // and clicking Stop cancels the active request immediately.
+        const builtinStrategy = async (cancelSignal?: AbortSignal) => {
+          const startedMs = performance.now();
+          let timedOut = false;
+          builtinStrategyAttempt.current = {
+            modelName: 'gemini-4-hydrogen',
+            responseTimeMs: null,
+            promptChars: strategyPromptChars,
+            aiReturnedModules: [],
+            timedOut: false,
+          };
           assertCloudAiAvailable();
-          const res = await fetch('/api/ai/master', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() },
-            signal: AbortSignal.timeout(12_000),
-            body: JSON.stringify(strategyInput),
-          });
-          const data = await readBuiltinAiResponse(res);
-          return data.strategy;
+          const headers = { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() };
+          if (cancelSignal?.aborted || directorStopRef.current) {
+            throw new DOMException('Cancelled.', 'AbortError');
+          }
+          const req = createCloudAiRequestSignal(CLOUD_AI_TIMEOUT_MS, cancelSignal);
+          try {
+            const res = await fetch('/api/ai/master', {
+              method: 'POST',
+              headers,
+              signal: req.signal,
+              body: JSON.stringify(strategyInput),
+            });
+            const data = await readBuiltinAiResponse(res);
+            const meta = (data.meta ?? null) as {
+              modelName?: string;
+              responseTimeMs?: number;
+              promptChars?: number;
+              aiReturnedModules?: string[];
+            } | null;
+            builtinStrategyAttempt.current = {
+              modelName: typeof meta?.modelName === 'string' ? meta.modelName : 'gemini-4-hydrogen',
+              responseTimeMs: typeof meta?.responseTimeMs === 'number'
+                ? meta.responseTimeMs
+                : Math.max(0, Math.round(performance.now() - startedMs)),
+              promptChars: typeof meta?.promptChars === 'number' ? meta.promptChars : strategyPromptChars,
+              aiReturnedModules: Array.isArray(meta?.aiReturnedModules)
+                ? (meta.aiReturnedModules.filter(Boolean) as ProcessorType[])
+                : [],
+              timedOut: false,
+            };
+            return data.strategy;
+          } finally {
+            timedOut = req.timedOut();
+            if (builtinStrategyAttempt.current) {
+              builtinStrategyAttempt.current.timedOut = timedOut;
+              if (builtinStrategyAttempt.current.responseTimeMs === null) {
+                builtinStrategyAttempt.current.responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));
+              }
+            }
+            req.cleanup();
+          }
         };
         const providerRun = await runProviderCall('strategy', (opts) =>
-          requestStrategy(getActiveProviderConfig(), strategyInput, builtinStrategy, opts),
+          requestStrategy(getActiveProviderConfig(), strategyInput, () => builtinStrategy(opts.signal), opts),
         );
         if (isStale()) return;
         aiProviderLog.push(...providerRun.notices.map((n) => `Plan: ${n}`));
         if (providerRun.producedBy) aiProviderLog.push(`Plan: initial strategy produced by ${providerRun.producedBy}.`);
-        if (!providerRun.result) throw new Error(providerRun.notices[0] ?? 'AI strategy skipped.');
+        if (!providerRun.result) {
+          if (providerRun.cancelled || directorStopRef.current) {
+            setDirectorStage('Stopped');
+            setAiLifecycleState('Stopped');
+            setStatusNotice('Stopped by engineer during AI planning.');
+            return;
+          }
+          throw new Error(providerRun.notices[0] ?? 'AI strategy skipped.');
+        }
         const strat = providerRun.result as unknown as AIMasteringStrategy;
         // If the AI diagnosis explicitly selects Vocal Rebalance, create the missing source
         // stems now rather than silently dropping the requested processor. Separation is
@@ -1851,18 +1943,81 @@ export default function App() {
             aiProviderLog.push(`Vocal Rebalance unavailable: ${separationState.error ?? separationState.assessment?.message ?? 'stem separation did not produce usable stems'}; the vocal processor will be withheld.`);
           }
         }
+        const usedBuiltin = providerRun.producedBy === BUILTIN_LABEL;
+        const resolvedModel = usedBuiltin
+          ? (builtinStrategyAttempt.current?.modelName ?? 'gemini-4-hydrogen')
+          : (providerRun.meta?.modelName ?? aiProviderUsed.model);
+        const resolvedTimeMs = usedBuiltin
+          ? (builtinStrategyAttempt.current?.responseTimeMs ?? providerRun.meta?.responseTimeMs ?? null)
+          : (providerRun.meta?.responseTimeMs ?? null);
+        const resolvedPromptChars = usedBuiltin
+          ? (builtinStrategyAttempt.current?.promptChars ?? providerRun.meta?.promptChars ?? strategyPromptChars)
+          : (providerRun.meta?.promptChars ?? strategyPromptChars);
+        const rawReturnedModules: ProcessorType[] = usedBuiltin && (builtinStrategyAttempt.current?.aiReturnedModules.length ?? 0) > 0
+          ? builtinStrategyAttempt.current!.aiReturnedModules
+          : ((providerRun.meta?.aiReturnedModules.length ?? 0) > 0
+            ? providerRun.meta!.aiReturnedModules
+            : (strat.chain ?? []).map((m) => m.type));
+
         const invCheck = validateChainAgainstInventory(strat.chain);
         if (invCheck.valid && invCheck.sanitizedChain.length > 0) {
           strat.chain = gateRebalance(invCheck.sanitizedChain);
           geminiInitialChain = strat.chain;
           setAiStrategy(strat);
+          initialAiTrace = {
+            pass: 0,
+            stage: 'strategy',
+            source: usedBuiltin ? 'gemini-cloud' : 'byo-provider',
+            fallbackReason: null,
+            ...(providerRun.fellBack && providerRun.notices[0] ? { fallbackDetail: providerRun.notices[0] } : {}),
+            modelName: resolvedModel,
+            responseTimeMs: resolvedTimeMs,
+            promptChars: resolvedPromptChars,
+            timeoutHit: null,
+            aiReturnedModules: rawReturnedModules,
+            finalRenderedModules: strat.chain.map((m) => m.type),
+          };
         } else {
+          const reasonDetail = invCheck.errors[0] ?? 'empty chain';
           setAiError(
-            `Cloud AI response failed inventory validation (${invCheck.errors[0] ?? 'empty chain'}); using local DSP planner.`,
+            `Cloud AI response failed inventory validation (${reasonDetail}); using local DSP planner.`,
           );
+          initialAiTrace = {
+            pass: 0,
+            stage: 'strategy',
+            source: 'local-dsp-planner',
+            fallbackReason: 'validation',
+            fallbackDetail: reasonDetail,
+            modelName: resolvedModel,
+            responseTimeMs: resolvedTimeMs,
+            promptChars: resolvedPromptChars,
+            timeoutHit: null,
+            aiReturnedModules: rawReturnedModules,
+            finalRenderedModules: [],
+          };
         }
       } catch (err) {
         if (!isStale()) {
+          if (directorStopRef.current) {
+            setDirectorStage('Stopped');
+            setAiLifecycleState('Stopped');
+            setStatusNotice('Stopped by engineer during AI planning.');
+            return;
+          }
+          const classified = classifyBuiltinAiError(err, builtinStrategyAttempt.current?.timedOut ?? false);
+          initialAiTrace = {
+            pass: 0,
+            stage: 'strategy',
+            source: 'local-dsp-planner',
+            fallbackReason: classified.fallbackReason,
+            fallbackDetail: classified.fallbackDetail,
+            modelName: builtinStrategyAttempt.current?.modelName ?? null,
+            responseTimeMs: builtinStrategyAttempt.current?.responseTimeMs ?? null,
+            promptChars: builtinStrategyAttempt.current?.promptChars ?? strategyPromptChars,
+            timeoutHit: classified.timeoutHit,
+            aiReturnedModules: [],
+            finalRenderedModules: [],
+          };
           if (err instanceof CloudAiRateLimitError) {
             // Not an error for the user: the run continues on the local DSP planner.
             const notice = friendlyCloudAiLimitNotice(err);
@@ -1875,6 +2030,17 @@ export default function App() {
       } finally {
         if (!isStale()) setAiLoading(false);
       }
+      if (directorStopRef.current && !isStale()) {
+        setDirectorStage('Stopped');
+        setAiLifecycleState('Stopped');
+        setStatusNotice('Stopped by engineer during AI planning.');
+        return;
+      }
+    }
+
+    if (initialAiTrace?.fallbackReason && !isStale()) {
+      const banner = summarizeAiFallbackBanner([initialAiTrace]);
+      if (banner) setAiFallbackBanner(banner);
     }
 
     // Local Director: a conservative vocal-only move when stems are cached and the measured
@@ -1934,6 +2100,7 @@ export default function App() {
         sampleRate: activeTrack.sampleRate,
         operatingMode: runOperatingMode,
         objectiveId,
+        mode,
         customSpec: customObjective,
         qcProfile: activeQcProfile,
         exportConfig,
@@ -1950,6 +2117,7 @@ export default function App() {
         leadModules,
         externalProcessor: processExternalStage,
         postFades: getPostFades(),
+        initialAiTrace,
         maxIterations: forceAutonomous ? 10 : maxIterations,
         maxCpuBudgetMs: forceAutonomous ? 120_000 : 60_000,
         convergenceThreshold,
@@ -1960,37 +2128,161 @@ export default function App() {
             ? async (ctx) => {
                 const refineCtx = {
                   ...ctx,
+                  objective: ctx.objective ?? objectiveId,
+                  mode: ctx.mode ?? mode,
                   ...(vocalBalance.stemsCached ? { vocalBalance } : {}),
                   ...(vocalBalanceVerification ? { vocalBalanceVerification } : {}),
                 };
-                const builtinRefine = async () => {
+                const refinePromptChars = SYSTEM_PROMPT.length + buildRefineUserPrompt(refineCtx).length;
+                const builtinRefineAttempt: {
+                  current: {
+                    modelName: string | null;
+                    responseTimeMs: number | null;
+                    promptChars: number;
+                    aiReturnedModules: ProcessorType[];
+                    timedOut: boolean;
+                  } | null;
+                } = { current: null };
+                if (!isStale()) {
+                  setAiLoading(true);
+                  setDirectorStage('AI is thinking…');
+                }
+                const builtinRefine = async (cancelSignal?: AbortSignal) => {
+                  const startedMs = performance.now();
+                  builtinRefineAttempt.current = {
+                    modelName: 'gemini-4-hydrogen',
+                    responseTimeMs: null,
+                    promptChars: refinePromptChars,
+                    aiReturnedModules: [],
+                    timedOut: false,
+                  };
                   assertCloudAiAvailable();
-                  const res = await fetch('/api/ai/refine', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() },
-                    signal: AbortSignal.timeout(12_000),
-                    body: JSON.stringify(refineCtx),
-                  });
-                  const data = await readBuiltinAiResponse(res);
-                  return data.refined;
+                  const headers = { 'Content-Type': 'application/json', ...await getBuiltinAccessHeaders() };
+                  if (cancelSignal?.aborted || directorStopRef.current) {
+                    throw new DOMException('Cancelled.', 'AbortError');
+                  }
+                  const req = createCloudAiRequestSignal(CLOUD_AI_TIMEOUT_MS, cancelSignal);
+                  try {
+                    const res = await fetch('/api/ai/refine', {
+                      method: 'POST',
+                      headers,
+                      signal: req.signal,
+                      body: JSON.stringify(refineCtx),
+                    });
+                    const data = await readBuiltinAiResponse(res);
+                    const meta = (data.meta ?? null) as {
+                      modelName?: string;
+                      responseTimeMs?: number;
+                      promptChars?: number;
+                      aiReturnedModules?: string[];
+                    } | null;
+                    builtinRefineAttempt.current = {
+                      modelName: typeof meta?.modelName === 'string' ? meta.modelName : 'gemini-4-hydrogen',
+                      responseTimeMs: typeof meta?.responseTimeMs === 'number'
+                        ? meta.responseTimeMs
+                        : Math.max(0, Math.round(performance.now() - startedMs)),
+                      promptChars: typeof meta?.promptChars === 'number' ? meta.promptChars : refinePromptChars,
+                      aiReturnedModules: Array.isArray(meta?.aiReturnedModules)
+                        ? (meta.aiReturnedModules.filter(Boolean) as ProcessorType[])
+                        : [],
+                      timedOut: false,
+                    };
+                    return data.refined;
+                  } finally {
+                    const didTimeOut = req.timedOut();
+                    if (builtinRefineAttempt.current) {
+                      builtinRefineAttempt.current.timedOut = didTimeOut;
+                      if (builtinRefineAttempt.current.responseTimeMs === null) {
+                        builtinRefineAttempt.current.responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));
+                      }
+                    }
+                    req.cleanup();
+                  }
                 };
                 let run: Awaited<ReturnType<typeof requestRefine>>;
                 try {
                   run = await runProviderCall('refine', (opts) =>
-                    requestRefine(getActiveProviderConfig(), refineCtx, builtinRefine, opts),
+                    requestRefine(getActiveProviderConfig(), refineCtx, () => builtinRefine(opts.signal), opts),
                   );
                 } catch (err) {
-                  if (!(err instanceof CloudAiRateLimitError)) throw err;
-                  // Spend limit reached mid-run: this pass is refined by the deterministic director.
-                  const notice = friendlyCloudAiLimitNotice(err);
-                  if (!isStale()) setAiNotice(notice);
-                  return { chain: null, producedBy: null, notices: [notice] };
+                  if (directorStopRef.current || isStale()) {
+                    return { chain: null, producedBy: null, notices: [] };
+                  }
+                  const classified = classifyBuiltinAiError(err, builtinRefineAttempt.current?.timedOut ?? false);
+                  const notice = err instanceof CloudAiRateLimitError
+                    ? friendlyCloudAiLimitNotice(err)
+                    : classified.fallbackDetail;
+                  if (err instanceof CloudAiRateLimitError) {
+                    setAiNotice(notice);
+                  }
+                  const refineFallbackBanner = summarizeAiFallbackBanner([{
+                    pass: 1,
+                    stage: 'refine',
+                    source: 'deterministic-director',
+                    fallbackReason: classified.fallbackReason,
+                    fallbackDetail: classified.fallbackDetail,
+                    modelName: builtinRefineAttempt.current?.modelName ?? null,
+                    responseTimeMs: builtinRefineAttempt.current?.responseTimeMs ?? null,
+                    promptChars: builtinRefineAttempt.current?.promptChars ?? refinePromptChars,
+                    timeoutHit: classified.timeoutHit,
+                    aiReturnedModules: [],
+                    finalRenderedModules: [],
+                  }]);
+                  if (refineFallbackBanner) {
+                    setAiFallbackBanner((prev) => prev ?? refineFallbackBanner);
+                  }
+                  return {
+                    chain: null,
+                    producedBy: null,
+                    notices: [notice],
+                    trace: {
+                      source: 'deterministic-director',
+                      fallbackReason: classified.fallbackReason,
+                      fallbackDetail: classified.fallbackDetail,
+                      modelName: builtinRefineAttempt.current?.modelName ?? null,
+                      responseTimeMs: builtinRefineAttempt.current?.responseTimeMs ?? null,
+                      promptChars: builtinRefineAttempt.current?.promptChars ?? refinePromptChars,
+                      timeoutHit: classified.timeoutHit,
+                      aiReturnedModules: [],
+                    },
+                  };
+                } finally {
+                  if (!isStale()) setAiLoading(false);
                 }
                 aiProviderLog.push(...run.notices.map((n) => `Refine: ${n}`));
                 if (run.producedBy) aiProviderLog.push(`Refine: suggestion produced by ${run.producedBy}.`);
                 const refinedChain = run.result?.chain ? gateRebalance(run.result.chain) : null;
                 const gateNotices = rebalanceNotes.splice(0);
-                return { chain: refinedChain, producedBy: run.producedBy, notices: [...run.notices, ...gateNotices] };
+                const usedBuiltin = run.producedBy === BUILTIN_LABEL;
+                const resolvedModel = usedBuiltin
+                  ? (builtinRefineAttempt.current?.modelName ?? 'gemini-4-hydrogen')
+                  : (run.meta?.modelName ?? aiProviderUsed.model);
+                const resolvedTimeMs = usedBuiltin
+                  ? (builtinRefineAttempt.current?.responseTimeMs ?? run.meta?.responseTimeMs ?? null)
+                  : (run.meta?.responseTimeMs ?? null);
+                const resolvedPromptChars = usedBuiltin
+                  ? (builtinRefineAttempt.current?.promptChars ?? run.meta?.promptChars ?? refinePromptChars)
+                  : (run.meta?.promptChars ?? refinePromptChars);
+                const rawReturnedModules: ProcessorType[] = usedBuiltin && (builtinRefineAttempt.current?.aiReturnedModules.length ?? 0) > 0
+                  ? builtinRefineAttempt.current!.aiReturnedModules
+                  : ((run.meta?.aiReturnedModules.length ?? 0) > 0
+                    ? run.meta!.aiReturnedModules
+                    : (run.result?.chain ?? []).map((m) => m.type));
+                return {
+                  chain: refinedChain,
+                  producedBy: run.producedBy,
+                  notices: [...run.notices, ...gateNotices],
+                  trace: {
+                    source: usedBuiltin ? 'gemini-cloud' : 'byo-provider',
+                    fallbackReason: null,
+                    ...(run.fellBack && run.notices[0] ? { fallbackDetail: run.notices[0] } : {}),
+                    modelName: resolvedModel,
+                    responseTimeMs: resolvedTimeMs,
+                    promptChars: resolvedPromptChars,
+                    timeoutHit: null,
+                    aiReturnedModules: rawReturnedModules,
+                  },
+                };
               }
             : undefined,
         onProgress: (upd) => {
@@ -2071,7 +2363,9 @@ export default function App() {
             convergenceThreshold,
             exportConfig,
             useGeminiCloud,
-            aiProvider: useGeminiCloud ? { ...aiProviderUsed, log: aiProviderLog } : null,
+            aiProvider: useGeminiCloud
+              ? { ...aiProviderUsed, log: aiProviderLog, aiPasses: report.aiPasses ?? [], aiFallbackBanner: summarizeAiFallbackBanner(report.aiPasses) }
+              : { log: aiProviderLog, aiPasses: report.aiPasses ?? [], aiFallbackBanner: summarizeAiFallbackBanner(report.aiPasses) },
             referenceAnalysis: referenceTrack?.analysis ?? null,
             externalPlugins: hostSnapshot.plugins,
           },
@@ -2099,6 +2393,8 @@ export default function App() {
         diagnosticNotice = 'Mastering finished, but the diagnostic archive could not be saved. Download the in-session bundle before leaving this page.';
       }
 
+      const finalBanner = summarizeAiFallbackBanner(report.aiPasses);
+      if (finalBanner) setAiFallbackBanner(finalBanner);
       setDirectorReport(report);
       setDirectorCheckpoints(report.checkpoints);
       setDirectorActivityLog(report.activityLog);
@@ -2737,6 +3033,7 @@ export default function App() {
     vocalPreparationCacheRef.current.clear();
     vocalSourceOverrideRef.current = null;
     directorStopRef.current = true;
+    getActiveAiCall()?.cancel();
     directorRunIdRef.current += 1;
     activeTrackIdRef.current = null;
     sourceChannelsRef.current = null;
@@ -2756,6 +3053,7 @@ export default function App() {
     telemetryStore.publish({ isPlaying: false, currentTimeSec: 0, live: null });
     setActiveTrack(null);
     setDirectorReport(null);
+    setAiFallbackBanner(null);
     setShowWorkstationWithoutTrack(typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
   };
 
@@ -2851,6 +3149,7 @@ export default function App() {
       onStop={() => {
         directorStopRef.current = true;
         vocalPreparationAbortRef.current?.abort();
+        getActiveAiCall()?.cancel();
       }}
       onDemo={() => handleLoadDemoSource('main-mix')}
       onImport={handleUploadSourceFile}
@@ -2865,6 +3164,7 @@ export default function App() {
       onOpenStereoLab={() => { setLabDefaultSubTab('stereo'); setActiveTab('lab'); }}
       notice={statusNotice}
       aiNotice={aiNotice}
+      aiFallbackBanner={summarizeAiFallbackBanner(directorReport?.aiPasses) ?? aiFallbackBanner}
       aiChanges={renderAiChanges('console')}
       onAskAi={() => setActiveTab('ai')}
       onExport={() => setExportModalOpen(true)}
@@ -3609,6 +3909,7 @@ export default function App() {
               aiLoading={aiLoading}
               aiError={aiError}
               aiNotice={aiNotice}
+              aiFallbackBanner={summarizeAiFallbackBanner(directorReport?.aiPasses) ?? aiFallbackBanner}
               aiChanges={renderAiChanges('assistant')}
               onChangeOperatingMode={setOperatingMode}
               onChangeObjectiveId={setObjectiveId}
@@ -3627,6 +3928,7 @@ export default function App() {
               onStopDirector={() => {
                 directorStopRef.current = true;
                 vocalPreparationAbortRef.current?.abort();
+                getActiveAiCall()?.cancel();
                 directorPauseRef.current = false;
                 setDirectorPaused(false);
               }}

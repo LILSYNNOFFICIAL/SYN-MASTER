@@ -15,7 +15,14 @@ import {
   generateGeminiMasterStrategy,
   refineGeminiIteration,
 } from './src/server/aiMastering.ts';
-import { isValidAnalysisPayload, sanitizeAvailablePlugins, sanitizeVocalBalance } from './src/server/aiPayloadValidation.ts';
+import { AiValidationError } from './src/ai/masteringPrompt.ts';
+import {
+  isValidAnalysisPayload,
+  sanitizeAvailablePlugins,
+  sanitizeMasteringMode,
+  sanitizeObjectiveId,
+  sanitizeVocalBalance,
+} from './src/server/aiPayloadValidation.ts';
 import { createRateLimiter } from './src/server/requestLimiter.mjs';
 import { createAiSpendLimiter, createAiSpendMiddleware, readAiSpendLimitsFromEnv } from './src/server/aiSpendLimiter.mjs';
 import { createAiGuestSession } from './src/server/aiAccess.ts';
@@ -62,8 +69,14 @@ app.post('/api/ai/session', (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const result = guestBootstrapLimiter(ip);
   if (!result.allowed) {
-    res.setHeader('Retry-After', String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))));
-    res.status(429).json({ error: 'Cloud AI session setup is temporarily rate-limited. Try again shortly.' });
+    const retryAfterSec = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
+    res.setHeader('Retry-After', String(retryAfterSec));
+    res.status(429).json({
+      error: 'Cloud AI session setup is temporarily rate-limited. Try again shortly.',
+      code: 'ai_rate_limited',
+      scope: 'client-minute',
+      retryAfterSec,
+    });
     return;
   }
   aiGuestSession.bootstrap(req, res);
@@ -137,20 +150,24 @@ app.use(express.json({ limit: '4mb' }));
 
 function sendSanitizedAiError(res: express.Response, err: unknown): void {
   if (err instanceof AiConfigError) {
-    res.status(503).json({ error: err.message });
+    res.status(503).json({ error: err.message, code: 'missing_key' });
     return;
   }
   if (err instanceof AiTimeoutError) {
-    res.status(504).json({ error: err.message });
+    res.status(504).json({ error: err.message, code: 'ai_timeout', timeoutHit: 'server-25s' });
     return;
   }
   if (err instanceof SyntaxError) {
-    res.status(502).json({ error: 'AI returned malformed strategy JSON.' });
+    res.status(502).json({ error: 'AI returned malformed strategy JSON.', code: 'parse_error' });
+    return;
+  }
+  if (err instanceof AiValidationError) {
+    res.status(422).json({ error: err.message, code: 'validation_error' });
     return;
   }
   const msg = err instanceof Error ? err.message : 'AI mastering request failed.';
   console.error('[SYN-AI] Endpoint error:', msg);
-  res.status(500).json({ error: 'AI mastering service could not complete the request.' });
+  res.status(500).json({ error: 'AI mastering service could not complete the request.', code: 'server_error' });
 }
 
 async function measureEncodedLoudness(filePath: string): Promise<{ integratedLufs: number | null; truePeakDbtp: number | null }> {
@@ -398,7 +415,7 @@ app.post('/api/ai/master', async (req, res) => {
     }
     const safePlugins = pluginResult.value;
 
-    const strategy = await generateGeminiMasterStrategy({
+    const { aiMeta, ...strategy } = await generateGeminiMasterStrategy({
       analysis,
       mode: mode ?? 'ai-auto',
       objective,
@@ -410,7 +427,7 @@ app.post('/api/ai/master', async (req, res) => {
       availablePlugins: safePlugins,
       vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
-    res.json({ strategy });
+    res.json({ strategy, meta: aiMeta });
   } catch (err) {
     sendSanitizedAiError(res, err);
   }
@@ -422,6 +439,8 @@ app.post('/api/ai/refine', async (req, res) => {
       preAnalysis,
       postAnalysis,
       currentChain,
+      mode,
+      objective,
       targetLufs,
       targetTruePeakDb,
       preserveDynamics,
@@ -455,10 +474,15 @@ app.post('/api/ai/refine', async (req, res) => {
       return;
     }
 
-    const refined = await refineGeminiIteration({
+    const safeMode = sanitizeMasteringMode(mode);
+    const safeObjective = sanitizeObjectiveId(objective);
+
+    const { aiMeta, ...refined } = await refineGeminiIteration({
       preAnalysis,
       postAnalysis,
       currentChain: chainValidation.sanitizedChain,
+      mode: safeMode,
+      objective: safeObjective,
       targetLufs: parsedTargetLufs,
       targetTruePeakDb: parsedTargetTp,
       preserveDynamics: preserveDynamics !== false,
@@ -466,7 +490,7 @@ app.post('/api/ai/refine', async (req, res) => {
       targetGate,
       vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
-    res.json({ refined });
+    res.json({ refined, meta: aiMeta });
   } catch (err) {
     sendSanitizedAiError(res, err);
   }

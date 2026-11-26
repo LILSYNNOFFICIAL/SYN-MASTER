@@ -34,7 +34,7 @@ function fnv1aHash(str: string): string {
   return `${(h1 >>> 0).toString(16)}-${(h2 >>> 0).toString(16)}`;
 }
 
-const OBJECTIVE_LIMITS: Record<
+export const OBJECTIVE_LIMITS: Record<
   MasteringObjectiveId,
   { targetLufs: number; lufsTolerance: number; maxTruePeakDb: number; minDynamicRangeDb: number }
 > = {
@@ -52,6 +52,10 @@ const OBJECTIVE_LIMITS: Record<
   warm: { targetLufs: -13.0, lufsTolerance: 1.3, maxTruePeakDb: -1.0, minDynamicRangeDb: 8.0 },
   custom: { targetLufs: -13.0, lufsTolerance: 1.2, maxTruePeakDb: -1.0, minDynamicRangeDb: 7.0 },
 };
+
+export const MASTERING_OBJECTIVE_IDS: readonly MasteringObjectiveId[] = Object.keys(
+  OBJECTIVE_LIMITS,
+) as MasteringObjectiveId[];
 
 function normalizeStageParamsForFingerprint(mod: ProcessorModule): unknown {
   if (mod.type === 'parametric-eq') {

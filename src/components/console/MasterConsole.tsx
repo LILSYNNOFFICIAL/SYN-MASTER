@@ -78,6 +78,8 @@ export interface MasterConsoleProps {
   notice?: string | null;
   /** Friendly AI notice shown under FIX ALL (e.g. cloud AI limit reached, local planner used). */
   aiNotice?: string | null;
+  /** Visible banner shown whenever Cloud AI was not used / fell back during a FIX ALL pass. */
+  aiFallbackBanner?: string | null;
   /** "What AI changed" list rendered under FIX ALL after a run. */
   aiChanges?: React.ReactNode;
   /** Peaks of the processed preview render (falls back to the source); drawn as the glowing blanket behind the EQ curve. */
@@ -401,6 +403,9 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
         <button type="button" className="syn-fixai-stop" onClick={p.onStop}>
           <Square className="w-3 h-3" /> Stop
         </button>
+      )}
+      {p.aiFallbackBanner && (
+        <p className="syn-fixai-notice" role="status" data-testid="console-ai-fallback-banner">{p.aiFallbackBanner}</p>
       )}
       {p.aiNotice && (
         <p className="syn-fixai-notice" role="status" data-testid="console-ai-limit-notice">{p.aiNotice}</p>

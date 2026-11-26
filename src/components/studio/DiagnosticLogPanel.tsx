@@ -50,6 +50,28 @@ export const DiagnosticLogPanel: React.FC<{ log: DiagnosticLog }> = ({ log }) =>
         </div>
       </div>
 
+      {log.aiFallbackBanner && (
+        <div className="syn2-issue sev-moderate" role="status" data-testid="diagnostic-ai-fallback-banner">
+          {log.aiFallbackBanner}
+        </div>
+      )}
+
+      {log.aiPasses.length > 0 && (
+        <div className="syn2-issue-row" data-testid="diagnostic-ai-timing-summary">
+          <b>AI calls</b>{' '}
+          {log.aiPasses
+            .map((a) => {
+              const label = a.stage === 'strategy' ? 'Strategy' : `Refine #${a.pass}`;
+              const parts: string[] = [a.source];
+              if (a.responseTimeMs !== null) parts.push(`${a.responseTimeMs} ms`);
+              if (a.timeoutHit) parts.push(a.timeoutHit);
+              if (a.fallbackReason) parts.push(`fallback: ${a.fallbackReason}`);
+              return `${label} (${parts.join(', ')})`;
+            })
+            .join(' · ')}
+        </div>
+      )}
+
       {log.gate && (
         <div className="syn2-gate" aria-label="Objective target checks">
           {log.gate.checks.map((c) => (
@@ -111,26 +133,50 @@ export const DiagnosticLogPanel: React.FC<{ log: DiagnosticLog }> = ({ log }) =>
       )}
 
       {tab === 'passes' && (
-        <table className="syn2-table">
-          <thead>
-            <tr><th>Pass</th><th>LUFS</th><th>dBTP</th><th>Clicks</th><th>Gate</th><th>Outcome</th></tr>
-          </thead>
-          <tbody>
-            {log.passes.length === 0 && (
-              <tr><td colSpan={6}>No passes yet.</td></tr>
-            )}
-            {log.passes.map((p) => (
-              <tr key={p.pass}>
-                <td>#{p.pass}</td>
-                <td>{p.lufs.toFixed(1)}</td>
-                <td>{p.truePeakDb.toFixed(2)}</td>
-                <td>{p.clicks}</td>
-                <td>{p.gatePassed === null ? '—' : p.gatePassed ? 'PASS' : 'FAIL'}</td>
-                <td>{p.outcome}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="flex flex-col gap-3">
+          <table className="syn2-table">
+            <thead>
+              <tr><th>Pass</th><th>LUFS</th><th>dBTP</th><th>Clicks</th><th>Gate</th><th>Outcome</th></tr>
+            </thead>
+            <tbody>
+              {log.passes.length === 0 && (
+                <tr><td colSpan={6}>No passes yet.</td></tr>
+              )}
+              {log.passes.map((p) => (
+                <tr key={p.pass}>
+                  <td>#{p.pass}</td>
+                  <td>{p.lufs.toFixed(1)}</td>
+                  <td>{p.truePeakDb.toFixed(2)}</td>
+                  <td>{p.clicks}</td>
+                  <td>{p.gatePassed === null ? '—' : p.gatePassed ? 'PASS' : 'FAIL'}</td>
+                  <td>{p.outcome}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {log.aiPasses.length > 0 && (
+            <table className="syn2-table" aria-label="AI and fallback pass provenance">
+              <thead>
+                <tr><th>AI Call</th><th>Source</th><th>Model</th><th>Response Time</th><th>Prompt</th><th>Timeout</th><th>Fallback</th><th>AI vs Rendered Modules</th></tr>
+              </thead>
+              <tbody>
+                {log.aiPasses.map((a, idx) => (
+                  <tr key={`${a.stage}-${a.pass}-${idx}`}>
+                    <td>{a.stage === 'strategy' ? 'Strategy' : `Refine #${a.pass}`}</td>
+                    <td>{a.source}</td>
+                    <td>{a.modelName ?? '—'}</td>
+                    <td>{a.responseTimeMs !== null ? `${a.responseTimeMs} ms` : '—'}</td>
+                    <td>{a.promptChars !== null ? `${a.promptChars} chars` : '—'}</td>
+                    <td>{a.timeoutHit ?? '—'}</td>
+                    <td>{a.fallbackReason ? `${a.fallbackReason}${a.fallbackDetail ? ` (${a.fallbackDetail})` : ''}` : '—'}</td>
+                    <td>AI: [{a.aiReturnedModules.join(', ') || 'none'}] / Rendered: [{a.finalRenderedModules.join(', ') || 'none'}]</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
 
       {tab === 'chain' && (

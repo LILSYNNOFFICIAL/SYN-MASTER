@@ -22,8 +22,17 @@ import {
 } from './masteringPrompt.ts';
 import { callProvider, describeProvider, modelWarning, ProviderError, redactSecrets, type CallOptions, type ProviderConfig } from './providerAdapters.ts';
 import { BUILTIN_PROVIDER_ID, getPreset } from './providerPresets.ts';
+import type { ProcessorType } from '../types/mastering.ts';
 
 export const BUILTIN_LABEL = 'Built-in Gemini';
+
+export interface ProviderCallMeta {
+  source: 'gemini-cloud' | 'byo-provider';
+  modelName: string | null;
+  responseTimeMs: number | null;
+  promptChars: number | null;
+  aiReturnedModules: ProcessorType[];
+}
 
 export interface ProviderRunResult<T> {
   result: T | null;
@@ -32,6 +41,7 @@ export interface ProviderRunResult<T> {
   notices: string[];
   fellBack: boolean;
   cancelled: boolean;
+  meta?: ProviderCallMeta;
 }
 
 type StrategyResult = ReturnType<typeof normalizeStrategyResponse>;
@@ -42,28 +52,82 @@ function errorText(err: unknown, config: ProviderConfig): string {
   return redactSecrets(msg, [config.apiKey]);
 }
 
+function rawModuleTypesFromPayload(data: Record<string, unknown>): ProcessorType[] {
+  if (!Array.isArray(data.processors)) return [];
+  return data.processors
+    .map((p) => (p && typeof p === 'object' ? String((p as { type?: unknown }).type ?? '') : ''))
+    .filter(Boolean) as ProcessorType[];
+}
+
 async function runWithFallback<T>(
   config: ProviderConfig,
-  viaProvider: () => Promise<T>,
+  userPrompt: string,
+  viaProvider: () => Promise<{ normalized: T; aiReturnedModules: ProcessorType[] }>,
   viaBuiltin: () => Promise<T>,
 ): Promise<ProviderRunResult<T>> {
   const preset = getPreset(config.presetId);
+  const promptChars = SYSTEM_PROMPT.length + userPrompt.length;
   if (preset.id === BUILTIN_PROVIDER_ID) {
-    return { result: await viaBuiltin(), producedBy: BUILTIN_LABEL, notices: [], fellBack: false, cancelled: false };
+    const startedMs = performance.now();
+    const result = await viaBuiltin();
+    return {
+      result,
+      producedBy: BUILTIN_LABEL,
+      notices: [],
+      fellBack: false,
+      cancelled: false,
+      meta: {
+        source: 'gemini-cloud',
+        modelName: null,
+        responseTimeMs: Math.max(0, Math.round(performance.now() - startedMs)),
+        promptChars,
+        aiReturnedModules: [],
+      },
+    };
   }
-  const label = `${preset.label} (${describeProvider(config).model})`;
+  const modelName = describeProvider(config).model;
+  const label = `${preset.label} (${modelName})`;
   const warning = modelWarning(config);
   const baseNotices = warning ? [`${label}: ${warning}`] : [];
+  const startedMs = performance.now();
   try {
-    return { result: await viaProvider(), producedBy: label, notices: baseNotices, fellBack: false, cancelled: false };
+    const out = await viaProvider();
+    return {
+      result: out.normalized,
+      producedBy: label,
+      notices: baseNotices,
+      fellBack: false,
+      cancelled: false,
+      meta: {
+        source: 'byo-provider',
+        modelName,
+        responseTimeMs: Math.max(0, Math.round(performance.now() - startedMs)),
+        promptChars,
+        aiReturnedModules: out.aiReturnedModules,
+      },
+    };
   } catch (err) {
     if (err instanceof ProviderError && err.code === 'cancelled') {
       return { result: null, producedBy: null, notices: [...baseNotices, `${label}: cancelled by user; AI suggestion skipped for this step.`], fellBack: false, cancelled: true };
     }
     const kind = err instanceof AiValidationError || (err instanceof ProviderError && err.code === 'parse') ? 'output failed validation' : 'request failed';
     const notice = `${label} ${kind}: ${errorText(err, config)} Falling back to ${BUILTIN_LABEL} for this pass.`;
+    const builtinStartedMs = performance.now();
     const result = await viaBuiltin();
-    return { result, producedBy: BUILTIN_LABEL, notices: [...baseNotices, notice], fellBack: true, cancelled: false };
+    return {
+      result,
+      producedBy: BUILTIN_LABEL,
+      notices: [...baseNotices, notice],
+      fellBack: true,
+      cancelled: false,
+      meta: {
+        source: 'gemini-cloud',
+        modelName: null,
+        responseTimeMs: Math.max(0, Math.round(performance.now() - builtinStartedMs)),
+        promptChars,
+        aiReturnedModules: [],
+      },
+    };
   }
 }
 
@@ -73,15 +137,20 @@ export async function requestStrategy(
   builtin: () => Promise<StrategyResult>,
   opts: CallOptions = {},
 ): Promise<ProviderRunResult<StrategyResult>> {
+  const userPrompt = buildStrategyUserPrompt(input);
   return runWithFallback(
     config,
+    userPrompt,
     async () => {
       const data = await callProvider(
         config,
-        { kind: 'strategy', systemPrompt: SYSTEM_PROMPT, userPrompt: buildStrategyUserPrompt(input), measurements: input, schema: STRATEGY_JSON_SCHEMA },
+        { kind: 'strategy', systemPrompt: SYSTEM_PROMPT, userPrompt, measurements: input, schema: STRATEGY_JSON_SCHEMA },
         opts,
       );
-      return normalizeStrategyResponse(data, input);
+      return {
+        normalized: normalizeStrategyResponse(data, input),
+        aiReturnedModules: rawModuleTypesFromPayload(data),
+      };
     },
     builtin,
   );
@@ -93,15 +162,20 @@ export async function requestRefine(
   builtin: () => Promise<RefineResult>,
   opts: CallOptions = {},
 ): Promise<ProviderRunResult<RefineResult>> {
+  const userPrompt = buildRefineUserPrompt(input);
   return runWithFallback(
     config,
+    userPrompt,
     async () => {
       const data = await callProvider(
         config,
-        { kind: 'refine', systemPrompt: SYSTEM_PROMPT, userPrompt: buildRefineUserPrompt(input), measurements: input, schema: STRATEGY_JSON_SCHEMA },
+        { kind: 'refine', systemPrompt: SYSTEM_PROMPT, userPrompt, measurements: input, schema: STRATEGY_JSON_SCHEMA },
         opts,
       );
-      return normalizeRefineResponse(data, input.currentChain);
+      return {
+        normalized: normalizeRefineResponse(data, input.currentChain),
+        aiReturnedModules: rawModuleTypesFromPayload(data),
+      };
     },
     builtin,
   );

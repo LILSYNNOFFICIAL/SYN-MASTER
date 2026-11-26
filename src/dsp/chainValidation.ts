@@ -28,14 +28,174 @@ import type {
   SaturationParams,
   StereoImagerParams,
 } from '../types/mastering';
-import { EQ_CHANNELS, EQ_SUBTYPES, DYNAMIC_EQ_TYPES, allowedSlopes, resolveSubtype } from './eqDesign.ts';
+import { ALL_SLOPES, EQ_CHANNELS, EQ_SUBTYPES, DYNAMIC_EQ_TYPES, allowedSlopes, resolveSubtype } from './eqDesign.ts';
 import { MATCH_EQ_CHANNELS, MATCH_EQ_LIMITS, MATCH_EQ_SMOOTHING_OPTIONS, isValidSpectrumSet } from './matchEq.ts';
-import { DEFAULT_VOCAL_REBALANCE_PARAMS, sanitizeVocalRebalanceParams } from './vocalRebalance.ts';
+import { DEFAULT_VOCAL_REBALANCE_PARAMS, sanitizeVocalRebalanceParams, VOCAL_REBALANCE_LIMITS } from './vocalRebalance.ts';
 
 /** Band limits shared by the editors and AI validation. */
 export const MAX_EQ_BANDS = 8;
 export const MAX_DYNAMIC_EQ_BANDS = 8;
-const EQ_SHAPES: EQBandShape[] = ['highpass', 'lowshelf', 'bell', 'highshelf', 'lowpass', 'notch', 'bandpass', 'tilt'];
+export const EQ_SHAPES: readonly EQBandShape[] = ['highpass', 'lowshelf', 'bell', 'highshelf', 'lowpass', 'notch', 'bandpass', 'tilt'];
+
+/** Single source of truth for processor parameter ranges and enums (used by clampers and AI prompts). */
+export const PROCESSOR_PARAM_LIMITS = {
+  module: {
+    intensity: [0, 100] as const,
+    wetDry: [0, 100] as const,
+    inputGainDb: [-12, 12] as const,
+    outputGainDb: [-12, 12] as const,
+  },
+  'parametric-eq': {
+    maxBands: MAX_EQ_BANDS,
+    phaseMode: ['minimum', 'linear'] as const,
+    msMode: ['stereo', 'mid-side'] as const,
+    tiltDb: [-6, 6] as const,
+    band: {
+      shape: EQ_SHAPES,
+      subtype: EQ_SUBTYPES,
+      slope: ALL_SLOPES,
+      channel: EQ_CHANNELS,
+      freq: [20, 19500] as const,
+      gain: [-12, 12] as const,
+      q: [0.25, 12] as const,
+    },
+  },
+  'dynamic-eq': {
+    maxBands: MAX_DYNAMIC_EQ_BANDS,
+    band: {
+      type: DYNAMIC_EQ_TYPES,
+      mode: ['cut', 'boost'] as const,
+      channel: EQ_CHANNELS,
+      freq: [30, 16000] as const,
+      q: [0.5, 10] as const,
+      thresholdDb: [-45, 0] as const,
+      maxCutDbCut: [-12, 0] as const,
+      maxCutDbBoost: [0, 12] as const,
+      ratio: [1.0, 20.0] as const,
+      kneeDb: [0, 24] as const,
+      attackMs: [1, 100] as const,
+      releaseMs: [20, 600] as const,
+      lookaheadMs: [0, 10] as const,
+      sidechainMode: ['band', 'custom'] as const,
+      sidechainFreq: [20, 20000] as const,
+      sidechainQ: [0.3, 12] as const,
+    },
+  },
+  compressor: {
+    mode: ['downward', 'upward', 'parallel'] as const,
+    thresholdDb: [-40, 0] as const,
+    ratio: [1.0, 12.0] as const,
+    attackMs: [0.5, 150] as const,
+    releaseMs: [20, 1000] as const,
+    kneeDb: [0, 12] as const,
+    makeupDb: [-6, 12] as const,
+    scHpfHz: [20, 250] as const,
+  },
+  'multiband-comp': {
+    lowCrossHz: [60, 600] as const,
+    highCrossMinOffsetHz: 200,
+    highCrossMaxHz: 10000,
+    band: {
+      thresholdDb: [-40, 0] as const,
+      ratio: [1.0, 10.0] as const,
+      attackMs: [1, 120] as const,
+      releaseMs: [20, 800] as const,
+      gainDb: [-6, 6] as const,
+    },
+  },
+  saturation: {
+    flavor: ['tube', 'tape', 'soft-clip', 'hard-clip', 'exciter'] as const,
+    drive: [0, 100] as const,
+    tone: [-100, 100] as const,
+    harmonics: ['even', 'odd', 'balanced'] as const,
+    oversampling: [1, 2, 4] as const,
+  },
+  'stereo-imager': {
+    lowWidth: [0, 160] as const,
+    midWidth: [0, 175] as const,
+    highWidth: [0, 190] as const,
+    lowCrossHz: [60, 500] as const,
+    highCrossMinOffsetHz: 250,
+    highCrossMaxHz: 12000,
+    monoBassBelowHz: [0, 200] as const,
+    lrBalanceDb: [-4, 4] as const,
+    midSideGainDb: [-6, 6] as const,
+  },
+  restore: {
+    humRemovalHz: [0, 50, 60] as const,
+    hissReduction: [0, 100] as const,
+    deEssAmount: [0, 100] as const,
+    deEssFreqHz: [3500, 11000] as const,
+    resonanceSuppress: [0, 100] as const,
+    mode: ['conservative', 'aggressive'] as const,
+    declick: [0, 100] as const,
+    decrackle: [0, 100] as const,
+    deShimmer: [0, 100] as const,
+  },
+  'bass-enhancer': {
+    subFreqHz: [35, 95] as const,
+    subGainDb: [0, 7] as const,
+    harmonicDrive: [0, 100] as const,
+    tightness: [0, 100] as const,
+  },
+  limiter: {
+    ceilingDb: [-6.0, -0.1] as const,
+    thresholdDb: [-18.0, 0.0] as const,
+    releaseMs: [10, 500] as const,
+    lookaheadMs: [0, 10] as const,
+    oversampling: [1, 2, 4] as const,
+  },
+  maximizer: {
+    character: ['transparent', 'punchy', 'aggressive', 'smooth'] as const,
+    targetLufs: [-24, -6] as const,
+    ceilingDb: [-3.0, -0.1] as const,
+    transientEmphasis: [0, 100] as const,
+  },
+  'transient-shaper': {
+    attackDb: [-12, 12] as const,
+    sustainDb: [-12, 12] as const,
+    speedMs: [2, 60] as const,
+    lowCutHz: [20, 300] as const,
+  },
+  clipper: {
+    ceilingDb: [-6, 0] as const,
+    driveDb: [0, 12] as const,
+    softness: [0, 100] as const,
+    oversampling: [1, 2, 4] as const,
+  },
+  'multiband-maximizer': {
+    lowCrossHz: [40, 600] as const,
+    highCrossMinOffsetHz: 250,
+    highCrossMaxHz: 12000,
+    band: {
+      preGainDb: [-6, 12] as const,
+      thresholdDb: [-36, 0] as const,
+      ratio: [1, 20] as const,
+      attackMs: [0.5, 200] as const,
+      releaseMs: [10, 1000] as const,
+      postGainDb: [-12, 6] as const,
+    },
+    ceilingDb: [-3, -0.1] as const,
+    releaseMs: [10, 500] as const,
+  },
+  dither: {
+    bitDepth: [16, 20, 24] as const,
+    shape: ['tpdf', 'tpdf-hp', 'shaped'] as const,
+  },
+  'match-eq': {
+    ...MATCH_EQ_LIMITS,
+    smoothing: MATCH_EQ_SMOOTHING_OPTIONS,
+    channel: MATCH_EQ_CHANNELS,
+    phase: ['linear', 'minimum'] as const,
+  },
+  'vocal-rebalance': {
+    vocalGainDb: [VOCAL_REBALANCE_LIMITS.gainMinDb, VOCAL_REBALANCE_LIMITS.gainMaxDb] as const,
+    bassGainDb: [VOCAL_REBALANCE_LIMITS.gainMinDb, VOCAL_REBALANCE_LIMITS.gainMaxDb] as const,
+    drumsGainDb: [VOCAL_REBALANCE_LIMITS.gainMinDb, VOCAL_REBALANCE_LIMITS.gainMaxDb] as const,
+    sensitivity: [VOCAL_REBALANCE_LIMITS.sensitivityMin, VOCAL_REBALANCE_LIMITS.sensitivityMax] as const,
+    smoothingMs: [VOCAL_REBALANCE_LIMITS.smoothingMinMs, VOCAL_REBALANCE_LIMITS.smoothingMaxMs] as const,
+  },
+} as const;
 
 function clamp(v: number, min: number, max: number, fallback: number): number {
   if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
@@ -221,10 +381,10 @@ export function createProcessorModule(
     name: overrides?.name ?? PROCESSOR_DEFAULT_NAMES[type],
     enabled: overrides?.enabled ?? true,
     bypassed: overrides?.bypassed ?? false,
-    intensity: clamp(overrides?.intensity ?? 100, 0, 100, 100),
-    wetDry: clamp(overrides?.wetDry ?? 100, 0, 100, 100),
-    inputGainDb: clamp(overrides?.inputGainDb ?? 0, -12, 12, 0),
-    outputGainDb: clamp(overrides?.outputGainDb ?? 0, -12, 12, 0),
+    intensity: clamp(overrides?.intensity ?? 100, PROCESSOR_PARAM_LIMITS.module.intensity[0], PROCESSOR_PARAM_LIMITS.module.intensity[1], 100),
+    wetDry: clamp(overrides?.wetDry ?? 100, PROCESSOR_PARAM_LIMITS.module.wetDry[0], PROCESSOR_PARAM_LIMITS.module.wetDry[1], 100),
+    inputGainDb: clamp(overrides?.inputGainDb ?? 0, PROCESSOR_PARAM_LIMITS.module.inputGainDb[0], PROCESSOR_PARAM_LIMITS.module.inputGainDb[1], 0),
+    outputGainDb: clamp(overrides?.outputGainDb ?? 0, PROCESSOR_PARAM_LIMITS.module.outputGainDb[0], PROCESSOR_PARAM_LIMITS.module.outputGainDb[1], 0),
     expanded: overrides?.expanded ?? false,
     presetName: overrides?.presetName,
     group: overrides?.group,
@@ -241,30 +401,31 @@ export function validateProcessorParams(
 
   switch (type) {
     case 'parametric-eq': {
+      const lim = PROCESSOR_PARAM_LIMITS['parametric-eq'];
       const def = defaults as ParametricEQParams;
       const rawBands = Array.isArray(src.bands) ? src.bands : def.bands;
-      const bands: EQBand[] = rawBands.slice(0, MAX_EQ_BANDS).map((b, idx) => {
+      const bands: EQBand[] = rawBands.slice(0, lim.maxBands).map((b, idx) => {
         const bo = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
-        const shape = (EQ_SHAPES as string[]).includes(String(bo.shape))
+        const shape = (lim.band.shape as readonly string[]).includes(String(bo.shape))
           ? (bo.shape as EQBand['shape'])
           : 'bell';
         const band: EQBand = {
           id: typeof bo.id === 'string' && bo.id ? bo.id : `b${idx + 1}`,
           enabled: bo.enabled !== false,
           shape,
-          freq: clamp(Number(bo.freq), 20, 19500, 1000),
-          gain: clamp(Number(bo.gain), -12, 12, 0),
-          q: clamp(Number(bo.q), 0.25, 12, 1.0),
+          freq: clamp(Number(bo.freq), lim.band.freq[0], lim.band.freq[1], 1000),
+          gain: clamp(Number(bo.gain), lim.band.gain[0], lim.band.gain[1], 0),
+          q: clamp(Number(bo.q), lim.band.q[0], lim.band.q[1], 1.0),
         };
         // New fields are only written when present and valid, so legacy bands keep their exact shape.
-        if (typeof bo.subtype === 'string' && EQ_SUBTYPES[shape].includes(bo.subtype as EQBandSubtype)) {
+        if (typeof bo.subtype === 'string' && lim.band.subtype[shape].includes(bo.subtype as EQBandSubtype)) {
           band.subtype = bo.subtype as EQBandSubtype;
         }
         const slope = Number(bo.slope);
         if (bo.slope !== undefined && allowedSlopes(shape, resolveSubtype(band)).includes(slope as EQSlope)) {
           band.slope = slope as EQSlope;
         }
-        if (typeof bo.channel === 'string' && (EQ_CHANNELS as string[]).includes(bo.channel)) {
+        if (typeof bo.channel === 'string' && (lim.band.channel as readonly string[]).includes(bo.channel)) {
           band.channel = bo.channel as EQChannel;
         }
         if (bo.solo === true) band.solo = true;
@@ -273,50 +434,53 @@ export function validateProcessorParams(
       const out: ParametricEQParams = {
         phaseMode: src.phaseMode === 'linear' ? 'linear' : 'minimum',
         msMode: src.msMode === 'mid-side' ? 'mid-side' : 'stereo',
-        tiltDb: clamp(Number(src.tiltDb), -6, 6, 0),
+        tiltDb: clamp(Number(src.tiltDb), lim.tiltDb[0], lim.tiltDb[1], 0),
         bands: bands.length > 0 ? bands : def.bands,
       };
       if (src.autoGain === true) out.autoGain = true;
       return out;
     }
     case 'dynamic-eq': {
+      const lim = PROCESSOR_PARAM_LIMITS['dynamic-eq'];
       const def = defaults as DynamicEQParams;
       const rawBands = Array.isArray(src.bands) ? src.bands : def.bands;
       return {
-        bands: rawBands.slice(0, MAX_DYNAMIC_EQ_BANDS).map((b, idx): DynamicEQBand => {
+        bands: rawBands.slice(0, lim.maxBands).map((b, idx): DynamicEQBand => {
           const bo = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
           const mode: 'cut' | 'boost' = bo.mode === 'boost' ? 'boost' : 'cut';
           const band: DynamicEQBand = {
             id: typeof bo.id === 'string' && bo.id ? bo.id : `d${idx + 1}`,
             enabled: bo.enabled !== false,
-            freq: clamp(Number(bo.freq), 30, 16000, 500),
-            q: clamp(Number(bo.q), 0.5, 10, 2.0),
-            thresholdDb: clamp(Number(bo.thresholdDb), -45, 0, -20),
+            freq: clamp(Number(bo.freq), lim.band.freq[0], lim.band.freq[1], 500),
+            q: clamp(Number(bo.q), lim.band.q[0], lim.band.q[1], 2.0),
+            thresholdDb: clamp(Number(bo.thresholdDb), lim.band.thresholdDb[0], lim.band.thresholdDb[1], -20),
             maxCutDb: mode === 'boost'
-              ? clamp(Number(bo.maxCutDb), 0, 12, 3)
-              : clamp(Number(bo.maxCutDb), -12, 0, -3),
-            ratio: clamp(Number(bo.ratio), 1.0, 20.0, 20 / 7),
+              ? clamp(Number(bo.maxCutDb), lim.band.maxCutDbBoost[0], lim.band.maxCutDbBoost[1], 3)
+              : clamp(Number(bo.maxCutDb), lim.band.maxCutDbCut[0], lim.band.maxCutDbCut[1], -3),
+            ratio: clamp(Number(bo.ratio), lim.band.ratio[0], lim.band.ratio[1], 20 / 7),
             mode,
-            attackMs: clamp(Number(bo.attackMs), 1, 100, 10),
-            releaseMs: clamp(Number(bo.releaseMs), 20, 600, 110),
+            attackMs: clamp(Number(bo.attackMs), lim.band.attackMs[0], lim.band.attackMs[1], 10),
+            releaseMs: clamp(Number(bo.releaseMs), lim.band.releaseMs[0], lim.band.releaseMs[1], 110),
           };
-          if (typeof bo.type === 'string' && (DYNAMIC_EQ_TYPES as string[]).includes(bo.type)) {
+          if (typeof bo.type === 'string' && (lim.band.type as readonly string[]).includes(bo.type)) {
             band.type = bo.type as DynamicEQBandType;
           }
-          if (bo.kneeDb !== undefined && Number.isFinite(Number(bo.kneeDb))) band.kneeDb = clamp(Number(bo.kneeDb), 0, 24, 0);
-          if (typeof bo.channel === 'string' && (EQ_CHANNELS as string[]).includes(bo.channel)) {
+          if (bo.kneeDb !== undefined && Number.isFinite(Number(bo.kneeDb))) {
+            band.kneeDb = clamp(Number(bo.kneeDb), lim.band.kneeDb[0], lim.band.kneeDb[1], 0);
+          }
+          if (typeof bo.channel === 'string' && (lim.band.channel as readonly string[]).includes(bo.channel)) {
             band.channel = bo.channel as EQChannel;
           }
           if (bo.sidechain && typeof bo.sidechain === 'object') {
             const sc = bo.sidechain as Record<string, unknown>;
             band.sidechain = {
               mode: sc.mode === 'custom' ? 'custom' : 'band',
-              freq: clamp(Number(sc.freq), 20, 20000, band.freq),
-              q: clamp(Number(sc.q), 0.3, 12, band.q),
+              freq: clamp(Number(sc.freq), lim.band.sidechainFreq[0], lim.band.sidechainFreq[1], band.freq),
+              q: clamp(Number(sc.q), lim.band.sidechainQ[0], lim.band.sidechainQ[1], band.q),
             };
           }
           if (bo.lookaheadMs !== undefined && Number.isFinite(Number(bo.lookaheadMs))) {
-            band.lookaheadMs = clamp(Number(bo.lookaheadMs), 0, 10, 0);
+            band.lookaheadMs = clamp(Number(bo.lookaheadMs), lim.band.lookaheadMs[0], lim.band.lookaheadMs[1], 0);
           }
           if (bo.solo === true) band.solo = true;
           return band;
@@ -324,35 +488,37 @@ export function validateProcessorParams(
       };
     }
     case 'compressor': {
+      const lim = PROCESSOR_PARAM_LIMITS.compressor;
       const def = defaults as CompressorParams;
       return {
-        mode: ['downward', 'upward', 'parallel'].includes(String(src.mode))
+        mode: (lim.mode as readonly string[]).includes(String(src.mode))
           ? (src.mode as CompressorParams['mode'])
           : def.mode,
-        thresholdDb: clamp(Number(src.thresholdDb), -40, 0, def.thresholdDb),
-        ratio: clamp(Number(src.ratio), 1.0, 12.0, def.ratio),
-        attackMs: clamp(Number(src.attackMs), 0.5, 150, def.attackMs),
-        releaseMs: clamp(Number(src.releaseMs), 20, 1000, def.releaseMs),
-        kneeDb: clamp(Number(src.kneeDb), 0, 12, def.kneeDb),
-        makeupDb: clamp(Number(src.makeupDb), -6, 12, def.makeupDb),
-        scHpfHz: clamp(Number(src.scHpfHz), 20, 250, def.scHpfHz),
+        thresholdDb: clamp(Number(src.thresholdDb), lim.thresholdDb[0], lim.thresholdDb[1], def.thresholdDb),
+        ratio: clamp(Number(src.ratio), lim.ratio[0], lim.ratio[1], def.ratio),
+        attackMs: clamp(Number(src.attackMs), lim.attackMs[0], lim.attackMs[1], def.attackMs),
+        releaseMs: clamp(Number(src.releaseMs), lim.releaseMs[0], lim.releaseMs[1], def.releaseMs),
+        kneeDb: clamp(Number(src.kneeDb), lim.kneeDb[0], lim.kneeDb[1], def.kneeDb),
+        makeupDb: clamp(Number(src.makeupDb), lim.makeupDb[0], lim.makeupDb[1], def.makeupDb),
+        scHpfHz: clamp(Number(src.scHpfHz), lim.scHpfHz[0], lim.scHpfHz[1], def.scHpfHz),
       };
     }
     case 'multiband-comp': {
+      const lim = PROCESSOR_PARAM_LIMITS['multiband-comp'];
       const def = defaults as MultibandCompParams;
       const validateBand = (b: unknown, fb: MultibandBandParams): MultibandBandParams => {
         const bo = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
         return {
-          thresholdDb: clamp(Number(bo.thresholdDb), -40, 0, fb.thresholdDb),
-          ratio: clamp(Number(bo.ratio), 1.0, 10.0, fb.ratio),
-          attackMs: clamp(Number(bo.attackMs), 1, 120, fb.attackMs),
-          releaseMs: clamp(Number(bo.releaseMs), 20, 800, fb.releaseMs),
-          gainDb: clamp(Number(bo.gainDb), -6, 6, fb.gainDb),
+          thresholdDb: clamp(Number(bo.thresholdDb), lim.band.thresholdDb[0], lim.band.thresholdDb[1], fb.thresholdDb),
+          ratio: clamp(Number(bo.ratio), lim.band.ratio[0], lim.band.ratio[1], fb.ratio),
+          attackMs: clamp(Number(bo.attackMs), lim.band.attackMs[0], lim.band.attackMs[1], fb.attackMs),
+          releaseMs: clamp(Number(bo.releaseMs), lim.band.releaseMs[0], lim.band.releaseMs[1], fb.releaseMs),
+          gainDb: clamp(Number(bo.gainDb), lim.band.gainDb[0], lim.band.gainDb[1], fb.gainDb),
           bypass: bo.bypass === true,
         };
       };
-      const lowCross = clamp(Number(src.lowCrossHz), 60, 600, def.lowCrossHz);
-      const highCross = clamp(Number(src.highCrossHz), lowCross + 200, 10000, def.highCrossHz);
+      const lowCross = clamp(Number(src.lowCrossHz), lim.lowCrossHz[0], lim.lowCrossHz[1], def.lowCrossHz);
+      const highCross = clamp(Number(src.highCrossHz), lowCross + lim.highCrossMinOffsetHz, lim.highCrossMaxHz, def.highCrossHz);
       return {
         lowCrossHz: lowCross,
         highCrossHz: highCross,
@@ -362,119 +528,128 @@ export function validateProcessorParams(
       };
     }
     case 'saturation': {
+      const lim = PROCESSOR_PARAM_LIMITS.saturation;
       const def = defaults as SaturationParams;
       return {
-        flavor: ['tube', 'tape', 'soft-clip', 'hard-clip', 'exciter'].includes(String(src.flavor))
+        flavor: (lim.flavor as readonly string[]).includes(String(src.flavor))
           ? (src.flavor as SaturationParams['flavor'])
           : def.flavor,
-        drive: clamp(Number(src.drive), 0, 100, def.drive),
-        tone: clamp(Number(src.tone), -100, 100, def.tone),
-        harmonics: ['even', 'odd', 'balanced'].includes(String(src.harmonics))
+        drive: clamp(Number(src.drive), lim.drive[0], lim.drive[1], def.drive),
+        tone: clamp(Number(src.tone), lim.tone[0], lim.tone[1], def.tone),
+        harmonics: (lim.harmonics as readonly string[]).includes(String(src.harmonics))
           ? (src.harmonics as SaturationParams['harmonics'])
           : def.harmonics,
-        oversampling: [1, 2, 4].includes(Number(src.oversampling))
+        oversampling: (lim.oversampling as readonly number[]).includes(Number(src.oversampling))
           ? (Number(src.oversampling) as 1 | 2 | 4)
           : 2,
       };
     }
     case 'stereo-imager': {
+      const lim = PROCESSOR_PARAM_LIMITS['stereo-imager'];
       const def = defaults as StereoImagerParams;
-      const lowCross = clamp(Number(src.lowCrossHz), 60, 500, def.lowCrossHz);
+      const lowCross = clamp(Number(src.lowCrossHz), lim.lowCrossHz[0], lim.lowCrossHz[1], def.lowCrossHz);
       return {
-        lowWidth: clamp(Number(src.lowWidth), 0, 160, def.lowWidth),
-        midWidth: clamp(Number(src.midWidth), 0, 175, def.midWidth),
-        highWidth: clamp(Number(src.highWidth), 0, 190, def.highWidth),
+        lowWidth: clamp(Number(src.lowWidth), lim.lowWidth[0], lim.lowWidth[1], def.lowWidth),
+        midWidth: clamp(Number(src.midWidth), lim.midWidth[0], lim.midWidth[1], def.midWidth),
+        highWidth: clamp(Number(src.highWidth), lim.highWidth[0], lim.highWidth[1], def.highWidth),
         lowCrossHz: lowCross,
-        highCrossHz: clamp(Number(src.highCrossHz), lowCross + 250, 12000, def.highCrossHz),
-        monoBassBelowHz: clamp(Number(src.monoBassBelowHz), 0, 200, def.monoBassBelowHz),
-        lrBalanceDb: clamp(Number(src.lrBalanceDb), -4, 4, def.lrBalanceDb),
-        midSideGainDb: clamp(Number(src.midSideGainDb), -6, 6, def.midSideGainDb),
+        highCrossHz: clamp(Number(src.highCrossHz), lowCross + lim.highCrossMinOffsetHz, lim.highCrossMaxHz, def.highCrossHz),
+        monoBassBelowHz: clamp(Number(src.monoBassBelowHz), lim.monoBassBelowHz[0], lim.monoBassBelowHz[1], def.monoBassBelowHz),
+        lrBalanceDb: clamp(Number(src.lrBalanceDb), lim.lrBalanceDb[0], lim.lrBalanceDb[1], def.lrBalanceDb),
+        midSideGainDb: clamp(Number(src.midSideGainDb), lim.midSideGainDb[0], lim.midSideGainDb[1], def.midSideGainDb),
       };
     }
     case 'restore': {
+      const lim = PROCESSOR_PARAM_LIMITS.restore;
       const def = defaults as RestoreParams;
       return {
         dcOffset: src.dcOffset !== false,
-        humRemovalHz: [0, 50, 60].includes(Number(src.humRemovalHz))
+        humRemovalHz: (lim.humRemovalHz as readonly number[]).includes(Number(src.humRemovalHz))
           ? (Number(src.humRemovalHz) as 0 | 50 | 60)
           : 0,
-        hissReduction: clamp(Number(src.hissReduction), 0, 100, def.hissReduction),
-        deEssAmount: clamp(Number(src.deEssAmount), 0, 100, def.deEssAmount),
-        deEssFreqHz: clamp(Number(src.deEssFreqHz), 3500, 11000, def.deEssFreqHz),
-        resonanceSuppress: clamp(Number(src.resonanceSuppress), 0, 100, def.resonanceSuppress),
+        hissReduction: clamp(Number(src.hissReduction), lim.hissReduction[0], lim.hissReduction[1], def.hissReduction),
+        deEssAmount: clamp(Number(src.deEssAmount), lim.deEssAmount[0], lim.deEssAmount[1], def.deEssAmount),
+        deEssFreqHz: clamp(Number(src.deEssFreqHz), lim.deEssFreqHz[0], lim.deEssFreqHz[1], def.deEssFreqHz),
+        resonanceSuppress: clamp(Number(src.resonanceSuppress), lim.resonanceSuppress[0], lim.resonanceSuppress[1], def.resonanceSuppress),
         mode: src.mode === 'aggressive' ? 'aggressive' : 'conservative',
-        declick: clamp(Number(src.declick), 0, 100, def.declick ?? 0),
-        decrackle: clamp(Number(src.decrackle), 0, 100, def.decrackle ?? 0),
+        declick: clamp(Number(src.declick), lim.declick[0], lim.declick[1], def.declick ?? 0),
+        decrackle: clamp(Number(src.decrackle), lim.decrackle[0], lim.decrackle[1], def.decrackle ?? 0),
         spikeRepair: src.spikeRepair === true,
-        deShimmer: clamp(Number(src.deShimmer), 0, 100, def.deShimmer ?? 0),
+        deShimmer: clamp(Number(src.deShimmer), lim.deShimmer[0], lim.deShimmer[1], def.deShimmer ?? 0),
       };
     }
     case 'bass-enhancer': {
+      const lim = PROCESSOR_PARAM_LIMITS['bass-enhancer'];
       const def = defaults as BassEnhancerParams;
       return {
-        subFreqHz: clamp(Number(src.subFreqHz), 35, 95, def.subFreqHz),
-        subGainDb: clamp(Number(src.subGainDb), 0, 7, def.subGainDb),
-        harmonicDrive: clamp(Number(src.harmonicDrive), 0, 100, def.harmonicDrive),
-        tightness: clamp(Number(src.tightness), 0, 100, def.tightness),
+        subFreqHz: clamp(Number(src.subFreqHz), lim.subFreqHz[0], lim.subFreqHz[1], def.subFreqHz),
+        subGainDb: clamp(Number(src.subGainDb), lim.subGainDb[0], lim.subGainDb[1], def.subGainDb),
+        harmonicDrive: clamp(Number(src.harmonicDrive), lim.harmonicDrive[0], lim.harmonicDrive[1], def.harmonicDrive),
+        tightness: clamp(Number(src.tightness), lim.tightness[0], lim.tightness[1], def.tightness),
         monoFocus: src.monoFocus !== false,
       };
     }
     case 'limiter': {
+      const lim = PROCESSOR_PARAM_LIMITS.limiter;
       const def = defaults as LimiterParams;
       return {
-        ceilingDb: clamp(Number(src.ceilingDb), -6.0, -0.1, def.ceilingDb),
-        thresholdDb: clamp(Number(src.thresholdDb), -18.0, 0.0, def.thresholdDb),
-        releaseMs: clamp(Number(src.releaseMs), 10, 500, def.releaseMs),
-        lookaheadMs: clamp(Number(src.lookaheadMs), 0, 10, def.lookaheadMs),
+        ceilingDb: clamp(Number(src.ceilingDb), lim.ceilingDb[0], lim.ceilingDb[1], def.ceilingDb),
+        thresholdDb: clamp(Number(src.thresholdDb), lim.thresholdDb[0], lim.thresholdDb[1], def.thresholdDb),
+        releaseMs: clamp(Number(src.releaseMs), lim.releaseMs[0], lim.releaseMs[1], def.releaseMs),
+        lookaheadMs: clamp(Number(src.lookaheadMs), lim.lookaheadMs[0], lim.lookaheadMs[1], def.lookaheadMs),
         truePeak: src.truePeak !== false,
-        oversampling: [1, 2, 4].includes(Number(src.oversampling))
+        oversampling: (lim.oversampling as readonly number[]).includes(Number(src.oversampling))
           ? (Number(src.oversampling) as 1 | 2 | 4)
           : 4,
       };
     }
     case 'maximizer': {
+      const lim = PROCESSOR_PARAM_LIMITS.maximizer;
       const def = defaults as MaximizerParams;
       return {
-        character: ['transparent', 'punchy', 'aggressive', 'smooth'].includes(String(src.character))
+        character: (lim.character as readonly string[]).includes(String(src.character))
           ? (src.character as MaximizerParams['character'])
           : def.character,
-        targetLufs: clamp(Number(src.targetLufs), -24, -6, def.targetLufs),
-        ceilingDb: clamp(Number(src.ceilingDb), -3.0, -0.1, def.ceilingDb),
-        transientEmphasis: clamp(Number(src.transientEmphasis), 0, 100, def.transientEmphasis),
+        targetLufs: clamp(Number(src.targetLufs), lim.targetLufs[0], lim.targetLufs[1], def.targetLufs),
+        ceilingDb: clamp(Number(src.ceilingDb), lim.ceilingDb[0], lim.ceilingDb[1], def.ceilingDb),
+        transientEmphasis: clamp(Number(src.transientEmphasis), lim.transientEmphasis[0], lim.transientEmphasis[1], def.transientEmphasis),
         truePeak: src.truePeak !== false,
       };
     }
     case 'transient-shaper': {
+      const lim = PROCESSOR_PARAM_LIMITS['transient-shaper'];
       const def = defaults as TransientShaperParams;
       return {
-        attackDb: clamp(Number(src.attackDb), -12, 12, def.attackDb),
-        sustainDb: clamp(Number(src.sustainDb), -12, 12, def.sustainDb),
-        speedMs: clamp(Number(src.speedMs), 2, 60, def.speedMs),
-        lowCutHz: clamp(Number(src.lowCutHz), 20, 300, def.lowCutHz),
+        attackDb: clamp(Number(src.attackDb), lim.attackDb[0], lim.attackDb[1], def.attackDb),
+        sustainDb: clamp(Number(src.sustainDb), lim.sustainDb[0], lim.sustainDb[1], def.sustainDb),
+        speedMs: clamp(Number(src.speedMs), lim.speedMs[0], lim.speedMs[1], def.speedMs),
+        lowCutHz: clamp(Number(src.lowCutHz), lim.lowCutHz[0], lim.lowCutHz[1], def.lowCutHz),
       };
     }
     case 'dither': {
+      const lim = PROCESSOR_PARAM_LIMITS.dither;
       const def = defaults as DitherParams;
       const bd = Number(src.bitDepth);
       const shape = src.shape;
       return {
-        bitDepth: bd === 16 || bd === 20 || bd === 24 ? bd : def.bitDepth,
-        shape: shape === 'tpdf' || shape === 'tpdf-hp' || shape === 'shaped' ? shape : def.shape,
+        bitDepth: (lim.bitDepth as readonly number[]).includes(bd) ? (bd as DitherParams['bitDepth']) : def.bitDepth,
+        shape: (lim.shape as readonly string[]).includes(String(shape)) ? (shape as DitherParams['shape']) : def.shape,
         autoBlank: typeof src.autoBlank === 'boolean' ? src.autoBlank : def.autoBlank,
       };
     }
     case 'match-eq': {
+      const lim = PROCESSOR_PARAM_LIMITS['match-eq'];
       const def = defaults as MatchEqParams;
       const sm = Number(src.smoothing);
-      const lowHz = clamp(Number(src.lowHz), MATCH_EQ_LIMITS.lowHz[0], MATCH_EQ_LIMITS.lowHz[1], def.lowHz);
+      const lowHz = clamp(Number(src.lowHz), lim.lowHz[0], lim.lowHz[1], def.lowHz);
       const out: MatchEqParams = {
-        amount: clamp(Number(src.amount), MATCH_EQ_LIMITS.amount[0], MATCH_EQ_LIMITS.amount[1], def.amount),
-        smoothing: (MATCH_EQ_SMOOTHING_OPTIONS as number[]).includes(sm) ? (sm as MatchEqParams['smoothing']) : def.smoothing,
-        maxBoostDb: clamp(Number(src.maxBoostDb), MATCH_EQ_LIMITS.maxBoostDb[0], MATCH_EQ_LIMITS.maxBoostDb[1], def.maxBoostDb),
-        maxCutDb: clamp(Math.abs(Number(src.maxCutDb)), MATCH_EQ_LIMITS.maxCutDb[0], MATCH_EQ_LIMITS.maxCutDb[1], def.maxCutDb),
+        amount: clamp(Number(src.amount), lim.amount[0], lim.amount[1], def.amount),
+        smoothing: (lim.smoothing as readonly number[]).includes(sm) ? (sm as MatchEqParams['smoothing']) : def.smoothing,
+        maxBoostDb: clamp(Number(src.maxBoostDb), lim.maxBoostDb[0], lim.maxBoostDb[1], def.maxBoostDb),
+        maxCutDb: clamp(Math.abs(Number(src.maxCutDb)), lim.maxCutDb[0], lim.maxCutDb[1], def.maxCutDb),
         lowHz,
-        highHz: clamp(Number(src.highHz), Math.max(MATCH_EQ_LIMITS.highHz[0], lowHz * 2), MATCH_EQ_LIMITS.highHz[1], Math.max(def.highHz, lowHz * 2)),
-        channel: (MATCH_EQ_CHANNELS as string[]).includes(String(src.channel)) ? (src.channel as MatchEqParams['channel']) : def.channel,
+        highHz: clamp(Number(src.highHz), Math.max(lim.highHz[0], lowHz * 2), lim.highHz[1], Math.max(def.highHz, lowHz * 2)),
+        channel: (lim.channel as readonly string[]).includes(String(src.channel)) ? (src.channel as MatchEqParams['channel']) : def.channel,
         phase: src.phase === 'minimum' ? 'minimum' : 'linear',
       };
       // Learned spectra are kept only when complete and finite (fixed 1/24-octave grid).
@@ -488,38 +663,40 @@ export function validateProcessorParams(
     case 'vocal-rebalance':
       return sanitizeVocalRebalanceParams(src);
     case 'clipper': {
+      const lim = PROCESSOR_PARAM_LIMITS.clipper;
       const def = defaults as ClipperParams;
       const os = Number(src.oversampling);
       return {
-        ceilingDb: clamp(Number(src.ceilingDb), -6, 0, def.ceilingDb),
-        driveDb: clamp(Number(src.driveDb), 0, 12, def.driveDb),
-        softness: clamp(Number(src.softness), 0, 100, def.softness),
-        oversampling: os === 1 || os === 2 || os === 4 ? os : def.oversampling,
+        ceilingDb: clamp(Number(src.ceilingDb), lim.ceilingDb[0], lim.ceilingDb[1], def.ceilingDb),
+        driveDb: clamp(Number(src.driveDb), lim.driveDb[0], lim.driveDb[1], def.driveDb),
+        softness: clamp(Number(src.softness), lim.softness[0], lim.softness[1], def.softness),
+        oversampling: (lim.oversampling as readonly number[]).includes(os) ? (os as ClipperParams['oversampling']) : def.oversampling,
       };
     }
     case 'multiband-maximizer': {
+      const lim = PROCESSOR_PARAM_LIMITS['multiband-maximizer'];
       const def = defaults as MultibandMaximizerParams;
       const band = (raw: unknown, d: MultibandMaximizerBand): MultibandMaximizerBand => {
         const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
         return {
-          preGainDb: clamp(Number(b.preGainDb), -6, 12, d.preGainDb),
-          thresholdDb: clamp(Number(b.thresholdDb), -36, 0, d.thresholdDb),
-          ratio: clamp(Number(b.ratio), 1, 20, d.ratio),
-          attackMs: clamp(Number(b.attackMs), 0.5, 200, d.attackMs),
-          releaseMs: clamp(Number(b.releaseMs), 10, 1000, d.releaseMs),
-          postGainDb: clamp(Number(b.postGainDb), -12, 6, d.postGainDb),
+          preGainDb: clamp(Number(b.preGainDb), lim.band.preGainDb[0], lim.band.preGainDb[1], d.preGainDb),
+          thresholdDb: clamp(Number(b.thresholdDb), lim.band.thresholdDb[0], lim.band.thresholdDb[1], d.thresholdDb),
+          ratio: clamp(Number(b.ratio), lim.band.ratio[0], lim.band.ratio[1], d.ratio),
+          attackMs: clamp(Number(b.attackMs), lim.band.attackMs[0], lim.band.attackMs[1], d.attackMs),
+          releaseMs: clamp(Number(b.releaseMs), lim.band.releaseMs[0], lim.band.releaseMs[1], d.releaseMs),
+          postGainDb: clamp(Number(b.postGainDb), lim.band.postGainDb[0], lim.band.postGainDb[1], d.postGainDb),
           bypass: b.bypass === true,
         };
       };
-      const lowCross = clamp(Number(src.lowCrossHz), 40, 600, def.lowCrossHz);
+      const lowCross = clamp(Number(src.lowCrossHz), lim.lowCrossHz[0], lim.lowCrossHz[1], def.lowCrossHz);
       return {
         lowCrossHz: lowCross,
-        highCrossHz: clamp(Number(src.highCrossHz), lowCross + 250, 12000, def.highCrossHz),
+        highCrossHz: clamp(Number(src.highCrossHz), lowCross + lim.highCrossMinOffsetHz, lim.highCrossMaxHz, def.highCrossHz),
         low: band(src.low, def.low),
         mid: band(src.mid, def.mid),
         high: band(src.high, def.high),
-        ceilingDb: clamp(Number(src.ceilingDb), -3, -0.1, def.ceilingDb),
-        releaseMs: clamp(Number(src.releaseMs), 10, 500, def.releaseMs),
+        ceilingDb: clamp(Number(src.ceilingDb), lim.ceilingDb[0], lim.ceilingDb[1], def.ceilingDb),
+        releaseMs: clamp(Number(src.releaseMs), lim.releaseMs[0], lim.releaseMs[1], def.releaseMs),
       };
     }
     case 'external-vst3': {

@@ -11,6 +11,7 @@ import { generateGeminiMasterStrategy } from '../server/aiMastering';
 import type { AIMasteringStrategy, MasteringMode, ProcessorModule } from '../types/mastering';
 import { resolveObjectiveTarget, runAutonomousDirectorLoop } from './directorEngine';
 import { evaluateMasterTargets } from './masterTargets';
+import { summarizeAiFallbackBanner } from './diagnosticLog';
 import { validateChainAgainstInventory } from './processorInventory';
 
 // Fix All end to end with a mocked AI: the strategy request carries "Mode: <mode> — <meaning>"
@@ -151,7 +152,7 @@ test('Fix All with a mocked AI: AI only seeds the chain; the loop renders, re-me
   const fetchImpl = async (_u: string, init?: RequestInit) => {
     const prompt = userPromptOf(init);
     prompts.push(prompt);
-    const isRefine = !prompt.includes('Mode: ');
+    const isRefine = prompt.includes('CURRENT PROCESSED PASS');
     calls.push(isRefine ? 'refine' : 'strategy');
     return openAiReply(isRefine ? REFINE : WEAK_STRATEGY);
   };
@@ -170,6 +171,7 @@ test('Fix All with a mocked AI: AI only seeds the chain; the loop renders, re-me
     sampleRate: SR,
     operatingMode: 'autonomous',
     objectiveId: 'streaming',
+    mode: 'loudness',
     initialChain: inv.sanitizedChain,
     maxIterations: 4,
     maxCpuBudgetMs: 60_000,
@@ -185,6 +187,8 @@ test('Fix All with a mocked AI: AI only seeds the chain; the loop renders, re-me
   assert.ok(report.iterationsExecuted >= 2, `expected >= 2 passes, got ${report.iterationsExecuted}: ${report.stopReason}`);
   assert.ok(refineContexts.length >= 1, 'verification loop must request an AI refinement after a failing pass');
   assert.deepEqual(calls.slice(0, 2), ['strategy', 'refine']);
+  assert.ok(prompts[1]?.includes('Mastering Objective: STREAMING'), 'AI refinement prompt includes the Mastering Objective name');
+  assert.ok(prompts[1]?.includes(`Mode: loudness — ${MODE_MEANINGS.loudness}`), 'AI refinement prompt includes the Mode line');
   assert.ok(prompts.some((prompt) => prompt.includes('OBJECTIVE GATE: FAIL')), 'AI refinement prompt includes the measured failed objective gate');
   assert.ok(lifecycles.includes('Validating'), 'loop reports a Validating stage');
 
@@ -322,4 +326,161 @@ test('Fix All does not converge while blocking QC failures remain even if the ob
   assert.equal(refineCalls, 1, 'QC failures must prevent early convergence and trigger an AI refinement');
   assert.notEqual(report.status, 'converged', 'a master with blocking QC failures cannot be marked converged');
   assert.match(report.stopReason, /QC|not fully verified/i, 'the final reason must disclose the remaining QC failure');
+});
+
+test('Stop halts Fix All immediately during AI refinement without falling back or logging an error', async () => {
+  const channels = quietMix();
+  let stopped = false;
+  let renders = 0;
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: channels,
+    sampleRate: SR,
+    operatingMode: 'autonomous',
+    objectiveId: 'streaming',
+    qcProfile: QC_TARGET_PROFILES[0],
+    initialChain: [createProcessorModule('parametric-eq')],
+    maxIterations: 4,
+    maxCpuBudgetMs: 60_000,
+    shouldStop: () => stopped,
+    renderPassFn: async (renderedChannels) => {
+      renders++;
+      return { channels: renderedChannels, analysis: analyzeAudioBuffer(renderedChannels, SR) };
+    },
+    aiRefineCallback: async () => {
+      stopped = true;
+      throw new DOMException('Cancelled.', 'AbortError');
+    },
+  });
+
+  assert.equal(renders, 1, 'stopping during pass 1 AI wait must not render a second pass');
+  assert.equal(report.status, 'stopped-by-user');
+  assert.equal(
+    report.activityLog.some((entry) => /AI refinement skipped/i.test(entry.message)),
+    false,
+    'intentional Stop must not emit a fallback warning',
+  );
+});
+
+test('Director records AI strategy and refine provenance including response time, prompt size, model, and module diff', async () => {
+  const src = quietMix();
+  const analysis = analyzeAudioBuffer(src, SR);
+  const fetchImpl = async (_u: string, init?: RequestInit) => {
+    const prompt = userPromptOf(init);
+    return openAiReply(prompt.includes('CURRENT PROCESSED PASS') ? REFINE : WEAK_STRATEGY);
+  };
+
+  const stratRun = await requestStrategy(
+    provider,
+    { analysis, mode: 'transparent', objective: 'streaming', operatingMode: 'autonomous', targetLufs: -14 },
+    async () => { throw new Error('no fallback expected'); },
+    { fetchImpl },
+  );
+  const strat = stratRun.result as unknown as AIMasteringStrategy;
+  const inv = validateChainAgainstInventory(strat.chain);
+  assert.ok(inv.valid);
+
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: src,
+    sampleRate: SR,
+    operatingMode: 'autonomous',
+    objectiveId: 'streaming',
+    mode: 'transparent',
+    initialChain: inv.sanitizedChain,
+    initialAiTrace: {
+      pass: 0,
+      stage: 'strategy',
+      source: stratRun.meta?.source ?? 'byo-provider',
+      fallbackReason: null,
+      modelName: stratRun.meta?.modelName ?? provider.model,
+      responseTimeMs: stratRun.meta?.responseTimeMs ?? 0,
+      promptChars: stratRun.meta?.promptChars ?? 0,
+      timeoutHit: null,
+      aiReturnedModules: stratRun.meta?.aiReturnedModules ?? strat.chain.map((m) => m.type),
+      finalRenderedModules: inv.sanitizedChain.map((m) => m.type),
+    },
+    maxIterations: 2,
+    maxCpuBudgetMs: 60_000,
+    aiRefineCallback: async (ctx) => {
+      const run = await requestRefine(provider, ctx, async () => { throw new Error('no fallback expected'); }, { fetchImpl });
+      return {
+        chain: run.result?.chain ?? null,
+        producedBy: run.producedBy ?? undefined,
+        notices: run.notices,
+        trace: run.meta
+          ? {
+              source: run.meta.source,
+              fallbackReason: null,
+              modelName: run.meta.modelName,
+              responseTimeMs: run.meta.responseTimeMs,
+              promptChars: run.meta.promptChars,
+              timeoutHit: null,
+              aiReturnedModules: run.meta.aiReturnedModules,
+            }
+          : undefined,
+      };
+    },
+  });
+
+  const aiPasses = report.aiPasses ?? [];
+  assert.ok(aiPasses.length >= 2, `expected strategy + refine trace, got ${aiPasses.length}`);
+  assert.equal(aiPasses[0]?.stage, 'strategy');
+  assert.equal(aiPasses[0]?.source, 'byo-provider');
+  assert.equal(aiPasses[0]?.modelName, 'mock-model');
+  assert.ok((aiPasses[0]?.promptChars ?? 0) > 500, 'strategy trace records promptChars');
+  assert.equal(typeof aiPasses[0]?.responseTimeMs, 'number');
+  assert.deepEqual(aiPasses[0]?.aiReturnedModules, ['parametric-eq']);
+  assert.equal(aiPasses[1]?.stage, 'refine');
+  assert.equal(aiPasses[1]?.source, 'byo-provider');
+  assert.ok((aiPasses[1]?.promptChars ?? 0) > 500, 'refine trace records promptChars');
+  assert.deepEqual(aiPasses[1]?.aiReturnedModules, ['parametric-eq', 'limiter']);
+  assert.ok(aiPasses[1]?.finalRenderedModules.length > 0);
+  assert.equal(summarizeAiFallbackBanner(aiPasses), null);
+});
+
+test('Director records deterministic-director fallback with exact reason when AI refine is skipped or fails', async () => {
+  const src = subDominantMix();
+  const report = await runAutonomousDirectorLoop({
+    sourceChannels: src,
+    sampleRate: SR,
+    operatingMode: 'autonomous',
+    objectiveId: 'streaming',
+    initialChain: [createProcessorModule('parametric-eq')],
+    initialAiTrace: {
+      pass: 0,
+      stage: 'strategy',
+      source: 'local-dsp-planner',
+      fallbackReason: '429',
+      fallbackDetail: 'rate limit test',
+      modelName: 'gemini-4-hydrogen',
+      responseTimeMs: 85,
+      promptChars: 5000,
+      timeoutHit: null,
+      aiReturnedModules: [],
+      finalRenderedModules: ['parametric-eq'],
+    },
+    maxIterations: 2,
+    maxCpuBudgetMs: 60_000,
+    aiRefineCallback: async () => ({
+      chain: null,
+      trace: {
+        source: 'deterministic-director',
+        fallbackReason: 'timeout',
+        fallbackDetail: 'client 30s timeout exceeded',
+        modelName: 'gemini-4-hydrogen',
+        responseTimeMs: 30005,
+        promptChars: 6100,
+        timeoutHit: 'client-30s',
+        aiReturnedModules: [],
+      },
+    }),
+  });
+
+  const aiPasses = report.aiPasses ?? [];
+  assert.equal(aiPasses[0]?.source, 'local-dsp-planner');
+  assert.equal(aiPasses[0]?.fallbackReason, '429');
+  assert.ok(aiPasses.some((p) => p.stage === 'refine' && p.source === 'deterministic-director' && p.fallbackReason === 'timeout' && p.timeoutHit === 'client-30s'));
+  const banner = summarizeAiFallbackBanner(aiPasses);
+  assert.ok(banner && banner.includes('Cloud AI was not used for this pass because:'));
+  assert.match(banner, /429/);
+  assert.match(banner, /timed out/);
 });

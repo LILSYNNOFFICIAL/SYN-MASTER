@@ -1134,6 +1134,39 @@ export interface VocalBalanceVerification {
   summary: string;
 }
 
+export type AiCallSource =
+  | 'gemini-cloud'
+  | 'byo-provider'
+  | 'local-dsp-planner'
+  | 'deterministic-director';
+
+export type AiFallbackReason =
+  | '429'
+  | 'guest-session'
+  | 'timeout'
+  | 'missing-key'
+  | 'server-error'
+  | 'parse'
+  | 'validation'
+  | 'user-disabled';
+
+export type AiTimeoutHit = 'server-25s' | 'client-30s' | null;
+
+export interface AiPassTrace {
+  /** 0 = initial strategy planning (before Pass 1); 1..N = refinement after Pass N. */
+  pass: number;
+  stage: 'strategy' | 'refine';
+  source: AiCallSource;
+  fallbackReason: AiFallbackReason | null;
+  fallbackDetail?: string;
+  modelName: string | null;
+  responseTimeMs: number | null;
+  promptChars: number | null;
+  timeoutHit: AiTimeoutHit;
+  aiReturnedModules: ProcessorType[];
+  finalRenderedModules: ProcessorType[];
+}
+
 export interface MasterFinalReport {
   id: string;
   createdAt: number;
@@ -1164,5 +1197,6 @@ export interface MasterFinalReport {
   postFixVerification?: PostFixVerificationReport;
   stemIntelligence?: StemIntelligenceReport;
   vocalBalanceVerification?: VocalBalanceVerification;
+  aiPasses?: AiPassTrace[];
 }
 

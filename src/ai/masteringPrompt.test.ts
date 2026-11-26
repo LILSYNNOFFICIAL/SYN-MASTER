@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { buildRefineUserPrompt, buildStrategyUserPrompt, formatModeLine, MODE_MEANINGS, PROCESSOR_JSON_SCHEMA, SYSTEM_PROMPT } from './masteringPrompt.ts';
 import type { AudioAnalysis, MasteringMode } from '../types/mastering.ts';
 import { VERIFIED_NATIVE_PROCESSOR_INVENTORY } from '../director/processorInventory.ts';
+import { PROCESSOR_PARAM_LIMITS } from '../dsp/chainValidation.ts';
 
 // Minimal analysis stub: summarizeAnalysisForPrompt only reads numeric fields; missing ones print as undefined.
 const analysis = new Proxy({}, { get: (_t, k) => (k === 'zoneEnergyDb' ? {} : k === 'spectrumBinsFreq' || k === 'spectrumBinsDb' ? [] : 0) }) as unknown as AudioAnalysis;
@@ -104,3 +105,113 @@ test('AI is told when Vocal-Focused correction was already verified or was not a
   assert.match(unverified, /This preparation was not verified/);
   assert.match(unverified, /do not claim it fixed vocal balance/);
 });
+
+test('strategy and refine prompts include clickCount with timestamps, shimmer, stereoBandCorrelation, and momentaryLufsMax', () => {
+  const richAnalysis = {
+    durationSec: 120,
+    sampleRate: 48000,
+    channels: 2,
+    integratedLufs: -16.2,
+    shortTermLufsMax: -11.5,
+    momentaryLufsMax: -7.4,
+    loudnessRangeLu: 6.1,
+    rmsDb: -18.0,
+    samplePeakDb: -1.2,
+    truePeakDb: -1.0,
+    dynamicRangeDb: 9.5,
+    crestFactorDb: 11.2,
+    plrDb: 15.2,
+    transientDensity: 0.42,
+    spectralCentroidHz: 1850,
+    spectralSlopeDbPerOct: -3.2,
+    zoneEnergyDb: { sub: -18, bass: -12, lowMid: -10, mid: -9, highMid: -11, presence: -15, air: -22 },
+    spectrumBinsFreq: [],
+    spectrumBinsDb: [],
+    resonances: [],
+    stereoWidth: 0.85,
+    midSideRatioDb: 4.2,
+    phaseCorrelation: 0.78,
+    lowEndCorrelation: 0.94,
+    stereoBandCorrelation: { low: 0.94, mid: 0.72, high: -0.35 },
+    lrBalanceDb: 0.1,
+    monoCompatibilityScore: 86,
+    clippedSamples: 0,
+    interSamplePeaks: 0,
+    thdEstimatePercent: 0.4,
+    noiseFloorDb: -68,
+    dcOffset: 0,
+    loudnessHistoryLufs: [],
+    clickCount: 2,
+    clickTimesSec: [1.25, 14.5],
+    shimmer: {
+      score: 0.81,
+      confidence: 0.76,
+      sideHfRatio: 0.62,
+      fluxRatio: 0.88,
+      tonality: 0.7,
+      hfShareDb: -11.2,
+    },
+  } as unknown as AudioAnalysis;
+
+  const strategyPrompt = buildStrategyUserPrompt({ analysis: richAnalysis, mode: 'streaming', objective: 'pop' });
+  const refinePrompt = buildRefineUserPrompt({
+    preAnalysis: richAnalysis,
+    postAnalysis: richAnalysis,
+    currentChain: [],
+    mode: 'analog',
+    objective: 'vocal-focused',
+    targetLufs: -14,
+    targetTruePeakDb: -1,
+    preserveDynamics: true,
+  });
+
+  for (const prompt of [strategyPrompt, refinePrompt]) {
+    assert.match(prompt, /Momentary Max: -7\.4/);
+    assert.match(prompt, /Band Corr \(low\/mid\/high\): low=0\.94, mid=0\.72, high=-0\.35/);
+    assert.match(prompt, /clickCount=2 \(timestamps: 1\.25s, 14\.50s\)/);
+    assert.match(prompt, /shimmer: score=0\.81, confidence=0\.76/);
+  }
+  assert.match(refinePrompt, /Mastering Objective: VOCAL-FOCUSED/);
+  assert.ok(refinePrompt.includes(`Mode: analog — ${MODE_MEANINGS.analog}`), 'refine prompt includes Mode line');
+});
+
+test('SYSTEM_PROMPT replaces hardcoded literals with types/enums, expands multiband-maximizer, and reflects PROCESSOR_PARAM_LIMITS ranges', () => {
+  for (const forbidden of [
+    '"truePeak":true',
+    '"autoBlank":true',
+    '"bypass":false',
+    '"enabled":true',
+    '"oversampling":2',
+    '"oversampling":4',
+    '{...same}',
+  ]) {
+    assert.ok(!SYSTEM_PROMPT.includes(forbidden), `SYSTEM_PROMPT must not contain hardcoded literal ${forbidden}`);
+  }
+
+  for (const requiredTypeOrEnum of [
+    '"truePeak":boolean',
+    '"autoBlank":boolean',
+    '"bypass":boolean',
+    '"enabled":boolean',
+    '"oversampling":1|2|4',
+  ]) {
+    assert.ok(SYSTEM_PROMPT.includes(requiredTypeOrEnum), `SYSTEM_PROMPT must expose ${requiredTypeOrEnum}`);
+  }
+
+  const L = PROCESSOR_PARAM_LIMITS;
+  const bandTuple = `${L.compressor.thresholdDb[0]}..${L.compressor.thresholdDb[1]}`;
+  assert.ok(SYSTEM_PROMPT.includes(`"thresholdDb":${bandTuple}`));
+  assert.ok(SYSTEM_PROMPT.includes(`"ceilingDb":${L.limiter.ceilingDb[0]}..${L.limiter.ceilingDb[1]}`));
+  assert.ok(SYSTEM_PROMPT.includes(`"targetLufs":${L.maximizer.targetLufs[0]}..${L.maximizer.targetLufs[1]}`));
+  assert.ok(SYSTEM_PROMPT.includes(`"lowWidth":${L['stereo-imager'].lowWidth[0]}..${L['stereo-imager'].lowWidth[1]}`));
+  assert.ok(SYSTEM_PROMPT.includes(`"deEssFreqHz":${L.restore.deEssFreqHz[0]}..${L.restore.deEssFreqHz[1]}`));
+  assert.ok(SYSTEM_PROMPT.includes(`"subFreqHz":${L['bass-enhancer'].subFreqHz[0]}..${L['bass-enhancer'].subFreqHz[1]}`));
+
+  const mbMaxLine = SYSTEM_PROMPT.split('\n').find((line) => line.startsWith('13. "multiband-maximizer":'));
+  assert.ok(mbMaxLine, 'multiband-maximizer schema line exists');
+  const mbBandSchema = `"preGainDb":${L['multiband-maximizer'].band.preGainDb[0]}..${L['multiband-maximizer'].band.preGainDb[1]}`;
+  assert.ok(mbMaxLine.includes(`"low":{${mbBandSchema}`), 'multiband-maximizer expands low band fields');
+  assert.ok(mbMaxLine.includes(`"mid":{${mbBandSchema}`), 'multiband-maximizer expands mid band fields');
+  assert.ok(mbMaxLine.includes(`"high":{${mbBandSchema}`), 'multiband-maximizer expands high band fields');
+});
+

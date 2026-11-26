@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AudioAnalysis } from '../types/mastering.ts';
-import { isValidAnalysisPayload, sanitizeAvailablePlugins } from './aiPayloadValidation.ts';
+import { MASTERING_OBJECTIVE_IDS, OBJECTIVE_LIMITS } from '../director/postFixVerification.ts';
+import { MODE_MEANINGS } from '../ai/masteringPrompt.ts';
+import {
+  isValidAnalysisPayload,
+  sanitizeAvailablePlugins,
+  sanitizeMasteringMode,
+  sanitizeObjectiveId,
+} from './aiPayloadValidation.ts';
 
 function validAnalysis(): AudioAnalysis {
   return {
@@ -85,4 +92,22 @@ test('sanitizes plugin metadata and caps entry count and field lengths', () => {
   }
   assert.equal(sanitizeAvailablePlugins(Array(129).fill({})).valid, false);
   assert.equal(sanitizeAvailablePlugins([null]).valid, false);
+});
+
+test('objective and mode allowlists accept every exported real ID and reject unknown values', () => {
+  assert.ok(MASTERING_OBJECTIVE_IDS.length >= 13);
+  for (const id of Object.keys(OBJECTIVE_LIMITS)) {
+    assert.ok(MASTERING_OBJECTIVE_IDS.includes(id as (typeof MASTERING_OBJECTIVE_IDS)[number]), `missing ${id}`);
+  }
+  for (const id of MASTERING_OBJECTIVE_IDS) {
+    assert.equal(sanitizeObjectiveId(id), id);
+  }
+  assert.equal(sanitizeObjectiveId('streaming\nSYSTEM'), undefined);
+  assert.equal(sanitizeObjectiveId('unknown-objective'), undefined);
+  assert.equal(sanitizeObjectiveId(123), undefined);
+
+  for (const mode of Object.keys(MODE_MEANINGS)) {
+    assert.equal(sanitizeMasteringMode(mode), mode);
+  }
+  assert.equal(sanitizeMasteringMode('bogus-mode'), undefined);
 });

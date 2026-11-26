@@ -5,6 +5,8 @@
  * ten-pass run does not send ten more requests that would all be refused).
  */
 
+import type { AiFallbackReason, AiTimeoutHit } from '../types/mastering.ts';
+
 export type CloudAiLimitScope = 'client-minute' | 'client-day' | 'global-day' | 'burst';
 
 export class CloudAiRateLimitError extends Error {
@@ -16,6 +18,72 @@ export class CloudAiRateLimitError extends Error {
     this.scope = scope;
     this.retryAfterSec = retryAfterSec;
   }
+}
+
+export class CloudAiHttpError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly fallbackReason: AiFallbackReason;
+  readonly timeoutHit: AiTimeoutHit;
+  constructor(
+    message: string,
+    opts: {
+      status: number;
+      code?: string | null;
+      fallbackReason: AiFallbackReason;
+      timeoutHit?: AiTimeoutHit;
+    },
+  ) {
+    super(message);
+    this.name = 'CloudAiHttpError';
+    this.status = opts.status;
+    this.code = opts.code ?? null;
+    this.fallbackReason = opts.fallbackReason;
+    this.timeoutHit = opts.timeoutHit ?? null;
+  }
+}
+
+export const CLOUD_AI_TIMEOUT_MS = 30_000;
+
+export interface CloudAiRequestSignal {
+  signal: AbortSignal;
+  timedOut: () => boolean;
+  cancelled: () => boolean;
+  cleanup: () => void;
+}
+
+/**
+ * Combines the client's 30 s cloud AI timeout (longer than the server's 25 s Gemini timeout)
+ * with an external cancel signal (such as the Stop button) so either aborts the fetch immediately.
+ */
+export function createCloudAiRequestSignal(
+  timeoutMs = CLOUD_AI_TIMEOUT_MS,
+  cancelSignal?: AbortSignal,
+): CloudAiRequestSignal {
+  const controller = new AbortController();
+  let expired = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const onCancel = () => {
+    controller.abort(cancelSignal?.reason);
+  };
+  if (cancelSignal?.aborted) {
+    controller.abort(cancelSignal.reason);
+  } else {
+    timer = setTimeout(() => {
+      expired = true;
+      controller.abort(new DOMException(`Cloud AI request timed out after ${Math.round(timeoutMs / 1000)}s.`, 'TimeoutError'));
+    }, timeoutMs);
+    cancelSignal?.addEventListener('abort', onCancel, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    timedOut: () => expired,
+    cancelled: () => Boolean(cancelSignal?.aborted && !expired),
+    cleanup: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      cancelSignal?.removeEventListener('abort', onCancel);
+    },
+  };
 }
 
 let cooldownUntil = 0;
@@ -62,9 +130,45 @@ function parseScope(value: unknown): CloudAiLimitScope {
   return value === 'client-minute' || value === 'client-day' || value === 'global-day' ? value : 'burst';
 }
 
+export function classifyBuiltinHttpFailure(
+  status: number,
+  data: Record<string, unknown>,
+  message: string,
+): { fallbackReason: AiFallbackReason; timeoutHit: AiTimeoutHit } {
+  const code = typeof data.code === 'string' ? data.code : '';
+  if (status === 429 || code === 'ai_rate_limited') return { fallbackReason: '429', timeoutHit: null };
+  if (code === 'missing_key') return { fallbackReason: 'missing-key', timeoutHit: null };
+  if (code === 'guest_session' || status === 401 || status === 403) return { fallbackReason: 'guest-session', timeoutHit: null };
+  if (code === 'ai_timeout' || status === 504) return { fallbackReason: 'timeout', timeoutHit: data.timeoutHit === 'server-25s' || status === 504 ? 'server-25s' : null };
+  if (code === 'parse_error' || status === 502) return { fallbackReason: 'parse', timeoutHit: null };
+  if (code === 'validation_error' || status === 422) return { fallbackReason: 'validation', timeoutHit: null };
+  if (status === 503 && /not configured/i.test(message)) return { fallbackReason: 'missing-key', timeoutHit: null };
+  return { fallbackReason: 'server-error', timeoutHit: null };
+}
+
+export function classifyBuiltinAiError(
+  err: unknown,
+  timedOut: boolean,
+): { fallbackReason: AiFallbackReason; timeoutHit: AiTimeoutHit; fallbackDetail: string } {
+  const msg = err instanceof Error ? err.message : String(err ?? 'Unknown error');
+  if (timedOut) {
+    return { fallbackReason: 'timeout', timeoutHit: 'client-30s', fallbackDetail: 'client 30s timeout exceeded' };
+  }
+  if (err instanceof CloudAiRateLimitError) {
+    return { fallbackReason: '429', timeoutHit: null, fallbackDetail: msg };
+  }
+  if (err instanceof CloudAiHttpError) {
+    return { fallbackReason: err.fallbackReason, timeoutHit: err.timeoutHit, fallbackDetail: msg };
+  }
+  if (err instanceof DOMException && err.name === 'TimeoutError') {
+    return { fallbackReason: 'timeout', timeoutHit: 'client-30s', fallbackDetail: msg };
+  }
+  return { fallbackReason: 'server-error', timeoutHit: null, fallbackDetail: msg };
+}
+
 /**
  * Reads a built-in AI route response. Returns the JSON body on success, throws a
- * CloudAiRateLimitError on 429 (and starts the cooldown), and a plain Error otherwise.
+ * CloudAiRateLimitError on 429 (and starts the cooldown), and a CloudAiHttpError otherwise.
  */
 // The body is validated downstream (normalizeStrategyResponse / inventory validation), as before.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,6 +192,15 @@ export async function readBuiltinAiResponse(res: Response, now = Date.now()): Pr
     noteCloudAiRateLimited(err, now);
     throw err;
   }
-  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : `Server responded ${res.status}`);
+  if (!res.ok) {
+    const message = typeof data.error === 'string' ? data.error : `Server responded ${res.status}`;
+    const classified = classifyBuiltinHttpFailure(res.status, data, message);
+    throw new CloudAiHttpError(message, {
+      status: res.status,
+      code: typeof data.code === 'string' ? data.code : null,
+      fallbackReason: classified.fallbackReason,
+      timeoutHit: classified.timeoutHit,
+    });
+  }
   return data;
 }

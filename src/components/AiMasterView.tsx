@@ -79,6 +79,8 @@ interface Props {
   aiError: string | null;
   /** Friendly notice (e.g. cloud AI limit reached; FIX ALL used the local DSP planner). */
   aiNotice?: string | null;
+  /** Visible banner shown whenever Cloud AI was not used / fell back during a FIX ALL pass. */
+  aiFallbackBanner?: string | null;
   /** "What AI changed" list shown after a FIX ALL / CHAIN WITH AI run. */
   aiChanges?: React.ReactNode;
   onChangeOperatingMode: (mode: DirectorOperatingMode) => void;
@@ -200,6 +202,7 @@ export const AiMasterView: React.FC<Props> = ({
   aiLoading,
   aiError,
   aiNotice,
+  aiFallbackBanner,
   aiChanges,
   onChangeOperatingMode,
   onChangeObjectiveId,
@@ -718,6 +721,12 @@ export const AiMasterView: React.FC<Props> = ({
                 {directorReport.rolledBack ? ' (Rolled Back to Best)' : ''}
               </div>
             )}
+          </div>
+        )}
+
+        {aiFallbackBanner && (
+          <div role="status" data-testid="ai-fallback-banner" className="p-2.5 rounded bg-[#F59E0B]/10 border border-[#F59E0B]/40 text-xs text-[#FCD34D]">
+            {aiFallbackBanner}
           </div>
         )}
 
