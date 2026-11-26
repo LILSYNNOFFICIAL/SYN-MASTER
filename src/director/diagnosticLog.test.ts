@@ -25,6 +25,9 @@ function report(activeFindings: VerifiedFindingState[], resolvedFindings: Verifi
 test('diagnostic status never turns missing verification evidence green', () => {
   assert.equal(diagnosticStatusForFinding(null, 'diag-mud'), 'open');
   assert.equal(diagnosticStatusForFinding(report([], []), 'diag-mud'), 'unverified');
+  const stale = report([], []);
+  stale.postFixVerification!.analysisFresh = false;
+  assert.equal(diagnosticStatusForFinding(stale, 'diag-mud'), 'unverified');
 });
 
 test('diagnostic status reflects measured partial and unresolved outcomes', () => {
