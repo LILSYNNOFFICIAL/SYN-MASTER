@@ -51,7 +51,7 @@ import {
 import { type DynamicEqTrace, type ProcessorMeterTelemetry } from './dsp/offlineDsp';
 import { chainHasSoloedBand } from './dsp/eqDesign';
 import { renderAndAnalyzeOffThread } from './dsp/workerClient';
-import { getActiveRebalanceStems, getRebalanceStemState, setActiveRebalanceSource, subscribeRebalanceStems } from './services/rebalanceStemStore';
+import { getActiveRebalanceStems, getRebalanceStemState, separateActiveRebalanceStems, setActiveRebalanceSource, subscribeRebalanceStems } from './services/rebalanceStemStore';
 import type { VocalBalanceContext } from './ai/vocalBalancePrompt';
 import { filterSourceTransientClickAnalysis } from './dsp/clickDetect';
 import { MASTERING_PRESETS } from './dsp/presets';
@@ -1520,7 +1520,7 @@ export default function App() {
       await import('./director/vocalRebalancePolicy');
     if (isStale()) return;
     const rebalanceStemSet = getActiveRebalanceStems();
-    const vocalBalance: VocalBalanceContext = {
+    let vocalBalance: VocalBalanceContext = {
       stemsCached: Boolean(rebalanceStemSet),
       measurement: rebalanceStemSet ? measureVocalBalance(rebalanceStemSet, src[0], src[1] ?? src[0]) : null,
       range: vocalBalanceRange(objectiveId),
@@ -1583,6 +1583,30 @@ export default function App() {
         if (providerRun.producedBy) aiProviderLog.push(`Plan: initial strategy produced by ${providerRun.producedBy}.`);
         if (!providerRun.result) throw new Error(providerRun.notices[0] ?? 'AI strategy skipped.');
         const strat = providerRun.result as unknown as AIMasteringStrategy;
+        // If the AI diagnosis explicitly selects Vocal Rebalance, create the missing source
+        // stems now rather than silently dropping the requested processor. Separation is
+        // resource-gated by the stem store and only runs for this warranted case.
+        if (Array.isArray(strat.chain) && strat.chain.some((m) => m.type === 'vocal-rebalance') && !vocalBalance.stemsCached) {
+          aiProviderLog.push('Vocal Rebalance: AI selected stem-level vocal correction; starting automatic stem separation.');
+          try {
+            await separateActiveRebalanceStems();
+          } catch (separationError) {
+            aiProviderLog.push(`Vocal Rebalance: automatic stem separation failed: ${separationError instanceof Error ? separationError.message : 'unknown separation error'}.`);
+          }
+          if (isStale()) return;
+          const separatedStems = getActiveRebalanceStems();
+          if (separatedStems) {
+            vocalBalance = {
+              stemsCached: true,
+              measurement: measureVocalBalance(separatedStems, src[0], src[1] ?? src[0]),
+              range: vocalBalanceRange(objectiveId),
+            };
+            aiProviderLog.push('Vocal Rebalance: stems are ready; the proposed correction will be checked against measured vocal balance.');
+          } else {
+            const separationState = getRebalanceStemState();
+            aiProviderLog.push(`Vocal Rebalance unavailable: ${separationState.error ?? separationState.assessment?.message ?? 'stem separation did not produce usable stems'}; the vocal processor will be withheld.`);
+          }
+        }
         const invCheck = validateChainAgainstInventory(strat.chain);
         if (invCheck.valid && invCheck.sanitizedChain.length > 0) {
           strat.chain = gateRebalance(invCheck.sanitizedChain);
