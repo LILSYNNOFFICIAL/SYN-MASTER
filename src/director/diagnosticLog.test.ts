@@ -19,7 +19,7 @@ function state(status: VerifiedFindingState['status'], measurementReliable = tru
 }
 
 function report(activeFindings: VerifiedFindingState[], resolvedFindings: VerifiedFindingState[] = []): MasterFinalReport {
-  return { postFixVerification: { activeFindings, resolvedFindings } } as unknown as MasterFinalReport;
+  return { postFixVerification: { activeFindings, resolvedFindings, analysisFresh: true, postAnalysis: {} } } as unknown as MasterFinalReport;
 }
 
 test('diagnostic status never turns missing verification evidence green', () => {
