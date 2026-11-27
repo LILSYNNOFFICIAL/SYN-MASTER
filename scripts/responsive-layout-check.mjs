@@ -410,7 +410,7 @@ async function runWavExportE2E(browser) {
     const box = await waveform.boundingBox();
     assert.ok(box && box.width > 100, `Imported track must expose a visible interactive EQ waveform (matches: ${await page.locator('.syn-eqx-svg').count()})`);
     const dragFadeHandle = async (side, toXRatio) => {
-      const handle = page.locator(`[data-fade-handle="${side}"]:visible`);
+      const handle = waveform.locator(`[data-fade-handle="${side}"]:visible`);
       await handle.waitFor({ state: 'visible', timeout: 5000 });
       const handleBox = await handle.boundingBox();
       assert.ok(handleBox, `The visible ${side} fade handle must have a hit target`);
