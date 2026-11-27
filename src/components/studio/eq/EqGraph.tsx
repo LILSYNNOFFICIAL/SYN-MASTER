@@ -439,7 +439,17 @@ export const EqGraph: React.FC<Props> = ({
         onPointerCancel={(e) => {
           touchPointsRef.current.delete(e.pointerId);
           if (touchPointsRef.current.size < 2) pinchRef.current = null;
-          fadeDragRef.current = null; seekDragRef.current = false; setFadeDragSide(null); endDrag();
+          if (fadeDragRef.current) {
+            // A browser can cancel pointer capture during a drag. Preserve the last
+            // pointer position and commit that fade before clearing the active side.
+            lastPointerXRef.current = e.clientX;
+            endDrag();
+            return;
+          }
+          fadeDragRef.current = null;
+          seekDragRef.current = false;
+          setFadeDragSide(null);
+          endDrag();
         }}
         onDoubleClick={onDouble}
         onPointerDown={(e) => {
