@@ -22,6 +22,7 @@ import {
 } from './masteringPrompt.ts';
 import { callProvider, describeProvider, modelWarning, ProviderError, redactSecrets, type CallOptions, type ProviderConfig } from './providerAdapters.ts';
 import { BUILTIN_PROVIDER_ID, getPreset } from './providerPresets.ts';
+import { recordAiChainProvenance } from './aiProvenance.ts';
 import type { ProcessorType } from '../types/mastering.ts';
 
 export const BUILTIN_LABEL = 'Built-in Gemini';
@@ -59,7 +60,7 @@ function rawModuleTypesFromPayload(data: Record<string, unknown>): ProcessorType
     .filter(Boolean) as ProcessorType[];
 }
 
-async function runWithFallback<T>(
+async function runWithFallbackInner<T>(
   config: ProviderConfig,
   userPrompt: string,
   viaProvider: () => Promise<{ normalized: T; aiReturnedModules: ProcessorType[] }>,
@@ -131,6 +132,26 @@ async function runWithFallback<T>(
   }
 }
 
+/** Same as before, plus: remember what the AI proposed so the Director can log overrides. */
+async function runWithFallback<T>(
+  config: ProviderConfig,
+  userPrompt: string,
+  viaProvider: () => Promise<{ normalized: T; aiReturnedModules: ProcessorType[] }>,
+  viaBuiltin: () => Promise<T>,
+  previousChainIds: ReadonlySet<string> = new Set(),
+): Promise<ProviderRunResult<T>> {
+  const run = await runWithFallbackInner(config, userPrompt, viaProvider, viaBuiltin);
+  const result = run.result as { chain?: unknown; paramCorrections?: unknown } | null;
+  if (result && typeof result === 'object' && Array.isArray(result.chain)) {
+    // A refine that returned no processors hands back the current chain unchanged: that is
+    // not an AI proposal, so it is not recorded.
+    const unchanged = result.chain.length > 0 && result.chain.every((m) =>
+      Boolean(m) && typeof m === 'object' && previousChainIds.has(String((m as { id?: unknown }).id)));
+    if (!unchanged) recordAiChainProvenance(result.chain, result.paramCorrections);
+  }
+  return run;
+}
+
 export async function requestStrategy(
   config: ProviderConfig,
   input: StrategyPromptInput,
@@ -178,6 +199,7 @@ export async function requestRefine(
       };
     },
     builtin,
+    new Set(input.currentChain.map((m) => m.id)),
   );
 }
 

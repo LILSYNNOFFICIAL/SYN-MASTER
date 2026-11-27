@@ -398,10 +398,14 @@ app.post('/api/ai/master', async (req, res) => {
     }
     const safePlugins = pluginResult.value;
 
+    // Same allowlist as /api/ai/refine: unknown objective/mode strings never reach the prompt.
+    const safeMode = sanitizeMasteringMode(mode) ?? 'ai-auto';
+    const safeObjective = sanitizeObjectiveId(objective);
+
     const { aiMeta, ...strategy } = await generateGeminiMasterStrategy({
       analysis,
-      mode: mode ?? 'ai-auto',
-      objective,
+      mode: safeMode,
+      objective: safeObjective,
       customObjective,
       operatingMode,
       targetLufs,

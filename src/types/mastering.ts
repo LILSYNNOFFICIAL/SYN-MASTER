@@ -1117,6 +1117,8 @@ export interface DirectorCheckpoint {
     targetValue: string;
     previousValue?: string;
     outcome: 'improved' | 'regressed' | 'baseline' | 'converged';
+    /** Why this pass was not retained (hard-regression guard reasons, gate downgrade or no fit gain). Logging only. */
+    rejectionReasons?: string[];
   };
 }
 
@@ -1201,6 +1203,26 @@ export interface AiPassTrace {
   timeoutMs?: number | null;
   aiReturnedModules: ProcessorType[];
   finalRenderedModules: ProcessorType[];
+  /** AI values that validation clamped, reset or dropped (malformed paramsJson included). */
+  paramCorrections?: import('../ai/aiParamCorrections').AiParamCorrection[];
+  /** AI values the Director (or the app's policy gates) changed or removed before rendering, with the reason. */
+  directorOverrides?: DirectorOverride[];
+  /** Every tool the AI chose for this pass, with the settings actually rendered. */
+  aiChosenTools?: Array<{ name: string; type: ProcessorType; enabled: boolean; settings: string }>;
+}
+
+/** One AI-provided value the Director changed, removed or clamped (or a stage it added), and why. */
+export interface DirectorOverride {
+  pass: number;
+  stage: 'before-director' | 'inventory-validation' | 'required-modules-merge' | 'match-eq-guard' | 'objective-gate-repair';
+  module: string;
+  moduleType: string;
+  moduleId?: string;
+  parameter: string;
+  aiValue: string;
+  finalValue: string;
+  action: 'override' | 'clamp' | 'drop' | 'add';
+  reason: string;
 }
 
 export interface MasterFinalReport {

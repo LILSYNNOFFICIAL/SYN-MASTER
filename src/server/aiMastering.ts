@@ -11,6 +11,7 @@ import type {
   QCReport,
 } from '../types/mastering.ts';
 import {
+  AI_PROCESSOR_TYPES,
   SYSTEM_PROMPT,
   buildRefineUserPrompt,
   buildStrategyUserPrompt,
@@ -175,20 +176,24 @@ function getAiClient(): GoogleGenAI {
   });
 }
 
-const PROCESSOR_SCHEMA = {
+export const PROCESSOR_SCHEMA = {
   type: Type.OBJECT,
   properties: {
     type: {
       type: Type.STRING,
+      enum: [...AI_PROCESSOR_TYPES],
       description:
         'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither, match-eq, vocal-rebalance',
     },
     name: { type: Type.STRING },
+    enabled: { type: Type.BOOLEAN, description: 'false = stage kept in the chain but switched off (default true)' },
+    bypassed: { type: Type.BOOLEAN, description: 'true = stage bypassed (default false)' },
     intensity: { type: Type.NUMBER, description: '0 to 100' },
     wetDry: { type: Type.NUMBER, description: '0 to 100' },
     inputGainDb: { type: Type.NUMBER, description: '-12 to +12' },
     outputGainDb: { type: Type.NUMBER, description: '-12 to +12' },
-    reason: { type: Type.STRING, description: 'Engineering justification referencing measured metrics & tradeoffs' },
+    rationale: { type: Type.STRING, description: 'Short engineering rationale for this module referencing measured metrics' },
+    reason: { type: Type.STRING, description: 'Engineering justification referencing measured metrics & tradeoffs (alias of rationale)' },
     paramsJson: {
       type: Type.STRING,
       description:
@@ -262,7 +267,7 @@ export async function generateGeminiMasterStrategy(input: {
   const data = JSON.parse(rawText);
   const rawProcessors = Array.isArray(data.processors) ? data.processors : [];
   const aiReturnedModules = rawProcessors.map((p: { type?: unknown }) => String(p?.type ?? '')).filter(Boolean);
-  const { chain, reasoning } = parseAiChain(rawProcessors);
+  const { chain, reasoning, paramCorrections } = parseAiChain(rawProcessors);
 
   return {
     id: `ai-${Date.now()}`,
@@ -279,6 +284,7 @@ export async function generateGeminiMasterStrategy(input: {
     targetTruePeakDb: Number(data.targetTruePeakDb ?? -1.0),
     reasoningPerProcessor: reasoning,
     chain,
+    paramCorrections,
     aiMeta: {
       modelName,
       responseTimeMs,
@@ -319,13 +325,14 @@ export async function refineGeminiIteration(input: {
   const data = JSON.parse(rawText);
   const rawProcessors = Array.isArray(data.processors) ? data.processors : [];
   const aiReturnedModules = rawProcessors.map((p: { type?: unknown }) => String(p?.type ?? '')).filter(Boolean);
-  const { chain, reasoning } = parseAiChain(rawProcessors);
+  const { chain, reasoning, paramCorrections } = parseAiChain(rawProcessors);
 
   return {
     strategySummary: String(data.strategySummary || 'Refined mastering pass parameters.'),
     issuesDetected: Array.isArray(data.issuesDetected) ? data.issuesDetected.map(String) : [],
     reasoningPerProcessor: reasoning,
     chain: chain.length > 0 ? chain : input.currentChain,
+    paramCorrections,
     aiMeta: {
       modelName,
       responseTimeMs,

@@ -28,6 +28,7 @@ import type {
   AiFallbackReason,
   AIMasteringStrategy,
   AiPassTrace,
+  DirectorOverride,
   AiTimeoutHit,
   AudioAnalysis,
   ChainCommand,
@@ -81,6 +82,10 @@ import {
 import { applyStructuredChainCommands } from './chainCommands';
 import { inspectPluginInventory } from './pluginIntelligence';
 import { validateChainAgainstInventory } from './processorInventory';
+import { describeModuleSettings } from './diagnosticLog';
+import { OVERRIDE_REASONS, recordPreDirectorOverrides, recordStageOverrides } from './directorOverrides';
+import { takeAiChainProvenance } from '../ai/aiProvenance';
+import type { AiParamCorrection } from '../ai/aiParamCorrections';
 import { computeChainFingerprint, isMasterFullyVerified, verifyPostFixAnalysis } from './postFixVerification';
 import { deriveReferenceMatchBands } from './referenceMatch';
 
@@ -2406,12 +2411,60 @@ export async function runAutonomousDirectorLoop(
   // and hold them to the Director's conservative ceiling; without a reference, drop them.
   const prepareChain = (c: ProcessorModule[], fromAi: boolean) =>
     hydrateMatchEqChain(c, matchEqProfile, { dropUnlearned: true, conservative: fromAi });
-  let workingChain: ProcessorModule[] =
-    opts.initialChain && opts.initialChain.length > 0
-      ? prepareChain(mergeAiChainWithRequiredModules(opts.initialChain, opts.leadModules ?? []), true)
-      : opts.leadModules && opts.leadModules.length > 0
-        ? validateChain([...structuredClone(opts.leadModules), ...structuredClone(plan.chain)])
-        : structuredClone(plan.chain);
+  // Log-first (E4): every AI value the Director changes before a render is recorded with its reason.
+  const strategyOverrides: DirectorOverride[] = [];
+  // Ids of the modules the AI chose for each AI trace, so the log can list them with final settings.
+  const aiIdsByTrace = new WeakMap<AiPassTrace, ReadonlySet<string>>();
+  let lastTracedAiIds: ReadonlySet<string> | null = null;
+  let strategyAiIds: ReadonlySet<string> | null = null;
+  let strategyCorrections: AiParamCorrection[] = [];
+  const traceAiChainThroughDirector = (
+    pass: number,
+    received: ProcessorModule[],
+    provenance: ReturnType<typeof takeAiChainProvenance>,
+    out: DirectorOverride[],
+    validated?: ProcessorModule[],
+  ): ProcessorModule[] => {
+    const aiIds = new Set<string>(provenance ? [...provenance.snapshots.keys()] : received.map((m) => m.id));
+    lastTracedAiIds = aiIds;
+    if (provenance) recordPreDirectorOverrides(out, pass, provenance.snapshots, received);
+    let current = received;
+    if (validated) {
+      recordStageOverrides(out, { pass, stage: 'inventory-validation', before: current, after: validated, aiIds, reasonFor: () => OVERRIDE_REASONS.inventory });
+      current = validated;
+    }
+    const merged = mergeAiChainWithRequiredModules(current, opts.leadModules ?? []);
+    recordStageOverrides(out, { pass, stage: 'required-modules-merge', before: current, after: merged, aiIds, reasonFor: () => OVERRIDE_REASONS.merge });
+    const prepared = prepareChain(merged, true);
+    recordStageOverrides(out, {
+      pass,
+      stage: 'match-eq-guard',
+      before: merged,
+      after: prepared,
+      aiIds,
+      reasonFor: (_m, removed) => (removed ? OVERRIDE_REASONS.matchEqDropped : OVERRIDE_REASONS.matchEqCeiling),
+    });
+    return prepared;
+  };
+  let workingChain: ProcessorModule[];
+  if (opts.initialChain && opts.initialChain.length > 0) {
+    const strategyAiSourced = Boolean(
+      opts.initialAiTrace &&
+      (opts.initialAiTrace.source === 'gemini-cloud' || opts.initialAiTrace.source === 'byo-provider') &&
+      !opts.initialAiTrace.fallbackReason,
+    );
+    const provenance = takeAiChainProvenance(opts.initialChain);
+    strategyCorrections = provenance?.corrections ?? [];
+    lastTracedAiIds = null;
+    workingChain = provenance || strategyAiSourced
+      ? traceAiChainThroughDirector(0, opts.initialChain, provenance, strategyOverrides)
+      : prepareChain(mergeAiChainWithRequiredModules(opts.initialChain, opts.leadModules ?? []), true);
+    strategyAiIds = lastTracedAiIds;
+  } else {
+    workingChain = opts.leadModules && opts.leadModules.length > 0
+      ? validateChain([...structuredClone(opts.leadModules), ...structuredClone(plan.chain)])
+      : structuredClone(plan.chain);
+  }
 
   emit(
     'Building chain',
@@ -2433,6 +2486,11 @@ export async function runAutonomousDirectorLoop(
 
   const aiPasses: AiPassTrace[] = opts.initialAiTrace ? [structuredClone(opts.initialAiTrace)] : [];
   let pendingAiTrace: AiPassTrace | null = aiPasses[0] ?? null;
+  if (aiPasses[0]) {
+    if (strategyCorrections.length > 0) aiPasses[0].paramCorrections = strategyCorrections;
+    if (strategyOverrides.length > 0) aiPasses[0].directorOverrides = strategyOverrides;
+    if (strategyAiIds) aiIdsByTrace.set(aiPasses[0], strategyAiIds);
+  }
 
   let bestCheckpoint: DirectorCheckpoint = baseCheckpoint;
   const safeFallbackCandidates: SafeFallbackCandidate[] = [];
@@ -2652,11 +2710,26 @@ export async function runAutonomousDirectorLoop(
           ? `${prevCp.analysis.integratedLufs.toFixed(1)} LUFS · Fit ${prevCp.multiObjective.engineeringFitIndex.toFixed(1)}`
           : undefined,
         outcome: improved ? 'improved' : 'regressed',
+        ...(improved
+          ? {}
+          : {
+              rejectionReasons: hardRegressionReasons.length > 0
+                ? [`Regression guard rejected: ${hardRegressionReasons.join('; ')}`]
+                : gateDowngrade
+                  ? [`Objective gate failed while the retained Pass ${bestCheckpoint.passNumber} passes it`]
+                  : [`Fit ${multiObjective.engineeringFitIndex.toFixed(1)} did not improve over ${bestCheckpoint.multiObjective.engineeringFitIndex.toFixed(1)} (retained Pass ${bestCheckpoint.passNumber})`],
+            }),
       },
     };
     checkpoints.push(cp);
     if (pendingAiTrace) {
       pendingAiTrace.finalRenderedModules = cp.chain.map((m) => m.type);
+      const chosenIds = aiIdsByTrace.get(pendingAiTrace);
+      if (chosenIds && chosenIds.size > 0) {
+        pendingAiTrace.aiChosenTools = cp.chain
+          .filter((m) => chosenIds.has(m.id))
+          .map((m) => ({ name: m.name, type: m.type, enabled: m.enabled && !m.bypassed, settings: describeModuleSettings(m) }));
+      }
       pendingAiTrace = null;
     }
     safeFallbackCandidates.push({
@@ -2784,6 +2857,9 @@ export async function runAutonomousDirectorLoop(
       let refineValidationFailedDetail: string | undefined;
       let refineErrorDetail: string | undefined;
       let refineAiReturnedModules: ProcessorModule['type'][] = [];
+      const refineOverrides: DirectorOverride[] = [];
+      let refineCorrections: AiParamCorrection[] = [];
+      let refineAiIds = new Set<string>();
       if (opts.aiRefineCallback) {
         try {
           const rawSuggestion = await opts.aiRefineCallback({
@@ -2821,11 +2897,17 @@ export async function runAutonomousDirectorLoop(
               if (refineAiReturnedModules.length === 0) {
                 refineAiReturnedModules = candidateAiChain.map((m) => m.type);
               }
+              const refineProvenance = takeAiChainProvenance(candidateAiChain);
+              refineCorrections = refineProvenance?.corrections ?? [];
               const invCheck = validateChainAgainstInventory(candidateAiChain);
               if (invCheck.valid) {
-                nextChainFromAi = prepareChain(
-                  mergeAiChainWithRequiredModules(invCheck.sanitizedChain, opts.leadModules ?? []),
-                  true,
+                refineAiIds = new Set<string>(refineProvenance ? [...refineProvenance.snapshots.keys()] : candidateAiChain.map((m) => m.id));
+                nextChainFromAi = traceAiChainThroughDirector(
+                  pass,
+                  candidateAiChain,
+                  refineProvenance,
+                  refineOverrides,
+                  invCheck.sanitizedChain,
                 );
               } else {
                 refineValidationFailedDetail = invCheck.errors[0] ?? 'schema violation';
@@ -2882,6 +2964,16 @@ export async function runAutonomousDirectorLoop(
         if (gateFix.commands.length > 0) {
           const repaired = applyStructuredChainCommands(nextChainFromAi, gateFix.commands);
           if (repaired.appliedCount > 0) {
+            const failedGateLabels = targetGate.failed.map((check) => check.label).join(', ');
+            recordStageOverrides(refineOverrides, {
+              pass,
+              stage: 'objective-gate-repair',
+              before: nextChainFromAi,
+              after: repaired.chain,
+              aiIds: refineAiIds,
+              reasonFor: () => `Objective gate failed on the Pass ${pass} render (${failedGateLabels}): ${gateFix.reasons.join('; ')}`,
+              logAdditions: true,
+            });
             nextChainFromAi = repaired.chain;
             emit(
               'Optimizing',
@@ -2913,8 +3005,11 @@ export async function runAutonomousDirectorLoop(
           ...(refineTraceMeta?.timeoutHit ? { timeoutMs: refineTraceMeta.timeoutMs ?? null } : {}),
           aiReturnedModules: refineAiReturnedModules,
           finalRenderedModules: nextChainFromAi.map((m) => m.type),
+          ...(refineCorrections.length > 0 ? { paramCorrections: refineCorrections } : {}),
+          ...(refineOverrides.length > 0 ? { directorOverrides: refineOverrides } : {}),
         };
         aiPasses.push(refineTrace);
+        aiIdsByTrace.set(refineTrace, refineAiIds);
         pendingAiTrace = refineTrace;
         if (renderedChainKeys.has(chainRenderKey(nextChainFromAi))) {
           pendingAiTrace = null;
@@ -2964,6 +3059,7 @@ export async function runAutonomousDirectorLoop(
           ...(refineTraceMeta?.timeoutHit ? { timeoutMs: refineTraceMeta.timeoutMs ?? null } : {}),
           aiReturnedModules: refineAiReturnedModules,
           finalRenderedModules: refinementSourceChain.map((m) => m.type),
+          ...(refineCorrections.length > 0 ? { paramCorrections: refineCorrections } : {}),
         };
         aiPasses.push(fallbackTrace);
         pendingAiTrace = fallbackTrace;

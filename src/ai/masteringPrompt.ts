@@ -21,6 +21,7 @@ import { PROCESSOR_PARAM_LIMITS } from '../dsp/chainValidation.ts';
 import { summarizeVocalBalanceForPrompt, type VocalBalanceContext } from './vocalBalancePrompt.ts';
 import { formatPlatformHintsForPrompt } from '../dsp/platformRules.ts';
 import type { MasterTargetGate } from '../director/masterTargets.ts';
+import { collectModuleCorrections, MAX_AI_PARAM_CORRECTIONS, type AiParamCorrection } from './aiParamCorrections.ts';
 
 export interface StrategyPromptInput {
   analysis: AudioAnalysis;
@@ -301,21 +302,30 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
   return prompt;
 }
 
+/** Processor types the AI may return: derived from the validator's limits table (single source of truth). */
+export const AI_PROCESSOR_TYPES = Object.keys(PROCESSOR_PARAM_LIMITS).filter(
+  (k) => k !== 'module',
+) as Array<Exclude<keyof typeof PROCESSOR_PARAM_LIMITS, 'module'>>;
+
 /** Standard JSON Schema for the strategy object (OpenAI json_schema, Anthropic tool input, Gemini REST). */
 export const PROCESSOR_JSON_SCHEMA = {
   type: 'object',
   properties: {
     type: {
       type: 'string',
+      enum: AI_PROCESSOR_TYPES,
       description:
         'Must be one of: parametric-eq, dynamic-eq, compressor, multiband-comp, saturation, stereo-imager, restore, bass-enhancer, limiter, maximizer, transient-shaper, clipper, multiband-maximizer, dither, match-eq, vocal-rebalance',
     },
     name: { type: 'string' },
+    enabled: { type: 'boolean', description: 'false = stage kept in the chain but switched off (default true)' },
+    bypassed: { type: 'boolean', description: 'true = stage bypassed (default false)' },
     intensity: { type: 'number', description: '0 to 100' },
     wetDry: { type: 'number', description: '0 to 100' },
     inputGainDb: { type: 'number', description: '-12 to +12' },
     outputGainDb: { type: 'number', description: '-12 to +12' },
-    reason: { type: 'string', description: 'Engineering justification referencing measured metrics & tradeoffs' },
+    rationale: { type: 'string', description: 'Short engineering rationale for this module referencing measured metrics' },
+    reason: { type: 'string', description: 'Engineering justification referencing measured metrics & tradeoffs (alias of rationale)' },
     paramsJson: {
       type: 'string',
       description:
@@ -371,39 +381,54 @@ export class AiValidationError extends Error {
   }
 }
 
+export interface RawAiProcessor {
+  type: string;
+  name: string;
+  intensity: number;
+  wetDry: number;
+  inputGainDb?: number;
+  outputGainDb?: number;
+  enabled?: boolean;
+  bypassed?: boolean;
+  reason: string;
+  rationale?: string;
+  paramsJson: string;
+}
+
 export function parseAiChain(
-  rawProcessors: Array<{
-    type: string;
-    name: string;
-    intensity: number;
-    wetDry: number;
-    inputGainDb?: number;
-    outputGainDb?: number;
-    reason: string;
-    paramsJson: string;
-  }>,
+  rawProcessors: RawAiProcessor[],
 ): {
   chain: ProcessorModule[];
-  reasoning: Array<{ processorType: ProcessorModule['type']; reason: string }>;
+  reasoning: Array<{ processorType: ProcessorModule['type']; reason: string; rationale?: string }>;
+  /** Every AI value that validation changed or dropped (empty when everything survived). */
+  paramCorrections: AiParamCorrection[];
 } {
   if (rawProcessors.length === 0) {
-    return { chain: [], reasoning: [] };
+    return { chain: [], reasoning: [], paramCorrections: [] };
   }
 
-  const parsed = rawProcessors.map((p) => {
+  const malformed: Array<string | undefined> = [];
+  const parsed = rawProcessors.map((p, i) => {
     let paramsObj: unknown = {};
+    malformed[i] = undefined;
     try {
       paramsObj = JSON.parse(p.paramsJson);
     } catch {
       paramsObj = {};
+      malformed[i] = typeof p.paramsJson === 'string' ? p.paramsJson : String(p.paramsJson);
     }
     return {
+      // Temporary id in the validator's own format so each validated module can be traced
+      // back to the AI entry that produced it (the validator may reorder, e.g. Vocal Rebalance).
+      id: `${p.type}-${Math.random().toString(36).slice(2, 8)}${i}`,
       type: p.type,
       name: p.name,
       intensity: p.intensity,
       wetDry: p.wetDry,
       inputGainDb: p.inputGainDb ?? 0,
       outputGainDb: p.outputGainDb ?? 0,
+      ...(typeof p.enabled === 'boolean' ? { enabled: p.enabled } : {}),
+      ...(typeof p.bypassed === 'boolean' ? { bypassed: p.bypassed } : {}),
       params: paramsObj,
     };
   });
@@ -416,14 +441,42 @@ export function parseAiChain(
   }
 
   const chain = inventoryCheck.sanitizedChain;
-  const reasoning = rawProcessors
-    .slice(0, chain.length)
-    .map((p, idx) => ({
-      processorType: chain[idx].type,
-      reason: String(p.reason || '').slice(0, 400),
-    }));
+  const byId = new Map(chain.map((m) => [m.id, m] as const));
+  const reasoning: Array<{ processorType: ProcessorModule['type']; reason: string; rationale?: string }> = [];
+  const paramCorrections: AiParamCorrection[] = [];
+  rawProcessors.forEach((p, i) => {
+    const validated = byId.get(parsed[i].id);
+    const rationale = typeof p.rationale === 'string' && p.rationale.trim() ? p.rationale.slice(0, 400) : undefined;
+    if (validated) {
+      reasoning.push({
+        processorType: validated.type,
+        reason: String(rationale ?? p.reason ?? '').slice(0, 400),
+        ...(rationale ? { rationale } : {}),
+      });
+    }
+    if (paramCorrections.length < MAX_AI_PARAM_CORRECTIONS) {
+      paramCorrections.push(
+        ...collectModuleCorrections(
+          {
+            type: p.type,
+            name: p.name,
+            intensity: p.intensity,
+            wetDry: p.wetDry,
+            inputGainDb: p.inputGainDb,
+            outputGainDb: p.outputGainDb,
+            enabled: p.enabled,
+            bypassed: p.bypassed,
+            params: parsed[i].params,
+            ...(malformed[i] !== undefined ? { malformedParamsJson: malformed[i] } : {}),
+          },
+          validated,
+          i,
+        ),
+      );
+    }
+  });
 
-  return { chain, reasoning };
+  return { chain, reasoning, paramCorrections: paramCorrections.slice(0, MAX_AI_PARAM_CORRECTIONS) };
 }
 
 type RawStrategy = Record<string, unknown> & { processors?: unknown };
@@ -442,7 +495,10 @@ function rawProcessorsOf(data: RawStrategy): Parameters<typeof parseAiChain>[0] 
       wetDry: Number(r.wetDry),
       inputGainDb: r.inputGainDb === undefined ? undefined : Number(r.inputGainDb),
       outputGainDb: r.outputGainDb === undefined ? undefined : Number(r.outputGainDb),
+      ...(typeof r.enabled === 'boolean' ? { enabled: r.enabled } : {}),
+      ...(typeof r.bypassed === 'boolean' ? { bypassed: r.bypassed } : {}),
       reason: String(r.reason ?? ''),
+      ...(typeof r.rationale === 'string' ? { rationale: r.rationale } : {}),
       // Some providers return params as an object instead of a JSON string.
       paramsJson: typeof r.paramsJson === 'string' ? r.paramsJson : JSON.stringify(r.paramsJson ?? r.params ?? {}),
     };
@@ -451,7 +507,7 @@ function rawProcessorsOf(data: RawStrategy): Parameters<typeof parseAiChain>[0] 
 
 /** Same normalization the built-in Gemini route applies to its strategy response. */
 export function normalizeStrategyResponse(data: RawStrategy, input: Pick<StrategyPromptInput, 'objective' | 'mode' | 'targetLufs'>) {
-  const { chain, reasoning } = parseAiChain(rawProcessorsOf(data));
+  const { chain, reasoning, paramCorrections } = parseAiChain(rawProcessorsOf(data));
   return {
     id: `ai-${Date.now()}`,
     timestamp: Date.now(),
@@ -467,16 +523,18 @@ export function normalizeStrategyResponse(data: RawStrategy, input: Pick<Strateg
     targetTruePeakDb: Number(data.targetTruePeakDb ?? -1.0),
     reasoningPerProcessor: reasoning,
     chain,
+    ...(paramCorrections.length > 0 ? { paramCorrections } : {}),
   };
 }
 
 /** Same normalization the built-in Gemini route applies to its refine response. */
 export function normalizeRefineResponse(data: RawStrategy, currentChain: ProcessorModule[]) {
-  const { chain, reasoning } = parseAiChain(rawProcessorsOf(data));
+  const { chain, reasoning, paramCorrections } = parseAiChain(rawProcessorsOf(data));
   return {
     strategySummary: String(data.strategySummary || 'Refined mastering pass parameters.'),
     issuesDetected: Array.isArray(data.issuesDetected) ? data.issuesDetected.map(String) : [],
     reasoningPerProcessor: reasoning,
     chain: chain.length > 0 ? chain : currentChain,
+    ...(paramCorrections.length > 0 ? { paramCorrections } : {}),
   };
 }

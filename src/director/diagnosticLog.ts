@@ -13,6 +13,10 @@ import type {
 export type { AiCallSource, AiFallbackReason, AiPassTrace, AiTimeoutHit };
 import { evaluateMasterTargets, type MasterTargetGate } from './masterTargets';
 import { hasFreshPostFixVerification, isMasterFullyVerified } from './postFixVerification';
+import type { AiParamCorrection } from '../ai/aiParamCorrections';
+import type { DirectorOverride } from '../types/mastering';
+import { formatAiParamCorrection } from '../ai/aiParamCorrections';
+import { formatDirectorOverride } from './directorOverrides';
 
 /**
  * Mastering diagnostic log: every problem measured on the track, its target, which
@@ -41,8 +45,25 @@ export interface DiagnosticLog {
   source: Record<string, number | string>;
   master: Record<string, number | string> | null;
   gate: MasterTargetGate | null;
-  passes: Array<{ pass: number; lufs: number; truePeakDb: number; clicks: number; gatePassed: boolean | null; outcome: string }>;
+  passes: Array<{
+    pass: number;
+    lufs: number;
+    truePeakDb: number;
+    clicks: number;
+    gatePassed: boolean | null;
+    outcome: string;
+    /** The Director's main finding for this pass (the first hard-regression reason when there was one). */
+    detectedIssue?: string;
+    /** Why the pass was not retained, e.g. "Regression guard rejected: transient detail regression". */
+    rejectionReason?: string;
+  }>;
+  /** True when no processed pass was kept and the delivered audio is the original source (pass 0). */
+  rolledBackToSource: boolean;
   aiPasses: AiPassTrace[];
+  /** Every AI value validation clamped, reset or dropped, across all AI calls ("== AI parameter corrections =="). */
+  aiParamCorrections: Array<AiParamCorrection & { pass: number; stage: AiPassTrace['stage'] }>;
+  /** Every AI value the Director changed or removed before rendering, with its reason ("== Director overrides =="). */
+  directorOverrides: DirectorOverride[];
   aiFallbackBanner: string | null;
   entries: DiagnosticLogEntry[];
   chain: Array<{ name: string; type: ProcessorType; bypassed: boolean; settings: string }>;
@@ -352,7 +373,20 @@ export function buildDiagnosticLog(input: {
     clicks: cp.analysis.clickCount ?? 0,
     gatePassed: cp.targetGate ? cp.targetGate.passed : null,
     outcome: cp.iterationSummary?.outcome ?? '',
+    ...(cp.iterationSummary?.detectedIssue ? { detectedIssue: cp.iterationSummary.detectedIssue } : {}),
+    ...(cp.iterationSummary?.rejectionReasons?.length
+      ? { rejectionReason: cp.iterationSummary.rejectionReasons.join('; ') }
+      : cp.iterationSummary?.outcome === 'regressed'
+        ? { rejectionReason: `not recorded by this version; Director finding for this pass: ${cp.iterationSummary.detectedIssue || 'n/a'}` }
+        : {}),
   }));
+  const processedPasses = passes.filter((p) => p.pass > 0);
+  const rolledBackToSource = Boolean(report) && (report?.bestPassNumber ?? 0) === 0 && processedPasses.length > 0;
+  const rollbackSummary = rolledBackToSource
+    ? `No processed pass was retained: all ${processedPasses.length} rendered pass(es) were rejected (${processedPasses
+        .map((p) => `pass ${p.pass}: ${p.rejectionReason ?? p.outcome ?? 'not retained'}`)
+        .join('; ')}). The result was rolled back to Pass 0, so the delivered audio is the original, unprocessed source and there is no processed master to re-measure.`
+    : null;
 
   const outstanding = entries.filter((entry) => !['fixed', 'advisory'].includes(entry.status)).length;
   const verdict = !report
@@ -361,7 +395,9 @@ export function buildDiagnosticLog(input: {
       ? `PASSED: the delivered master was re-measured and meets every objective target (pass ${report.bestPassNumber} of ${report.iterationsExecuted}).`
       : gate?.passed && outstanding > 0
         ? `NOT FULLY VERIFIED: OBJECTIVE TARGETS MET, BUT ${outstanding} technical issue(s) remain unresolved or unverified. Review the individual evidence below (pass ${report.bestPassNumber} of ${report.iterationsExecuted}).`
-        : `NOT FULLY VERIFIED: ${gate?.summary ?? report.postFixVerification?.verificationError ?? 'no fresh verified render'} — see unresolved or unverified entries.`;
+        : rollbackSummary && !isFresh
+          ? `NOT FULLY VERIFIED: ${rollbackSummary}`
+          : `NOT FULLY VERIFIED: ${gate?.summary ?? report.postFixVerification?.verificationError ?? 'no fresh verified render'} — see unresolved or unverified entries.`;
 
   const aiPasses = report?.aiPasses
     ? structuredClone(report.aiPasses)
@@ -369,6 +405,8 @@ export function buildDiagnosticLog(input: {
       ? structuredClone(input.aiPasses)
       : [];
   const aiFallbackBanner = summarizeAiFallbackBanner(aiPasses);
+  const aiParamCorrections = aiPasses.flatMap((a) => (a.paramCorrections ?? []).map((c) => ({ ...c, pass: a.pass, stage: a.stage })));
+  const directorOverrides = aiPasses.flatMap((a) => a.directorOverrides ?? []);
 
   return {
     createdAt: new Date().toISOString(),
@@ -379,7 +417,10 @@ export function buildDiagnosticLog(input: {
     master: master ? metricsOf(master) : null,
     gate,
     passes,
+    rolledBackToSource,
     aiPasses,
+    aiParamCorrections,
+    directorOverrides,
     aiFallbackBanner,
     entries,
     chain: chain.map((m) => ({ name: m.name, type: m.type, bypassed: m.bypassed || !m.enabled, settings: describeModuleSettings(m) })),
@@ -410,7 +451,11 @@ export function diagnosticLogToText(log: DiagnosticLog): string {
   if (log.passes.length > 0) {
     L.push('');
     L.push('== Passes ==');
-    for (const p of log.passes) L.push(`  #${p.pass}: ${p.lufs.toFixed(1)} LUFS, ${p.truePeakDb.toFixed(2)} dBTP, clicks ${p.clicks}, gate ${p.gatePassed === null ? '-' : p.gatePassed ? 'PASS' : 'FAIL'} (${p.outcome})`);
+    for (const p of log.passes) {
+      L.push(`  #${p.pass}: ${p.lufs.toFixed(1)} LUFS, ${p.truePeakDb.toFixed(2)} dBTP, clicks ${p.clicks}, gate ${p.gatePassed === null ? '-' : p.gatePassed ? 'PASS' : 'FAIL'} (${p.outcome})`);
+      if (p.rejectionReason) L.push(`      not retained: ${p.rejectionReason}`);
+    }
+    if (log.rolledBackToSource) L.push('  Result: rolled back to Pass 0 (original source); no processed pass was retained.');
   }
   if (log.aiPasses.length > 0 || log.aiFallbackBanner) {
     L.push('');
@@ -428,7 +473,24 @@ export function diagnosticLogToText(log: DiagnosticLog): string {
       L.push(`  ${label}: source=${a.source} | model=${modelStr} | responseTime=${timeStr} | prompt=${promptStr} | timeoutHit=${timeoutStr} | fallback=${fbStr}`);
       L.push(`    AI returned:    [${aiMods}]`);
       L.push(`    Final rendered: [${finalMods}]`);
+      if (a.aiChosenTools && a.aiChosenTools.length > 0) {
+        L.push('    AI-chosen tools as rendered:');
+        for (const t of a.aiChosenTools) L.push(`      - ${t.name} (${t.type})${t.enabled ? '' : ' [off]'}: ${t.settings}`);
+      }
     }
+  }
+  const hasAiCalls = log.aiPasses.some((a) => a.source === 'gemini-cloud' || a.source === 'byo-provider');
+  if (log.aiParamCorrections?.length || hasAiCalls) {
+    L.push('');
+    L.push('== AI parameter corrections ==');
+    if (!log.aiParamCorrections?.length) L.push('  none: every AI value passed validation unchanged');
+    for (const c of log.aiParamCorrections ?? []) L.push(`  ${c.stage === 'strategy' ? 'Strategy' : `Refine after #${c.pass}`}: ${formatAiParamCorrection(c)}`);
+  }
+  if (log.directorOverrides?.length || hasAiCalls) {
+    L.push('');
+    L.push('== Director overrides ==');
+    if (!log.directorOverrides?.length) L.push('  none: the Director rendered every AI value as proposed');
+    for (const o of log.directorOverrides ?? []) L.push(`  ${formatDirectorOverride(o)}`);
   }
   L.push('');
   L.push('== Issues and fixes ==');

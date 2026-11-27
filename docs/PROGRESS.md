@@ -78,3 +78,21 @@ Dated entries, newest last, so work can resume if a session is cut off.
 **Checks run 2026-11-26:** `npm run lint` pass · `npm test` 472/472 pass · `npm run build` pass · `npm run check:bundle` pass · `NODE_ENV=production PORT=3456 node server.ts` → `/api/health` `{"ok":true,"aiConfigured":false}`.
 
 **Not verified:** a real Android phone (import overlay, Cancel, decode errors, memory use on a long WAV).
+
+## 2026-11-26 — Part E2 + E4 + B2 follow-up (AI schema, AI corrections, Director overrides log)
+
+**What changed (plain language)**
+- **E2 – the AI's answer format.** Both answer formats (server Gemini and the shared one used by every other AI provider) now list the allowed processor types as a fixed list built from the validator's limits table, and accept `enabled`, `bypassed` and a short `rationale` per module (`reason` still works). `paramsJson` stays a JSON string. When the AI switches a stage off or bypasses it, that is now honored.
+- **No more silent fixes.** If the AI sends broken `paramsJson`, a value out of range (clamped), an unknown option (reset) or a parameter name the tool does not have (dropped), it is recorded with module, parameter, AI value and final value. The diagnostic log shows it under **"== AI parameter corrections =="** (text and JSON). Validation and clamping themselves are unchanged.
+- `/api/ai/master` now uses the same objective/mode allowlist as `/api/ai/refine`.
+- **E4 – Director overrides (log only).** Every AI value the Director changes before a render is now logged with the reason under **"== Director overrides =="**: the app's Vocal Rebalance policy gate, the 12-stage safety limit, the Match EQ guard (no learned reference / conservative ceiling) and objective-gate repairs (for example "Bass Enhancer sub gain set to 0 dB because the Sub/Bass gate failed"). I checked each override: all of them already only happen for a failing objective gate or a protective guard, so **no merge rule was changed** (nothing loosened). Tests prove AI values survive untouched when no gate fails, overrides still happen and are logged when one fails, and gate verdicts are identical with and without logging.
+- Per AI pass the log now lists **every tool the AI chose with the settings actually rendered**.
+- **B2 follow-up.** Each rejected pass now records why (for example "Regression guard rejected: transient detail regression") and the export shows it next to the pass. When every pass was rejected, the verdict now says plainly: no processed pass was kept, the result rolled back to Pass 0 and the delivered audio is the original source (instead of only "not tied to a completed render"). Wording/logging only; gate and verdict logic unchanged.
+
+**Files:** `src/ai/aiParamCorrections.ts` (new), `src/ai/aiProvenance.ts` (new), `src/director/directorOverrides.ts` (new), `src/ai/masteringPrompt.ts` (schema block + parseAiChain/normalize only), `src/ai/masteringClient.ts`, `src/server/aiMastering.ts`, `server.ts`, `src/types/mastering.ts` (optional fields only), `src/director/directorEngine.ts`, `src/director/diagnosticLog.ts`; tests `src/ai/aiParamCorrections.test.ts`, `src/director/directorOverrides.test.ts` (new).
+
+**Checks run 2026-11-26:** `npm run lint` pass · `npm test` 467/467 pass · `npm run build` pass (main chunk `index-*.js` 848.11 kB raw, was 837.27 kB; budget not touched) · `NODE_ENV=production PORT=3458 npm start` → `/api/health` `{"ok":true,"aiConfigured":false}`.
+
+**Not verified:** a live Gemini call with the new enum schema (no API key here). The Vocal Rebalance gate runs in App.tsx (other agent's file), so its changes are detected by comparing the AI's answer with what the Director receives, not inside App.tsx.
+
+**Next:** end-to-end proof test that every AI parameter reaches the render and changes the audio.
