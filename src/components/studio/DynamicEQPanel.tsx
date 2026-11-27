@@ -28,7 +28,7 @@ interface Props {
   durationSec?: number;
   onSeek?: (sec: number) => void;
   fades?: FadeSettings;
-  onFadesChange?: (next: FadeSettings) => void;
+  onFadesChange?: (next: FadeSettings | ((current: FadeSettings) => FadeSettings)) => void;
   trace?: DynamicEqTrace;
   onAdd: () => void;
   onChange: (next: DynamicEQParams) => void;
