@@ -18,6 +18,8 @@ export interface ProgressRingProps {
   className?: string;
   /** Hide the centred number/label (when a parent draws its own content inside). */
   hideText?: boolean;
+  /** Ring thickness in viewBox px (default ~7.5% of size). The FIX ALL edge ring uses a thin stroke. */
+  strokeWidth?: number;
   children?: React.ReactNode;
 }
 
@@ -35,6 +37,7 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
   working = false,
   className = '',
   hideText = false,
+  strokeWidth,
   children,
 }) => {
   const [shown, setShown] = useState(() => clampPercent(percent));
@@ -46,7 +49,7 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
   }, [percent, state]);
 
   const value = Math.round(shown);
-  const stroke = Math.max(4, Math.round(size * 0.075));
+  const stroke = strokeWidth && strokeWidth > 0 ? strokeWidth : Math.max(4, Math.round(size * 0.075));
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
   const offset = circumference * (1 - shown / 100);

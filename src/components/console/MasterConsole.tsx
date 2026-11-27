@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BrainCircuit, Download, MessageSquareText, Pause, Play, Plus, SkipBack, SkipForward, Square, Upload } from 'lucide-react';
+import { BrainCircuit, Download, MessageSquareText, Pause, Play, Plus, SkipBack, SkipForward, Square } from 'lucide-react';
 import type {
   AudioAnalysis,
   CompressorParams,
@@ -36,6 +36,7 @@ import { StereoMeters, StereoScope } from './StereoScope';
 import { telemetryStore, type RuntimeTelemetryState } from '../../engine/telemetryStore';
 import { isMasterFullyVerified } from '../../director/postFixVerification';
 import { ProgressRing, type ProgressRingState } from '../ui/ProgressRing';
+import { useLevelGlow } from '../ui/levelGlow';
 import { clampPercent, fixAllPercent, fixAllStageLabel, nextMonotonicPercent } from '../ui/progressMath';
 
 /**
@@ -265,6 +266,7 @@ const StepLabel: React.FC<{ n: number; text: string; hint?: string; className?: 
 );
 
 export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
+  useLevelGlow();
   const [eqView, setEqView] = useState<'eq' | 'dyneq' | 'matcheq' | 'spectrum' | 'spectrogram' | 'vocal'>('eq');
   // Prefetch the code-split Dynamic EQ editor after first paint so the tab opens instantly.
   useEffect(() => {
@@ -427,16 +429,11 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
       <div className="syn-fixai-ringbox">
       <button
         type="button"
-        className={`syn-fixai${p.running ? ' is-running' : ''}`}
+        className={`syn-fixai syn-orb${p.running ? ' is-running' : ''}${isFilling ? ' is-filling' : ''}${fixRingState === 'running' && !p.running && progressPercent >= 100 ? ' is-done' : ''}`}
         onClick={p.onFix}
         disabled={!p.hasTrack || p.running}
         aria-describedby="syn-fixai-status"
         aria-label={p.running ? 'Fix All with AI is running' : 'Fix All with AI: analyze, fix, render and verify the master'}
-        style={{
-          boxShadow: isFilling
-            ? '0 0 0 6px rgba(5,7,13,0.9), 0 0 28px rgba(56,189,248,0.45)'
-            : undefined,
-        }}
       >
         <span className="syn-fixai-ring" aria-hidden="true" />
         <BrainCircuit className="syn-fixai-icon" aria-hidden="true" />
@@ -454,6 +451,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
           className="syn-fixai-progress"
           percent={progressPercent}
           size={180}
+          strokeWidth={5}
           state={fixRingState}
           working={p.running && /think|stem/i.test(p.stage ?? '')}
           label={fixStageText}
@@ -640,10 +638,6 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
             <div className="syn-progress" aria-hidden="true"><span style={{ width: `${Math.max(p.running ? 6 : 0, pct)}%` }} /></div>
             {!p.hasTrack && (
               <div className="syn-global-actions">
-                <label className="syn-btn-ghost syn-file-btn">
-                  <Upload className="w-3.5 h-3.5" /> Import
-                  <input type="file" accept="audio/*,.wav,.flac,.mp3,.aac,.m4a,.ogg,.aiff,.aif" onChange={(e) => { const f = e.target.files?.[0]; if (f) p.onImport(f); e.target.value = ''; }} />
-                </label>
                 <button type="button" className="syn-btn-ghost" onClick={p.onDemo}>Load demo session</button>
               </div>
             )}

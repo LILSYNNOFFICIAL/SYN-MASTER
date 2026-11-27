@@ -1009,3 +1009,104 @@ g.is-solo .syn-eqx-node{stroke-dasharray:3 2;}
     margin: 0;
   }
 }
+
+/* ===================================================================================
+   Living skin (2026-11-26): ribbon Import pill, FIX ALL edge ring + living orb,
+   audio-reactive glow (--syn-level, set by src/components/ui/levelGlow.ts), neon card
+   edges, glass header, hover/press feedback. Display only. Reduced motion respected.
+   =================================================================================== */
+
+/* 1 + 8. Import track pill in the session ribbon (moved from the fades row). */
+@media (min-width:1024px){.syn-workstation > .syn-session-ribbon > div:first-child{flex:1 1 auto;}}
+.syn-ribbon-import{position:relative;display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;margin-inline:auto;
+  padding:4px 12px;border-radius:999px;border:1px solid var(--skin-gold);background:rgba(245,184,46,.06);
+  color:var(--skin-gold-bright);font-size:12px;font-weight:600;line-height:16px;white-space:nowrap;cursor:pointer;
+  box-shadow:0 0 8px rgba(245,184,46,.22);}
+.syn-ribbon-import svg{color:var(--skin-gold);}
+.syn-ribbon-import input{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0);}
+.syn-ribbon-import:focus-within{outline:2px solid var(--skin-cyan);outline-offset:2px;}
+.syn-ribbon-import::after{content:"";position:absolute;inset:-3px;border-radius:inherit;pointer-events:none;
+  box-shadow:0 0 14px 2px rgba(245,184,46,.7);opacity:0;}
+.syn-ribbon-import.is-empty::after{animation:syn-import-pulse 1.8s ease-in-out infinite;}
+@keyframes syn-import-pulse{0%,100%{opacity:0}50%{opacity:1}}
+/* The old "Import Track" button in the fades row is replaced by the ribbon pill. */
+.syn-player-controls > .syn-player-import{display:none !important;}
+@media (max-width:1023px){
+  .syn-session-ribbon input[aria-label="Project Name"]{width:7.5rem !important;}
+  .syn-ribbon-import{margin-inline:4px 0;padding:0 10px;min-height:32px;}
+}
+@media (max-width:480px){
+  .syn-ribbon-import{padding:0;width:36px;min-height:36px;justify-content:center;}
+  .syn-ribbon-import-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);}
+}
+
+/* 2. FIX ALL: the progress ring IS the outer edge (thin, gold -> electric blue sweep). */
+.syn-fixai-ringbox > .syn-progress-ring.syn-fixai-progress{inset:-3px !important;}
+.syn-fixai-ringbox > .syn-progress-ring.syn-fixai-progress .syn-progress-ring-fill{filter:drop-shadow(0 0 5px rgba(63,224,255,.85));}
+.syn-fixai.is-filling{border-color:transparent !important;}
+.syn-fixai.is-running{animation:none !important;}
+
+/* 3. Living orb: gold breathing halo (idle), rotating blue sweep (running), white flash (done). */
+.syn-orb::before,.syn-orb::after{content:"";position:absolute;border-radius:50%;pointer-events:none;z-index:0;}
+.syn-orb::before{inset:-22px;opacity:.35;
+  background:radial-gradient(circle,transparent 58%,rgba(245,184,46,.38) 66%,rgba(245,184,46,0) 74%);}
+.syn-orb:not(:disabled)::before{animation:syn-orb-breathe 4.2s ease-in-out infinite;}
+@keyframes syn-orb-breathe{0%,100%{opacity:.25;transform:scale(.97)}50%{opacity:.85;transform:scale(1.02)}}
+.syn-orb.is-running::before{inset:-16px;opacity:1;
+  background:conic-gradient(from 0deg,transparent 0 72%,rgba(63,224,255,0) 74%,rgba(63,224,255,.9) 97%,transparent 100%);
+  -webkit-mask:radial-gradient(circle,transparent 62%,#000 64%,#000 69%,transparent 71%);
+          mask:radial-gradient(circle,transparent 62%,#000 64%,#000 69%,transparent 71%);
+  animation:syn-orb-sweep 1.6s linear infinite;}
+@keyframes syn-orb-sweep{to{transform:rotate(360deg)}}
+.syn-orb::after{inset:0;opacity:0;background:radial-gradient(circle,rgba(255,255,255,.95),rgba(255,255,255,.35) 55%,transparent 72%);}
+.syn-orb.is-done::after{animation:syn-orb-flash .7s ease-out 1 both;}
+@keyframes syn-orb-flash{0%{opacity:0}18%{opacity:.9}100%{opacity:0}}
+
+/* 4. Audio-reactive glow (--syn-level 0..1 while playing; 0 otherwise). Opacity/filter only. */
+.syn-eq-panel svg circle.syn-ceq-node{filter:drop-shadow(0 0 calc(4px + var(--syn-level,0) * 10px) currentColor) drop-shadow(0 0 2px currentColor) !important;}
+.syn-eq-panel:not(.syn-deq) .syn-eqx-live{filter:drop-shadow(0 0 calc(6px + var(--syn-level,0) * 8px) #3FE0FF);}
+@media (max-width:767px){.syn-eq-panel:not(.syn-deq) .syn-eqx-live{filter:drop-shadow(0 0 6px #3FE0FF);}}
+
+/* 5. Neon card edges: thin gold -> violet top edge (brightens with level) + soft inner shadow. */
+.syn-card::after{content:"";position:absolute;left:14px;right:14px;top:0;height:1.5px;border-radius:2px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--skin-gold) 18%,#C084FC 62%,var(--skin-purple) 85%,transparent);
+  box-shadow:0 0 8px rgba(139,92,246,.6),0 0 4px rgba(245,184,46,.5);
+  opacity:calc(.6 + var(--syn-level,0) * .4);}
+.syn-card{box-shadow:inset 0 1px 14px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.4),0 0 22px rgba(46,168,255,.16),0 0 10px var(--skin-gold-glow),0 10px 30px rgba(0,0,0,.55) !important;}
+
+/* 6. Glass header with a slow scanline shimmer behind the logo. */
+.syn-workstation > .syn-app-header{background:linear-gradient(180deg,rgba(10,12,20,.72),rgba(8,8,12,.58)) !important;
+  -webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3);}
+.syn-wordmark-row{position:relative;isolation:isolate;}
+.syn-wordmark-row::before{content:"";position:absolute;inset:-6px -14px;z-index:-1;border-radius:10px;pointer-events:none;
+  background:repeating-linear-gradient(180deg,rgba(63,224,255,.07) 0 1px,transparent 1px 3px),
+             linear-gradient(100deg,transparent 30%,rgba(255,243,204,.14) 50%,transparent 70%);
+  background-size:100% 100%,250% 100%;animation:syn-scan-shimmer 7s linear infinite;
+  -webkit-mask:radial-gradient(ellipse at center,#000 45%,transparent 80%);mask:radial-gradient(ellipse at center,#000 45%,transparent 80%);}
+@keyframes syn-scan-shimmer{from{background-position:0 0,150% 0}to{background-position:0 0,-100% 0}}
+
+/* 7. Hover / press feedback: blue underglow on hover, small press-in on tap. */
+.syn-seg button,.syn-primary-nav-item,.syn-btn-ghost,.syn-icon-btn,.syn-askai,.syn-ribbon-import,
+.syn-session-ribbon button,.syn-menu-group > summary,.syn-export-master,.syn-header-export,.syn-drawer-nav-item{
+  transition:transform .12s ease,box-shadow .18s ease,color .18s ease,filter .18s ease;}
+@media (hover:hover){
+  .syn-seg button:not(.is-on):not(:disabled):hover,.syn-btn-ghost:not(:disabled):hover,.syn-icon-btn:hover,.syn-askai:hover,
+  .syn-ribbon-import:hover,.syn-session-ribbon button:not(:disabled):hover,.syn-menu-group > summary:hover,.syn-drawer-nav-item:hover{
+    box-shadow:0 6px 14px -6px rgba(46,168,255,.85),0 0 0 1px rgba(63,224,255,.25) !important;}
+  .syn-primary-nav-item:not([data-active="true"]):hover{filter:drop-shadow(0 5px 7px rgba(46,168,255,.7));}
+}
+.syn-seg button:not(:disabled):active,.syn-primary-nav-item:active,.syn-btn-ghost:not(:disabled):active,.syn-icon-btn:active,
+.syn-askai:active,.syn-ribbon-import:active,.syn-session-ribbon button:not(:disabled):active,.syn-menu-group > summary:active,
+.syn-export-master:not(:disabled):active,.syn-header-export:active,.syn-drawer-nav-item:active{transform:translateY(1px) scale(.97);}
+.syn-fixai:not(:disabled):active{transform:scale(.98);}
+
+@media (prefers-reduced-motion:reduce){
+  .syn-ribbon-import.is-empty::after,.syn-orb::before,.syn-orb.is-running::before,.syn-orb.is-done::after,.syn-wordmark-row::before{animation:none !important;}
+  .syn-ribbon-import.is-empty::after{opacity:.6;}
+  .syn-orb:not(:disabled)::before{opacity:.5;transform:none;}
+  .syn-seg button,.syn-primary-nav-item,.syn-btn-ghost,.syn-icon-btn,.syn-askai,.syn-ribbon-import,.syn-session-ribbon button,
+  .syn-menu-group > summary,.syn-export-master,.syn-header-export,.syn-drawer-nav-item{transition:none;}
+  .syn-seg button:active,.syn-primary-nav-item:active,.syn-btn-ghost:active,.syn-icon-btn:active,.syn-askai:active,.syn-ribbon-import:active,
+  .syn-session-ribbon button:active,.syn-menu-group > summary:active,.syn-export-master:active,.syn-header-export:active,.syn-drawer-nav-item:active,
+  .syn-fixai:active{transform:none;}
+}

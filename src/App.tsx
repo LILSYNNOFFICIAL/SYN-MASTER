@@ -13,6 +13,7 @@ import {
   Sparkles,
   Square,
   Undo2,
+  Upload,
 } from 'lucide-react';
 import type {
   AiChainLifecycleState,
@@ -3622,6 +3623,21 @@ export default function App() {
           >
             <Redo2 className="w-3.5 h-3.5" />
           </button>
+          {/* Import track: compact gold pill in the session ribbon (pulses until a track is loaded). */}
+          <label
+            className={`syn-ribbon-import${activeTrack ? '' : ' is-empty'}`}
+            title="Import a track (WAV, FLAC, MP3, AIFF, M4A, OGG) - or drop a file anywhere"
+            data-testid="ribbon-import"
+          >
+            <Upload className="w-3.5 h-3.5" aria-hidden="true" />
+            <span className="syn-ribbon-import-text">Import track</span>
+            <input
+              type="file"
+              aria-label="Import track"
+              accept="audio/*,.wav,.flac,.mp3,.aac,.m4a,.ogg,.aiff,.aif"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUploadSourceFile(f); e.target.value = ''; }}
+            />
+          </label>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
