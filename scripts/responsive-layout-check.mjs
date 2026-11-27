@@ -427,7 +427,7 @@ async function runWavExportE2E(browser) {
     // with fixed pixel offsets that vary with viewport and SVG scaling.
     await dragFadeHandle('in', 0.1);
     const fadeInAfterFirstDrag = await page.locator('.syn-player-fades').innerText();
-    assert.match(fadeInAfterFirstDrag, /Fade in\\s+0\\.10s/i, `Fade-in must update immediately after its own drag; got: ${fadeInAfterFirstDrag}`);
+    assert.match(fadeInAfterFirstDrag, /Fade in\s+0\.10s/i, `Fade-in must update immediately after its own drag; got: ${fadeInAfterFirstDrag}`);
     await dragFadeHandle('out', 0.9);
     const fadeControls = await page.locator('.syn-player-fades').innerText();
     assert.match(fadeControls, /Fade in\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-in');
