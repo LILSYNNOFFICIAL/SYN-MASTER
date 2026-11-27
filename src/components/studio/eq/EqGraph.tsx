@@ -7,6 +7,8 @@ import { blanketPathFromEnvelope, clampView, envelopeFromGlobalPeaks, fadeGainAt
 import { getWaveformSource } from './waveformSource';
 // Split out of the main chunk (bundle budget): the zoom bar and the waveform styles load on demand.
 const WaveformZoomBar = React.lazy(() => import('./WaveformZoomBar').then((m) => ({ default: m.WaveformZoomBar })));
+// Neon frequency fill, loudness tint and fade labels also load on demand.
+const Layer = React.lazy(() => import('./waveformLayers'));
 import { F_MAX, F_MIN, G_MAX, H, W, clampF, clampG, curvePath, fToX, fmtF, gToY, xToF, yToG } from './graphMath';
 
 export interface EqGraphNode {
@@ -133,6 +135,9 @@ export const EqGraph: React.FC<Props> = ({
   const dragRef = useRef<null | { id: string; kind: 'node' | 'qlo' | 'qhi'; fine: boolean; sx: number; sy: number; node: EqGraphNode; last: { freq?: number; yDb?: number; q?: number } }>(null);
   const seekDragRef = useRef(false);
   const fadeDragRef = useRef<null | 'in' | 'out'>(null);
+  // Fade handle under the pointer or being dragged: shows its length on the curve.
+  const [fadeHot, setFadeHot] = useState<null | 'in' | 'out'>(null);
+  const [fadeDragSide, setFadeDragSide] = useState<null | 'in' | 'out'>(null);
   const lastSeekAtRef = useRef(0);
   const lastPointerXRef = useRef(0);
   // Visible waveform time window (zoom). The EQ curve stays frequency-based.
@@ -214,6 +219,7 @@ export const EqGraph: React.FC<Props> = ({
       if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
       else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
       fadeDragRef.current = null;
+      setFadeDragSide(null);
       return;
     }
     if (seekDragRef.current) {
@@ -328,10 +334,11 @@ export const EqGraph: React.FC<Props> = ({
     }, 40);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [waveSource, waveformPeaks, hasTimeline, view, durationSec]);
-  const blanketPath = useMemo(() => {
+  const blanket = useMemo(() => {
     if (!waveformPeaks || waveformPeaks.length < 2 || !(durationSec > 0)) {
       if (!waveformPeaks || waveformPeaks.length < 2) return null;
-      return blanketPathFromEnvelope(envelopeFromGlobalPeaks(waveformPeaks, 1, { start: 0, end: 1 }, Math.min(480, waveformPeaks.length)), W, H);
+      const e0 = envelopeFromGlobalPeaks(waveformPeaks, 1, { start: 0, end: 1 }, Math.min(480, waveformPeaks.length));
+      return { d: blanketPathFromEnvelope(e0, W, H), env: e0 };
     }
     const bins = Math.min(480, Math.max(2, waveformPeaks.length));
     const fresh = hiEnv && hiEnv.peaks === waveformPeaks && Math.abs(hiEnv.start - view.start) < 1e-9 && Math.abs(hiEnv.end - view.end) < 1e-9;
@@ -340,8 +347,9 @@ export const EqGraph: React.FC<Props> = ({
       const span = view.end - view.start;
       for (let i = 0; i < env.length; i++) env[i] *= fadeGainAt(view.start + ((i + 0.5) / env.length) * span, durationSec, fades);
     }
-    return blanketPathFromEnvelope(env, W, H);
+    return { d: blanketPathFromEnvelope(env, W, H), env };
   }, [waveformPeaks, durationSec, view, scaleByFades, fades, hiEnv]);
+  const blanketPath = blanket?.d ?? null;
   const fadeOverlay = useMemo(() => {
     if (!fades || durationSec <= 0) return null;
     const inX = secToX(fades.inSec, view, W);
@@ -418,7 +426,7 @@ export const EqGraph: React.FC<Props> = ({
         onPointerCancel={(e) => {
           touchPointsRef.current.delete(e.pointerId);
           if (touchPointsRef.current.size < 2) pinchRef.current = null;
-          fadeDragRef.current = null; seekDragRef.current = false; endDrag();
+          fadeDragRef.current = null; seekDragRef.current = false; setFadeDragSide(null); endDrag();
         }}
         onDoubleClick={onDouble}
         onPointerDown={(e) => {
@@ -427,6 +435,7 @@ export const EqGraph: React.FC<Props> = ({
             if (touchPointsRef.current.size === 2 && hasTimeline && svgRef.current) {
               // Second finger down: cancel the seek / fade drag and start a pinch zoom.
               fadeDragRef.current = null;
+              setFadeDragSide(null);
               seekDragRef.current = false;
               dragRef.current = null;
               svgRef.current.setPointerCapture?.(e.pointerId);
@@ -447,6 +456,7 @@ export const EqGraph: React.FC<Props> = ({
             if (p.y <= 20 && Math.abs(p.x - inX) <= 15) fadeDragRef.current = 'in';
             else if (p.y >= 20 && p.y <= 40 && Math.abs(p.x - outX) <= 15) fadeDragRef.current = 'out';
             if (fadeDragRef.current) {
+              setFadeDragSide(fadeDragRef.current);
               e.preventDefault();
               svgRef.current.setPointerCapture?.(e.pointerId);
               return;
@@ -517,6 +527,9 @@ export const EqGraph: React.FC<Props> = ({
         {blanketPath && (
           <g className="syn-ceq-blanket" pointerEvents="none">
             <path d={blanketPath} className="syn-ceq-blanket-path" fill={`url(#${uid}-blanket)`} stroke="#2EA8FF" strokeOpacity={0.25} strokeWidth={0.8} />
+            <React.Suspense fallback={null}>
+              <Layer kind="tint" uid={uid} d={blanketPath} env={blanket!.env} view={durationSec > 0 ? view : { start: 0, end: 1 }} durationSec={durationSec} source={waveSource} fades={fades} scaleByFades={scaleByFades} />
+            </React.Suspense>
             {durationSec > 0 && <line ref={headRef} x1={0} x2={0} y1={0} y2={H} className="syn-ceq-playhead" />}
           </g>
         )}
@@ -536,14 +549,15 @@ export const EqGraph: React.FC<Props> = ({
               </g>
             ))}
             {fadeOverlay.inX >= -8 && fadeOverlay.inX <= W + 8 && (
-              <circle data-fade-handle="in" className="syn-wf-fade-handle" cx={Math.max(10, Math.min(W - 10, fadeOverlay.inX))} cy={12} r={7} fill="#3FE0FF" pointerEvents="all" />
+              <circle data-fade-handle="in" onPointerEnter={() => setFadeHot('in')} onPointerLeave={() => setFadeHot(null)} className="syn-wf-fade-handle" cx={Math.max(10, Math.min(W - 10, fadeOverlay.inX))} cy={12} r={7} fill="#3FE0FF" pointerEvents="all" />
             )}
             {fadeOverlay.outX >= -8 && fadeOverlay.outX <= W + 8 && (
-              <circle data-fade-handle="out" className="syn-wf-fade-handle" cx={Math.min(W - 10, Math.max(10, fadeOverlay.outX))} cy={28} r={7} fill="#3FE0FF" pointerEvents="all" />
+              <circle data-fade-handle="out" onPointerEnter={() => setFadeHot('out')} onPointerLeave={() => setFadeHot(null)} className="syn-wf-fade-handle" cx={Math.min(W - 10, Math.max(10, fadeOverlay.outX))} cy={28} r={7} fill="#3FE0FF" pointerEvents="all" />
             )}
           </g>
         )}
         {postPath && <path d={postPath} className="syn-eqx-spec-post" pointerEvents="none" style={neonLine ? { fill: `url(#${uid}-neonfill)`, stroke: 'none' } : undefined} />}
+        {postPath && neonLine && <React.Suspense fallback={null}><Layer kind="fill" uid={uid} d={postPath} /></React.Suspense>}
         {neonLine && (
           <g className="syn-wf-neon" pointerEvents="none" data-envelope="neon">
             <path d={neonLine} className="syn-wf-neon-bloom" fill="none" stroke={`url(#${uid}-neon)`} />
@@ -636,6 +650,11 @@ export const EqGraph: React.FC<Props> = ({
           );
         })}
       </svg>
+      {fades && (fadeDragSide ?? fadeHot) && (
+        <React.Suspense fallback={null}>
+          <Layer kind="label" side={(fadeDragSide ?? fadeHot)!} fades={fades} durationSec={durationSec} view={view} svg={svgRef.current} />
+        </React.Suspense>
+      )}
       <div className="syn-ceq-ylabels" aria-hidden="true">
         {[12, 6, 0, -6, -12].map((g) => (
           <span key={g} style={{ top: `${(gToY(g) / H) * 100}%` }}>{g > 0 ? `+${g}` : g}</span>

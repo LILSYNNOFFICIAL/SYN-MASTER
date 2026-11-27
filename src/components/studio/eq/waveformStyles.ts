@@ -93,6 +93,16 @@ export const WAVEFORM_CSS = `
 @media (prefers-reduced-motion: no-preference) and (pointer: fine) {
   .syn-wf-neon-bloom { animation: syn-wf-neon-breathe 4.8s ease-in-out infinite; }
 }
+/* ---- Frequency-colored neon fill + loudness tint (no blur: cheap on phones) ---- */
+.syn-wf-neon-fill, .syn-wf-tint { pointer-events: none; }
+/* ---- Fade length label on the fade curve (hover / drag) ---- */
+.syn-wf-fade-label {
+  position: absolute; z-index: 3; transform: translate(-50%, -135%); pointer-events: none; white-space: nowrap;
+  padding: 2px 7px; border-radius: 7px; font: 600 10px/1.3 var(--syn-font-mono, monospace); color: #E8F6FF;
+  background: rgba(3, 8, 16, 0.86); border: 1px solid rgba(224, 64, 251, 0.6); box-shadow: 0 0 8px rgba(224, 64, 251, 0.35);
+}
+.syn-wf-fade-label.is-below { transform: translate(-50%, 45%); }
+.syn-wf-fade-label b { color: #3FE0FF; font-variant-numeric: tabular-nums; }
 @keyframes syn-wf-neon-breathe { 0%, 100% { stroke-opacity: 0.22; } 50% { stroke-opacity: 0.36; } }
 `;
 
