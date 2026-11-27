@@ -50,6 +50,20 @@ SYN MASTER is an AI-assisted mastering workstation (React + TypeScript + Vite fr
 - No new backend services. New DSP goes in the browser (Web Audio API / `OfflineAudioContext` / the existing `src/dsp/*` offline renderer).
 - Minimal checks before pushing: `npm run lint` (tsc) and `npm run build`.
 
+## Current handoff: fade drag fix
+
+The fade handles on the shared EQ waveform now apply pointer updates against the latest fade state, including the final update on pointer release. This prevents the release event from restoring an older duration. GitHub Actions run [#653](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/runs/46021736072) passed on November 27, 2026.
+
+### Google AI Studio smoke test
+
+After pulling the latest `main` into Google AI Studio:
+
+1. Import an audio track and drag the cyan fade-in handle to about 0.10 seconds. Release it and confirm the Fade in readout still shows `0.10s`.
+2. Drag the fade-out handle to about 0.10 seconds. Release it and confirm the Fade out readout stays at `0.10s` while the fade-in value remains intact.
+3. Change both fade curves, switch to another workspace, then return to Dashboard. Confirm both durations and curve selections persist.
+4. Export a WAV and listen to the start and end to confirm the fades are rendered.
+
+
 ## Technology, packages & engineering references
 
 This section records the technologies and dependencies currently declared by the repository. Version numbers below are the package manifest's declared versions (semver ranges), not a claim that every package has been independently audited or upgraded to its newest upstream release.
