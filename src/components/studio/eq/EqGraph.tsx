@@ -568,9 +568,9 @@ export const EqGraph: React.FC<Props> = ({
           </g>
         )}
         {fadeOverlay && (
-          <g data-fade-overlay="true" className="syn-eqx-fade-overlay" pointerEvents="none">
+          <g data-fade-overlay="true" className="syn-eqx-fade-overlay">
             {([['in', fadeOverlay.fin], ['out', fadeOverlay.fout]] as const).map(([side, g]) => g && (
-              <g key={side} data-fade-side={side}>
+              <g key={side} data-fade-side={side} pointerEvents="none">
                 <linearGradient id={`${uid}-fade-${side}`} x1={g.x0} x2={g.x1} y1={0} y2={0} gradientUnits="userSpaceOnUse">
                   {g.stops.map((st) => (
                     <stop key={st.offset} offset={st.offset} stopColor="#02030A" stopOpacity={(0.68 * st.attenuation).toFixed(3)} />

@@ -432,6 +432,8 @@ async function runWavExportE2E(browser) {
     // Drag the actual SVG handles rather than approximating their hit targets
     // with fixed pixel offsets that vary with viewport and SVG scaling.
     const fadeInDragDiagnostics = await dragFadeHandle('in', 0.1);
+    assert.equal(fadeInDragDiagnostics.side, 'in', 'Fade-in handle must receive its pointer drag');
+    assert.ok(Number(fadeInDragDiagnostics.seconds) > 0, `Fade-in graph must track drag time; got: ${JSON.stringify(fadeInDragDiagnostics)}`);
     const fadeInAfterFirstDrag = await page.locator('.syn-player-fades').innerText();
     assert.match(fadeInAfterFirstDrag, /Fade in\s+0\.10s/i, `Fade-in must update immediately after its own drag; got: ${fadeInAfterFirstDrag}; drag: ${JSON.stringify(fadeInDragDiagnostics)}`);
     await dragFadeHandle('out', 0.9);
