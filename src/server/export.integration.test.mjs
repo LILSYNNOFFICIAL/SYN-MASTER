@@ -336,3 +336,101 @@ test('SYN-MASTER export endpoint creates measurable contract-format files', { ti
   assert.equal(Buffer.compare(wav44Decoded, flac44Decoded), 0,
     'Resampled 24-bit WAV and FLAC decoded samples differ with dither disabled.');
 });
+
+/** 48 kHz stereo float WAV: a steady tone with a linear fade-in and fade-out baked in. */
+function createFadedFloatWav(sampleRate, durationSeconds, fadeSeconds) {
+  const channels = 2;
+  const frames = Math.round(sampleRate * durationSeconds);
+  const fadeN = Math.round(sampleRate * fadeSeconds);
+  const dataBytes = frames * channels * 4;
+  const wav = Buffer.alloc(44 + dataBytes);
+  wav.write('RIFF', 0, 'ascii');
+  wav.writeUInt32LE(36 + dataBytes, 4);
+  wav.write('WAVE', 8, 'ascii');
+  wav.write('fmt ', 12, 'ascii');
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(3, 20);
+  wav.writeUInt16LE(channels, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * channels * 4, 28);
+  wav.writeUInt16LE(channels * 4, 32);
+  wav.writeUInt16LE(32, 34);
+  wav.write('data', 36, 'ascii');
+  wav.writeUInt32LE(dataBytes, 40);
+  const samples = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    const gain = i < fadeN ? i / fadeN : i >= frames - fadeN ? (frames - 1 - i) / fadeN : 1;
+    samples[i] = 0.25 * gain * Math.sin(2 * Math.PI * 440 * (i / sampleRate));
+    wav.writeFloatLE(samples[i], 44 + i * 8);
+    wav.writeFloatLE(samples[i], 44 + i * 8 + 4);
+  }
+  return { wav, samples, fadeN, frames };
+}
+
+function windowPeak(buf, from, to) {
+  let m = 0;
+  for (let i = from; i < to; i++) m = Math.max(m, Math.abs(buf.readInt32LE(i * 8) / 2147483648));
+  return m;
+}
+
+test('normalized export keeps timeline fades intact (one constant gain, no AGC)', { timeout: TEST_TIMEOUT_MS, skip: exportToolSkip }, async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'syn-master-fade-export-'));
+  const port = await getFreePort();
+  const baseUrl = 'http://127.0.0.1:' + port;
+  const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
+    cwd: process.cwd(),
+    env: { ...process.env, NODE_ENV: 'production', PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let diagnostics = '';
+  const collect = (chunk) => { diagnostics = (diagnostics + chunk.toString()).slice(-12_000); };
+  child.stdout.on('data', collect);
+  child.stderr.on('data', collect);
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      await new Promise((resolve) => {
+        const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 5_000);
+        timer.unref?.();
+        child.once('exit', () => { clearTimeout(timer); resolve(); });
+      });
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  });
+  await waitForEndpoint(baseUrl, child, () => diagnostics);
+
+  const SR = 48000;
+  const { wav, frames, fadeN } = createFadedFloatWav(SR, 12, 3);
+  const params = new URLSearchParams({
+    format: 'wav', sampleRate: String(SR), channels: 'stereo', wavBitDepth: '32', dither: 'none',
+    ceilingDb: '-1', normalizeToTarget: 'true', targetLufs: '-14', preserveFades: 'true',
+  });
+  const response = await fetch(baseUrl + '/api/export/encode?' + params.toString(), {
+    method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: wav,
+  });
+  const bytes = Buffer.from(await response.arrayBuffer());
+  assert.equal(response.status, 200, 'fade-safe export failed: ' + bytes.toString('utf8').slice(0, 500));
+  assert.equal(response.headers.get('X-Syn-Over-Ceiling'), '0', 'fade-safe normalization must respect the ceiling');
+  const outPath = path.join(tempDir, 'faded.wav');
+  await writeFile(outPath, bytes);
+  const decoded = await decodeToS32(outPath, path.join(tempDir, 'faded.s32le'));
+  assert.equal(decoded.length / 8, frames, 'every frame is exported');
+
+  // A constant gain keeps the fade shape: each window's level relative to the steady
+  // middle equals the fade gain at that point (a dynamic AGC would lift the fade regions).
+  const win = Math.round(SR * 0.05);
+  const steady = windowPeak(decoded, Math.round(SR * 5), Math.round(SR * 5) + win);
+  assert.ok(steady > 0.05, 'steady section is audible after normalization');
+  for (const frac of [0.1, 0.25, 0.5, 0.75]) {
+    const start = Math.round(fadeN * frac);
+    const expectedIn = (start + win) / fadeN;
+    const relIn = windowPeak(decoded, start, start + win) / steady;
+    assert.ok(Math.abs(relIn - expectedIn) < 0.03, `fade-in at ${frac}: level ${relIn.toFixed(3)} vs fade gain ${expectedIn.toFixed(3)}`);
+    const outStart = frames - fadeN + Math.round(fadeN * frac);
+    const expectedOut = (frames - 1 - outStart) / fadeN;
+    const relOut = windowPeak(decoded, outStart, outStart + win) / steady;
+    assert.ok(Math.abs(relOut - expectedOut) < 0.03, `fade-out at ${frac}: level ${relOut.toFixed(3)} vs fade gain ${expectedOut.toFixed(3)}`);
+  }
+  assert.equal(decoded.readInt32LE(0), 0, 'fade-in starts at true silence');
+  assert.equal(decoded.readInt32LE((frames - 1) * 8), 0, 'fade-out ends at true silence');
+});

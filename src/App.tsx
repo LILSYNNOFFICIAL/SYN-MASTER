@@ -2984,6 +2984,8 @@ export default function App() {
             ceilingDb: String(exportConfig.ceilingDb),
             normalizeToTarget: String(exportConfig.normalizeToTarget),
             targetLufs: String(exportConfig.targetLufs),
+            // Fades in the render: normalize with one constant gain so they are not undone.
+            preserveFades: String(Boolean(getPostFades())),
           });
           const response = await fetch('/api/export/encode?' + params.toString(), {
             method: 'POST',

@@ -115,3 +115,10 @@ Dated entries, newest last, so work can resume if a session is cut off.
 **Checks run 2026-11-26:** `npm run lint` pass · `npm test` 485/485 pass · `npm run build` pass · `npm run check:bundle` pass (main chunk 792.1 KiB raw / 242.8 KiB gzip, unchanged by this test-only step) · `NODE_ENV=production PORT=3458 npm start` → `/api/health` `{"ok":true,"aiConfigured":false}`.
 
 **Timeout ideas noted, not shipped:** see the final report (the prompt builders belong to the E1/E3 work).
+
+## 2026-11-26 — Waveform part 1/4: fade bug fix (export)
+- Bug found: with a delivery profile that normalizes loudness (Streaming / Club / Broadcast), the server ran FFmpeg's single-pass `loudnorm` AFTER the faded render. Single-pass loudnorm is a dynamic AGC: it turned the quiet fade regions back up (measured ~+4 dB lift inside a 3 s fade, and overshoot near its end), so exported fades did not fade properly even though the preview render was correct.
+- Fix: the client sends `preserveFades=true` when timeline fades exist; the server then measures the render (ebur128) and applies ONE constant gain toward the LUFS target, capped so true peak stays under the ceiling. A single gain keeps every fade shape and true silence. Exports without fades are unchanged.
+- Verified (already correct, now covered by tests): gain law reaches exact 0 at fade-in start / fade-out end, linear/exp/S-curve midpoints and quarter points, sample-accurate edges, fades applied after the limiter, export render == preview render.
+- Tests: src/dsp/fadeGainLaw.test.ts (4), new export integration test (fade levels preserved through normalized export).
+- Next: smooth fade drawing + attenuation shading.

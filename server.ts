@@ -171,6 +171,25 @@ async function measureEncodedLoudness(filePath: string): Promise<{ integratedLuf
   return { integratedLufs: parse(lufsMatch), truePeakDbtp: parse(peakMatch) };
 }
 
+/**
+ * One constant gain that moves the measured render toward the delivery LUFS target
+ * without pushing its true peak over the ceiling. Being a single gain it keeps every
+ * fade's shape (true silence stays silence); it may land below the target when the
+ * ceiling is the tighter limit, and the measured LUFS header reports what was reached.
+ */
+function fadeSafeNormalizeGainDb(
+  source: { integratedLufs: number | null; truePeakDbtp: number | null } | null,
+  targetLufs: number,
+  ceilingDb: number,
+): number {
+  if (!source || source.integratedLufs === null || !Number.isFinite(source.integratedLufs)) return 0;
+  let gain = targetLufs - source.integratedLufs;
+  if (source.truePeakDbtp !== null && Number.isFinite(source.truePeakDbtp)) {
+    gain = Math.min(gain, ceilingDb - 0.05 - source.truePeakDbtp);
+  }
+  return Number.isFinite(gain) ? Math.max(-60, Math.min(40, gain)) : 0;
+}
+
 class ExportPayloadTooLargeError extends Error {
   constructor() {
     super('Rendered WAV upload exceeds the 512 MiB export limit.');
@@ -233,6 +252,11 @@ app.post('/api/export/encode', async (req, res) => {
   const ceilingDb = Number(req.query.ceilingDb ?? -1);
   const normalizeToTarget = String(req.query.normalizeToTarget ?? 'false') === 'true';
   const targetLufs = Number(req.query.targetLufs ?? -14);
+  // Fade-safe delivery normalization: the master carries timeline fades, so loudness
+  // normalization must be one constant gain. FFmpeg's single-pass loudnorm is a dynamic
+  // AGC that turns quiet fade regions back up (it partly undoes fades), so with fades the
+  // export measures the render first and applies a single linear gain instead.
+  const preserveFades = String(req.query.preserveFades ?? 'false') === 'true';
   const ditherMode = String(req.query.dither ?? 'none') === 'tpdf' ? 'triangular' : 'none';
   if (![44100, 48000, 88200, 96000].includes(sampleRate) || !['stereo', 'mono'].includes(channelMode) ||
       ![16, 24, 32].includes(wavBitDepth) || ![16, 24].includes(flacBitDepth) || !Number.isInteger(flacCompression) || flacCompression < 0 || flacCompression > 8 ||
@@ -289,9 +313,18 @@ app.post('/api/export/encode', async (req, res) => {
       if (flacBitDepth === 24) resampleOptions.push('output_sample_bits=24');
       if (ditherMode === 'triangular') resampleOptions.push('dither_method=triangular');
     }
-    const audioFilters = normalizeToTarget
-      ? ['loudnorm=I=' + targetLufs + ':TP=' + ceilingDb + ':LRA=11', resampleOptions.join(':')]
-      : [resampleOptions.join(':')];
+    let audioFilters: string[];
+    if (normalizeToTarget && preserveFades) {
+      const source = await measureEncodedLoudness(inputPath).catch(() => null);
+      const gainDb = fadeSafeNormalizeGainDb(source, targetLufs, ceilingDb);
+      audioFilters = gainDb === 0
+        ? [resampleOptions.join(':')]
+        : ['volume=' + gainDb.toFixed(3) + 'dB:precision=float', resampleOptions.join(':')];
+    } else {
+      audioFilters = normalizeToTarget
+        ? ['loudnorm=I=' + targetLufs + ':TP=' + ceilingDb + ':LRA=11', resampleOptions.join(':')]
+        : [resampleOptions.join(':')];
+    }
     const args = [
       '-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath, '-vn',
       '-af', audioFilters.join(','),
