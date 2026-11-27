@@ -140,7 +140,8 @@ import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 import { WorkspaceHero } from './components/WorkspaceHero';
 import { MasterConsole } from './components/console/MasterConsole';
 import { Portal } from './ui/Portal';
-import { FixItStage } from './components/studio/FixItStage';
+// Shown only after a track is loaded and a run produced a diagnostic log (D2: off the main chunk).
+const FixItStage = React.lazy(() => import('./components/studio/FixItStage').then(({ FixItStage }) => ({ default: FixItStage })));
 const WhatAiChangedPanel = React.lazy(() => import('./components/studio/WhatAiChangedPanel').then(({ WhatAiChangedPanel }) => ({ default: WhatAiChangedPanel })));
 const FxRackWindow = React.lazy(() => import('./components/studio/FxRackWindow').then(({ FxRackWindow }) => ({ default: FxRackWindow })));
 import { TimelinePlayer } from './components/studio/TimelinePlayer';
@@ -4039,6 +4040,7 @@ export default function App() {
           {activeTab === 'studio' && activeTrack && masterConsole}
 
           {activeTab === 'studio' && activeTrack && diagnosticLog && (
+            <React.Suspense fallback={null}>
             <FixItStage
               trackName={activeTrack.name}
               durationSec={activeTrack.durationSec}
@@ -4072,6 +4074,7 @@ export default function App() {
               onNewTrack={handleNewTrack}
               hideCenterpiece
             />
+            </React.Suspense>
           )}
 
           {activeTab === 'studio' && activeTrack && (

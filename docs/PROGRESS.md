@@ -62,3 +62,19 @@ Dated entries, newest last, so work can resume if a session is cut off.
 **Not verified:** real Android Chrome behaviour (no device here).
 
 **Next:** D2 lazy-loading to get the main chunk under budget, then D3 mobile checks.
+
+## 2026-11-26 — Parts D2 + D3: smaller first load, mobile checks
+
+**What changed (plain language)**
+- **Main app file is now under the size budget (D2).** Two views that are not on screen when the app opens now load only when needed: the Spectrum/Spectrogram view in the EQ panel (not the default tab) and the "Fix It" stage panel (only shown after a run has a diagnostic log, together with its diagnostic-log panel). No vite config or budget changes.
+  - Main chunk before: **837.27 kB / 817.7 KiB raw, 250.2 KiB gzip** (Part A build) → after C+D1: 845.68 kB / 825.9 KiB → **after D2: 800.16 kB / 781.4 KiB raw, 239.3 KiB gzip**.
+  - `npm run check:bundle`: **passes** (limits 800 KiB raw / 250 KiB gzip). Rollup now also puts the shared analyzer (16.6 KiB) in its own small chunk; it is still loaded at start because the main app needs it, so the real first-load saving is about 28 KiB.
+- **Mobile checks (D3).** Playwright + Chromium headless were installed in the sandbox only (not added to the project).
+  - `scripts/mobile-emulation-check.mjs`: **passed** at 412×915 and 390×844 (touch seek, menus stay on screen, drawer, reduced motion). This is Chromium emulation, not a real phone.
+  - `scripts/responsive-layout-check.mjs`: **fails at its first step, for a reason that predates this work.** It looks for the "Cloud AI is included" help button on the old Import start screen, which no longer exists since the start screen was removed (d92598e). That help dialog is now only reachable from the unused `ImportScreen.tsx`. I did not edit the check (that would drop an assertion). Decision needed: put the Cloud AI help button somewhere in the workstation, or update the check.
+
+**Files:** `src/App.tsx` (FixItStage lazy), `src/components/console/MasterConsole.tsx` (Spectrum view lazy).
+
+**Checks run 2026-11-26:** `npm run lint` pass · `npm test` 472/472 pass · `npm run build` pass · `npm run check:bundle` pass · `NODE_ENV=production PORT=3456 node server.ts` → `/api/health` `{"ok":true,"aiConfigured":false}`.
+
+**Not verified:** a real Android phone (import overlay, Cancel, decode errors, memory use on a long WAV).

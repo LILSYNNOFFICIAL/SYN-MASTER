@@ -27,7 +27,8 @@ const loadDynamicEQPanel = () => import('../studio/DynamicEQPanel');
 const DynamicEQPanel = React.lazy(() => loadDynamicEQPanel().then(({ DynamicEQPanel }) => ({ default: DynamicEQPanel })));
 const MatchEQPanel = React.lazy(() => import('../studio/MatchEQPanel'));
 const VocalRebalancePanel = React.lazy(() => import('../studio/VocalRebalancePanel'));
-import { SpectrumAndEQCanvas } from '../CanvasVisualizers';
+// Spectrum / spectrogram view is not the default EQ tab: load it on demand (D2, main-chunk budget).
+const SpectrumAndEQCanvas = React.lazy(() => import('../CanvasVisualizers').then(({ SpectrumAndEQCanvas }) => ({ default: SpectrumAndEQCanvas })));
 import { ArcKnob } from './ArcKnob';
 import { GlowFader } from './GlowFader';
 import { LightRibbons } from './LightRibbons';
@@ -562,6 +563,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               <div className="syn-eq-empty"><AddModule type="parametric-eq" onAdd={add} /></div>
             )
           ) : (
+            <React.Suspense fallback={<div className="syn-eq-empty" role="status"><p>Loading spectrum…</p></div>}>
             <SpectrumAndEQCanvas
               preAnalysis={p.source}
               postAnalysis={p.master}
@@ -574,6 +576,7 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
               onSeek={p.onSeek}
               heightClass="h-64"
             />
+            </React.Suspense>
           )}
           {p.timeline}
         </section>
