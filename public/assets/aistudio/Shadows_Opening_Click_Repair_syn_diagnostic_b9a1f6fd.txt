@@ -1,0 +1,60 @@
+SYN MASTER — Mastering Diagnostic Log
+Track: Shadows_Opening_Click_Repair.wav
+Created: 2026-11-27T01:30:14.295Z
+Objective: Streaming (-14 LUFS / -1 dBTP)
+Phase: post-fix
+
+VERDICT: NOT FULLY VERIFIED: Post-fix analysis is not tied to a completed render; a ready render status is required. — see unresolved or unverified entries.
+
+== Measurements (source → master) ==
+  integratedLufs           -15.86
+  truePeakDbtp              -4.36
+  samplePeakDb              -4.36
+  loudnessRangeLu             9.4
+  dynamicRangeDb             14.2
+  crestFactorDb             13.54
+  clippedSamples                0
+  interSamplePeaks              0
+  clicks                        0
+  dcOffset                0.00004
+  phaseCorrelation          0.807
+  lowEndCorrelation         0.941
+  stereoWidth               0.493
+  thdPercent                    0
+  noiseFloorDb             -30.03
+  spectralCentroidHz         4701
+
+== Passes ==
+  #0: -15.9 LUFS, -4.36 dBTP, clicks 0, gate FAIL (baseline)
+  #1: -14.6 LUFS, -1.00 dBTP, clicks 0, gate FAIL (regressed)
+  #2: -14.6 LUFS, -1.11 dBTP, clicks 0, gate PASS (regressed)
+
+== AI & Fallback Provenance ==
+  Strategy (Pass #0 → #1): source=gemini-cloud | model=gemini-4-hydrogen | responseTime=17455 ms | prompt=11105 chars | timeoutHit=none | fallback=none
+    AI returned:    [dynamic-eq, parametric-eq, maximizer]
+    Final rendered: [dynamic-eq, parametric-eq, maximizer]
+  Refine (after Pass #1): source=gemini-cloud | model=gemini-4-hydrogen | responseTime=8347 ms | prompt=15502 chars | timeoutHit=none | fallback=none
+    AI returned:    [dynamic-eq, parametric-eq, maximizer]
+    Final rendered: [dynamic-eq, parametric-eq, maximizer]
+  Refine (after Pass #2): source=gemini-cloud | model=gemini-4-hydrogen | responseTime=6399 ms | prompt=15678 chars | timeoutHit=none | fallback=none
+    AI returned:    [dynamic-eq, parametric-eq, maximizer]
+    Final rendered: [dynamic-eq, parametric-eq, maximizer]
+
+== Issues and fixes ==
+* [UNVERIFIED] Integrated loudness (Objective target, high)
+    measured: -15.9 LUFS
+    target:   -14.0 ± 1.0 LUFS
+    tools:    maximizer, limiter
+    setting:  Recommended: Maximizer/limiter drive +1.9 dB (target -14.0 LUFS)
+    setting:  Transparent Streaming Maximizer: character=transparent, targetLufs=-14, ceilingDb=-1, transientEmphasis=45, truePeak=on, mix=100%, intensity=45%
+* [UNVERIFIED] Sub-bass excess / rumble (Objective target, high)
+    measured: +5.3 dB over bass
+    target:   ≤ +4.5 dB over bass when triggered
+    tools:    parametric-eq, bass-enhancer
+    setting:  Recommended: Parametric EQ: spectrum-centered bell cut at the dominant 20-60 Hz sub peak until it is within +4.5 dB over bass; disable Bass Enhancer sub boost; re-measure
+    setting:  Transparent Sub & Air Trim: phaseMode=minimum, msMode=stereo, tiltDb=0, bands=[highpass 28Hz +0.0dB Q0.71; highshelf 8.00kHz +1.0dB Q0.70], mix=100%, intensity=35%
+
+== Chain ==
+  1. Surgical Resonance Control: bands=[band 592Hz max -3.5dB @thr -24 Q4.50], mix=100%, intensity=60%
+  2. Transparent Sub & Air Trim: phaseMode=minimum, msMode=stereo, tiltDb=0, bands=[highpass 28Hz +0.0dB Q0.71; highshelf 8.00kHz +1.0dB Q0.70], mix=100%, intensity=35%
+  3. Transparent Streaming Maximizer: character=transparent, targetLufs=-14, ceilingDb=-1, transientEmphasis=45, truePeak=on, mix=100%, intensity=45%

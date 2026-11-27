@@ -1,0 +1,177 @@
+{
+  "createdAt": "2026-11-27T01:30:14.295Z",
+  "trackName": "Shadows_Opening_Click_Repair.wav",
+  "objective": {
+    "id": "streaming",
+    "label": "Streaming",
+    "targetLufs": -14,
+    "maxTruePeakDb": -1
+  },
+  "phase": "post-fix",
+  "source": {
+    "integratedLufs": -15.86,
+    "truePeakDbtp": -4.36,
+    "samplePeakDb": -4.36,
+    "loudnessRangeLu": 9.4,
+    "dynamicRangeDb": 14.2,
+    "crestFactorDb": 13.54,
+    "clippedSamples": 0,
+    "interSamplePeaks": 0,
+    "clicks": 0,
+    "dcOffset": 0.00004,
+    "phaseCorrelation": 0.807,
+    "lowEndCorrelation": 0.941,
+    "stereoWidth": 0.493,
+    "thdPercent": 0,
+    "noiseFloorDb": -30.03,
+    "spectralCentroidHz": 4701
+  },
+  "master": null,
+  "gate": null,
+  "passes": [
+    {
+      "pass": 0,
+      "lufs": -15.86,
+      "truePeakDb": -4.36,
+      "clicks": 0,
+      "gatePassed": false,
+      "outcome": "baseline"
+    },
+    {
+      "pass": 1,
+      "lufs": -14.55,
+      "truePeakDb": -1,
+      "clicks": 0,
+      "gatePassed": false,
+      "outcome": "regressed"
+    },
+    {
+      "pass": 2,
+      "lufs": -14.6,
+      "truePeakDb": -1.11,
+      "clicks": 0,
+      "gatePassed": true,
+      "outcome": "regressed"
+    }
+  ],
+  "aiPasses": [
+    {
+      "pass": 0,
+      "stage": "strategy",
+      "source": "gemini-cloud",
+      "fallbackReason": null,
+      "modelName": "gemini-4-hydrogen",
+      "responseTimeMs": 17455,
+      "promptChars": 11105,
+      "timeoutHit": null,
+      "aiReturnedModules": [
+        "dynamic-eq",
+        "parametric-eq",
+        "maximizer"
+      ],
+      "finalRenderedModules": [
+        "dynamic-eq",
+        "parametric-eq",
+        "maximizer"
+      ]
+    },
+    {
+      "pass": 1,
+      "stage": "refine",
+      "source": "gemini-cloud",
+      "fallbackReason": null,
+      "modelName": "gemini-4-hydrogen",
+      "responseTimeMs": 8347,
+      "promptChars": 15502,
+      "timeoutHit": null,
+      "aiReturnedModules": [
+        "dynamic-eq",
+        "parametric-eq",
+        "maximizer"
+      ],
+      "finalRenderedModules": [
+        "dynamic-eq",
+        "parametric-eq",
+        "maximizer"
+      ]
+    },
+    {
+      "pass": 2,
+      "stage": "refine",
+      "source": "gemini-cloud",
+      "fallbackReason": null,
+      "modelName": "gemini-4-hydrogen",
+      "responseTimeMs": 6399,
+      "promptChars": 15678,
+      "timeoutHit": null,
+      "aiReturnedModules": [
+        "dynamic-eq",
+        "parametric-eq",
+        "maximizer"
+      ],
+      "finalRenderedModules": [
+        "dynamic-eq",
+        "parametric-eq",
+        "maximizer"
+      ]
+    }
+  ],
+  "aiFallbackBanner": null,
+  "entries": [
+    {
+      "id": "gate-lufs",
+      "issue": "Integrated loudness",
+      "category": "Objective target",
+      "severity": "high",
+      "measured": "-15.9 LUFS",
+      "target": "-14.0 ± 1.0 LUFS",
+      "tools": [
+        "maximizer",
+        "limiter"
+      ],
+      "settings": [
+        "Recommended: Maximizer/limiter drive +1.9 dB (target -14.0 LUFS)",
+        "Transparent Streaming Maximizer: character=transparent, targetLufs=-14, ceilingDb=-1, transientEmphasis=45, truePeak=on, mix=100%, intensity=45%"
+      ],
+      "status": "unverified"
+    },
+    {
+      "id": "gate-sub-excess",
+      "issue": "Sub-bass excess / rumble",
+      "category": "Objective target",
+      "severity": "high",
+      "measured": "+5.3 dB over bass",
+      "target": "≤ +4.5 dB over bass when triggered",
+      "tools": [
+        "parametric-eq",
+        "bass-enhancer"
+      ],
+      "settings": [
+        "Recommended: Parametric EQ: spectrum-centered bell cut at the dominant 20-60 Hz sub peak until it is within +4.5 dB over bass; disable Bass Enhancer sub boost; re-measure",
+        "Transparent Sub & Air Trim: phaseMode=minimum, msMode=stereo, tiltDb=0, bands=[highpass 28Hz +0.0dB Q0.71; highshelf 8.00kHz +1.0dB Q0.70], mix=100%, intensity=35%"
+      ],
+      "status": "unverified"
+    }
+  ],
+  "chain": [
+    {
+      "name": "Surgical Resonance Control",
+      "type": "dynamic-eq",
+      "bypassed": false,
+      "settings": "bands=[band 592Hz max -3.5dB @thr -24 Q4.50], mix=100%, intensity=60%"
+    },
+    {
+      "name": "Transparent Sub & Air Trim",
+      "type": "parametric-eq",
+      "bypassed": false,
+      "settings": "phaseMode=minimum, msMode=stereo, tiltDb=0, bands=[highpass 28Hz +0.0dB Q0.71; highshelf 8.00kHz +1.0dB Q0.70], mix=100%, intensity=35%"
+    },
+    {
+      "name": "Transparent Streaming Maximizer",
+      "type": "maximizer",
+      "bypassed": false,
+      "settings": "character=transparent, targetLufs=-14, ceilingDb=-1, transientEmphasis=45, truePeak=on, mix=100%, intensity=45%"
+    }
+  ],
+  "verdict": "NOT FULLY VERIFIED: Post-fix analysis is not tied to a completed render; a ready render status is required. — see unresolved or unverified entries."
+}
