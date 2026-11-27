@@ -19,7 +19,7 @@ interface Props {
   auditionTarget: string;
   onAudition: (t: 'original' | 'mastered') => void;
   fades: FadeSettings;
-  onFadesChange: (f: FadeSettings) => void;
+  onFadesChange: React.Dispatch<React.SetStateAction<FadeSettings>>;
   onSeek: (sec: number) => void;
   running: boolean;
   stage: string;

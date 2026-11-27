@@ -67,7 +67,7 @@ interface Props {
   onSeek?: (sec: number) => void;
   /** Fade curves and handles layered directly over the existing waveform blanket. */
   fades?: FadeSettings;
-  onFadesChange?: (next: FadeSettings) => void;
+  onFadesChange?: React.Dispatch<React.SetStateAction<FadeSettings>>;
   ariaLabel: string;
   /** Popover rendered over the plot. */
   children?: React.ReactNode;
@@ -175,8 +175,9 @@ export const EqGraph: React.FC<Props> = ({
       const rect = svgRef.current.getBoundingClientRect();
       const sec = tl(e.clientX, rect);
       const maxLen = durationSec * 0.5;
-      if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
-      else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
+      onFadesChange((current) => fadeDragRef.current === 'in'
+        ? { ...current, inSec: Number(Math.min(maxLen, sec).toFixed(2)) }
+        : { ...current, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
       return;
     }
     if (seekDragRef.current && onSeek && durationSec > 0 && svgRef.current) {
@@ -216,8 +217,10 @@ export const EqGraph: React.FC<Props> = ({
       const rect = svgRef.current.getBoundingClientRect();
       const sec = tl(lastPointerXRef.current, rect);
       const maxLen = durationSec * 0.5;
-      if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
-      else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
+      const side = fadeDragRef.current;
+      onFadesChange((current) => side === 'in'
+        ? { ...current, inSec: Number(Math.min(maxLen, sec).toFixed(2)) }
+        : { ...current, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
       fadeDragRef.current = null;
       setFadeDragSide(null);
       return;

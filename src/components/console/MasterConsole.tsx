@@ -57,7 +57,7 @@ export interface MasterConsoleProps {
   scopeChannels: Float32Array[] | null;
   waveformPeaks: number[];
   fades: FadeSettings;
-  onFadesChange: (next: FadeSettings) => void;
+  onFadesChange?: React.Dispatch<React.SetStateAction<FadeSettings>>;
   durationSec: number;
   hasTrack: boolean;
   running: boolean;

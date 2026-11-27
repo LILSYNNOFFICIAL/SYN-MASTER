@@ -7,7 +7,7 @@ interface Props {
   durationSec: number;
   isPlaying: boolean;
   fades: FadeSettings;
-  onFadesChange: (f: FadeSettings) => void;
+  onFadesChange: React.Dispatch<React.SetStateAction<FadeSettings>>;
   onSeek: (sec: number) => void;
   onTogglePlay: () => void;
   onImport: (file: File) => void;
