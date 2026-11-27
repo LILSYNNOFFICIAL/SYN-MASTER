@@ -508,15 +508,8 @@ export default function App() {
 
   // Source used for every render (preview, Fix-All, battle, export): the imported audio
   // with the timeline fades applied, so what is verified is exactly what is exported.
-  // One synchronous source of truth for fade edits. Pointer gestures can arrive
-  // back-to-back before React commits a render, so resolve every update against this ref
-  // first, then mirror the result into React state and the export pipeline.
   const fadesRef = useRef(fades);
-  const updateFades = useCallback((update: FadeSettings | ((current: FadeSettings) => FadeSettings)) => {
-    const next = typeof update === 'function' ? update(fadesRef.current) : update;
-    fadesRef.current = next;
-    setFades(next);
-  }, []);
+  fadesRef.current = fades;
   const sourceRateRef = useRef(44100);
   // Fades are no longer baked into the source: every render applies them AFTER the
   // chain (postFades) so the limiter sees the unfaded signal.
@@ -1239,7 +1232,7 @@ export default function App() {
       sourceChannelsRef.current = channels;
       sourceRateRef.current = sampleRate;
       matchEqStore.setSource(channels, sampleRate);
-      updateFades(NO_FADES);
+      setFades(NO_FADES);
       setPostPeaksHi(null);
       engine.setSourceChannels(channels, sampleRate, precomputed?.playbackBuffer ?? null);
       setIsPlaying(false);
@@ -3416,7 +3409,7 @@ export default function App() {
       onTogglePlay={togglePlay}
       mode={mode}
       fades={fades}
-      onFadesChange={updateFades}
+      onFadesChange={setFades}
       onTargetLufs={(lufs) => {
         setTargetPresetId(null);
         setCustomObjective((prev) => ({ ...prev, targetLufs: lufs }));
@@ -3429,7 +3422,7 @@ export default function App() {
           durationSec={activeTrack?.durationSec ?? 0}
           isPlaying={isPlaying}
           fades={fades}
-          onFadesChange={updateFades}
+          onFadesChange={setFades}
           onSeek={seekTo}
           onTogglePlay={togglePlay}
           onImport={handleUploadSourceFile}
@@ -3442,7 +3435,7 @@ export default function App() {
           durationSec={activeTrack?.durationSec ?? 0}
           isPlaying={isPlaying}
           fades={fades}
-          onFadesChange={updateFades}
+          onFadesChange={setFades}
           onSeek={seekTo}
           onTogglePlay={togglePlay}
           onImport={handleUploadSourceFile}
@@ -4115,7 +4108,7 @@ export default function App() {
               auditionTarget={auditionTarget}
               onAudition={(t) => switchAuditionTarget(t)}
               fades={fades}
-              onFadesChange={updateFades}
+              onFadesChange={setFades}
               onSeek={(sec) => {
                 engineRef.current!.seek(sec);
                 telemetryStore.publish({ currentTimeSec: sec });
