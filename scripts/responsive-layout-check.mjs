@@ -420,14 +420,20 @@ async function runWavExportE2E(browser) {
       await page.mouse.move(fromX, fromY);
       await page.mouse.down();
       await page.mouse.move(toX, fromY, { steps: 4 });
+      const diagnostics = await waveform.evaluate((el) => ({
+        side: el.getAttribute('data-fade-drag-side'),
+        seconds: el.getAttribute('data-fade-last-seconds'),
+        controls: document.querySelector('.syn-player-fades')?.innerText ?? '',
+      }));
       await page.mouse.up();
+      return diagnostics;
     };
     step('fades');
     // Drag the actual SVG handles rather than approximating their hit targets
     // with fixed pixel offsets that vary with viewport and SVG scaling.
-    await dragFadeHandle('in', 0.1);
+    const fadeInDragDiagnostics = await dragFadeHandle('in', 0.1);
     const fadeInAfterFirstDrag = await page.locator('.syn-player-fades').innerText();
-    assert.match(fadeInAfterFirstDrag, /Fade in\s+0\.10s/i, `Fade-in must update immediately after its own drag; got: ${fadeInAfterFirstDrag}`);
+    assert.match(fadeInAfterFirstDrag, /Fade in\s+0\.10s/i, `Fade-in must update immediately after its own drag; got: ${fadeInAfterFirstDrag}; drag: ${JSON.stringify(fadeInDragDiagnostics)}`);
     await dragFadeHandle('out', 0.9);
     const fadeControls = await page.locator('.syn-player-fades').innerText();
     assert.match(fadeControls, /Fade in\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-in');

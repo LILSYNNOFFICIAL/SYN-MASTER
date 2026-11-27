@@ -167,6 +167,8 @@ export const EqGraph: React.FC<Props> = ({
     e.stopPropagation();
     fadeDragRef.current = side;
     lastPointerXRef.current = e.clientX;
+    svgRef.current?.setAttribute('data-fade-drag-side', side);
+    svgRef.current?.setAttribute('data-fade-last-seconds', 'not-moved');
     setFadeDragSide(side);
     svgRef.current?.setPointerCapture?.(e.pointerId);
   };
@@ -183,6 +185,7 @@ export const EqGraph: React.FC<Props> = ({
     if (fadeDragRef.current && fades && onFadesChange && durationSec > 0 && svgRef.current) {
       const rect = svgRef.current.getBoundingClientRect();
       const sec = tl(e.clientX, rect);
+      svgRef.current.setAttribute('data-fade-last-seconds', sec.toFixed(3));
       const maxLen = durationSec * 0.5;
       const side = fadeDragRef.current;
       onFadesChange((current) => side === 'in'
