@@ -139,3 +139,11 @@ Dated entries, newest last, so work can resume if a session is cut off.
 - The waveform is scaled by the fade: post-render peaks already include fades; when the graph shows dry peaks (rack bypassed / original), the drawn envelope is multiplied by the same gain law.
 - New: src/components/studio/eq/waveformView.ts (view + fade geometry math), waveformSource.ts (links peaks to audio for zoom detail), waveformStyles.ts (styles injected at runtime; a .css import would break the Node tests that render MasterConsole). Tests: waveformView.test.ts (6). 496 tests pass.
 - Next: FL-style zoom.
+
+## 2026-11-26 — Waveform part 3/4: FL Studio style zoom
+- Ctrl/Cmd + mouse wheel (and trackpad pinch) zooms the waveform around the cursor; Shift + wheel or horizontal wheel scrolls it; two-finger pinch zooms on touch screens (Android). Plain vertical wheel still scrolls the page / sets Q over a band node.
+- New zoom/scroll bar above the graph (WaveformZoomBar.tsx): drag the handle to scroll, drag its edges to zoom, click the track to jump, double-click (or 0 / Esc on keyboard) to show the whole track; arrows and +/- work from the keyboard. Bigger touch targets on phones.
+- Zoomed detail: the visible window is recomputed from the audio itself via a cached max-abs block pyramid built in small slices (waveformDetail.ts, loaded on demand), so detail increases as you zoom and the UI never stalls. No worker round-trip needed.
+- The EQ curve, nodes and analyser stay frequency-based; only the waveform, fades, fade handles, playhead and seeking follow the zoomed time window.
+- Bundle: zoom bar, zoom detail and the waveform styles are lazy chunks; main chunk 798.4 KiB raw / 245.3 KiB gzip (limit 800 / 250). 498 tests pass.
+- Next: neon envelope line.

@@ -3,9 +3,10 @@ import type { AudioAnalysis } from '../../../types/mastering';
 import { qEdgeRatio, qFromEdgeRatio } from '../../../dsp/eqDesign';
 import { telemetryStore } from '../../../engine/telemetryStore';
 import type { FadeSettings } from '../../../dsp/fades';
-import { blanketPathFromEnvelope, clampView, envelopeFromGlobalPeaks, fadeGainAt, fadeGeometry, fullView, secToX, type TimeView } from './waveformView';
+import { blanketPathFromEnvelope, clampView, envelopeFromGlobalPeaks, fadeGainAt, fadeGeometry, fullView, isFullView, panBy, secToX, wheelPixels, wheelZoomFactor, xToSec, zoomAround, type TimeView } from './waveformView';
 import { getWaveformSource } from './waveformSource';
-import { ensureWaveformStyles } from './waveformStyles';
+// Split out of the main chunk (bundle budget): the zoom bar and the waveform styles load on demand.
+const WaveformZoomBar = React.lazy(() => import('./WaveformZoomBar').then((m) => ({ default: m.WaveformZoomBar })));
 import { F_MAX, F_MIN, G_MAX, H, W, clampF, clampG, curvePath, fToX, fmtF, gToY, xToF, yToG } from './graphMath';
 
 export interface EqGraphNode {
@@ -127,7 +128,7 @@ export const EqGraph: React.FC<Props> = ({
   className = '',
 }) => {
   const uid = useId().replace(/:/g, '');
-  useEffect(() => { ensureWaveformStyles(); }, []);
+  useEffect(() => { void import('./waveformStyles').then((m) => m.ensureWaveformStyles()); }, []);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<null | { id: string; kind: 'node' | 'qlo' | 'qhi'; fine: boolean; sx: number; sy: number; node: EqGraphNode; last: { freq?: number; yDb?: number; q?: number } }>(null);
   const seekDragRef = useRef(false);
@@ -142,6 +143,13 @@ export const EqGraph: React.FC<Props> = ({
   }, [viewState, durationSec]);
   const viewRef = useRef(view);
   viewRef.current = view;
+  useEffect(() => { setViewState(fullView(durationSec)); }, [durationSec]);
+  const hasTimeline = Boolean(waveformPeaks && waveformPeaks.length >= 2 && durationSec > 0);
+  const timelineRef = useRef({ hasTimeline, durationSec });
+  timelineRef.current = { hasTimeline, durationSec };
+  // Two-finger pinch on touch screens zooms the waveform timeline.
+  const touchPointsRef = useRef(new Map<number, number>());
+  const pinchRef = useRef<null | { dist: number; mid: number; view: TimeView; anchor: number }>(null);
   const tl = (clientX: number, rect: DOMRect) => timelineSecondsFromPointer(clientX, rect.left, rect.width, durationSec, viewRef.current);
 
   const toLocal = (e: { clientX: number; clientY: number }) => {
@@ -229,6 +237,24 @@ export const EqGraph: React.FC<Props> = ({
     if (!svg) return;
     const onWheel = (e: WheelEvent) => {
       const id = (e.target as Element | null)?.closest?.('[data-band-id]')?.getAttribute('data-band-id');
+      const tlNow = timelineRef.current;
+      // FL Studio style: Ctrl/Cmd + wheel (and trackpad pinch, which arrives as ctrl+wheel)
+      // zooms the waveform timeline around the cursor; horizontal or Shift + wheel pans.
+      if (tlNow.hasTimeline && (e.ctrlKey || e.metaKey || ((e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) && !id))) {
+        const rect = svg.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const v = viewRef.current;
+        if (e.ctrlKey || e.metaKey) {
+          const anchor = xToSec(e.clientX - rect.left, v, rect.width);
+          setViewState(zoomAround(v, anchor, wheelZoomFactor(wheelPixels(e.deltaY, e.deltaMode, rect.height)), tlNow.durationSec));
+        } else {
+          const px = wheelPixels(Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY, e.deltaMode, rect.width);
+          setViewState(panBy(v, (px / rect.width) * (v.end - v.start), tlNow.durationSec));
+        }
+        return;
+      }
       if (!id) return;
       e.preventDefault();
       e.stopPropagation();
@@ -283,19 +309,37 @@ export const EqGraph: React.FC<Props> = ({
   // Peaks measured before the fades (dry / bypassed view) get the fade gain applied here so
   // the drawn waveform always shows what the render does.
   const scaleByFades = Boolean(waveSource && !waveSource.includesFades && fades);
+  // Zoomed in: recompute the envelope for the visible window from the audio itself
+  // (cached max-abs pyramid, built in slices), so detail increases like FL Studio.
+  const [hiEnv, setHiEnv] = useState<null | { peaks: unknown; start: number; end: number; env: number[] }>(null);
+  useEffect(() => {
+    if (!waveSource || !hasTimeline || isFullView(view, durationSec)) return;
+    let cancelled = false;
+    const target = { ...view };
+    const timer = window.setTimeout(() => {
+      void import('./waveformDetail').then(async (d) => {
+        const blocks = await d.ensurePeakBlocks(waveSource.channels);
+        if (cancelled) return;
+        const env = d.envelopeFromSamples(waveSource.channels, waveSource.sampleRate, target, 480, blocks);
+        setHiEnv({ peaks: waveformPeaks, start: target.start, end: target.end, env });
+      });
+    }, 40);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [waveSource, waveformPeaks, hasTimeline, view, durationSec]);
   const blanketPath = useMemo(() => {
     if (!waveformPeaks || waveformPeaks.length < 2 || !(durationSec > 0)) {
       if (!waveformPeaks || waveformPeaks.length < 2) return null;
       return blanketPathFromEnvelope(envelopeFromGlobalPeaks(waveformPeaks, 1, { start: 0, end: 1 }, Math.min(480, waveformPeaks.length)), W, H);
     }
     const bins = Math.min(480, Math.max(2, waveformPeaks.length));
-    const env = envelopeFromGlobalPeaks(waveformPeaks, durationSec, view, bins);
+    const fresh = hiEnv && hiEnv.peaks === waveformPeaks && Math.abs(hiEnv.start - view.start) < 1e-9 && Math.abs(hiEnv.end - view.end) < 1e-9;
+    const env = fresh && !isFullView(view, durationSec) ? hiEnv.env.slice() : envelopeFromGlobalPeaks(waveformPeaks, durationSec, view, bins);
     if (scaleByFades) {
       const span = view.end - view.start;
       for (let i = 0; i < env.length; i++) env[i] *= fadeGainAt(view.start + ((i + 0.5) / env.length) * span, durationSec, fades);
     }
     return blanketPathFromEnvelope(env, W, H);
-  }, [waveformPeaks, durationSec, view, scaleByFades, fades]);
+  }, [waveformPeaks, durationSec, view, scaleByFades, fades, hiEnv]);
   const fadeOverlay = useMemo(() => {
     if (!fades || durationSec <= 0) return null;
     const inX = secToX(fades.inSec, view, W);
@@ -330,6 +374,11 @@ export const EqGraph: React.FC<Props> = ({
 
   return (
     <div className={`syn-eqx-plot ${className}`}>
+      {hasTimeline && (
+        <React.Suspense fallback={<div className="syn-wfzoom" aria-hidden="true" style={{ height: 12 }} />}>
+          <WaveformZoomBar view={view} durationSec={durationSec} onChange={(next) => setViewState(clampView(next, durationSec))} />
+        </React.Suspense>
+      )}
       <div className="syn-eqx-canvas">
       <span className="syn-ceq-axis-y" aria-hidden="true">GAIN (dB)</span>
       <svg
@@ -337,11 +386,56 @@ export const EqGraph: React.FC<Props> = ({
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
         className="syn-ceq-svg syn-eqx-svg"
-        onPointerMove={(e) => { lastPointerXRef.current = e.clientX; onMove(e); }}
-        onPointerUp={(e) => { lastPointerXRef.current = e.clientX; endDrag(); }}
-        onPointerCancel={() => { fadeDragRef.current = null; seekDragRef.current = false; endDrag(); }}
+        onPointerMove={(e) => {
+          if (e.pointerType === 'touch' && touchPointsRef.current.has(e.pointerId)) {
+            touchPointsRef.current.set(e.pointerId, e.clientX);
+            const pinch = pinchRef.current;
+            if (pinch && touchPointsRef.current.size >= 2 && svgRef.current) {
+              const [a, b] = Array.from(touchPointsRef.current.values());
+              const rect = svgRef.current.getBoundingClientRect();
+              const dist = Math.max(12, Math.abs(a - b));
+              const zoomed = zoomAround(pinch.view, pinch.anchor, dist / pinch.dist, durationSec);
+              // Keep the pinch anchor under the fingers' midpoint while they move.
+              const midSec = xToSec((a + b) / 2 - rect.left, zoomed, rect.width);
+              setViewState(panBy(zoomed, pinch.anchor - midSec, durationSec));
+              return;
+            }
+          }
+          lastPointerXRef.current = e.clientX;
+          onMove(e);
+        }}
+        onPointerUp={(e) => {
+          touchPointsRef.current.delete(e.pointerId);
+          if (pinchRef.current) {
+            if (touchPointsRef.current.size < 2) pinchRef.current = null;
+            return;
+          }
+          lastPointerXRef.current = e.clientX;
+          endDrag();
+        }}
+        onPointerCancel={(e) => {
+          touchPointsRef.current.delete(e.pointerId);
+          if (touchPointsRef.current.size < 2) pinchRef.current = null;
+          fadeDragRef.current = null; seekDragRef.current = false; endDrag();
+        }}
         onDoubleClick={onDouble}
         onPointerDown={(e) => {
+          if (e.pointerType === 'touch') {
+            touchPointsRef.current.set(e.pointerId, e.clientX);
+            if (touchPointsRef.current.size === 2 && hasTimeline && svgRef.current) {
+              // Second finger down: cancel the seek / fade drag and start a pinch zoom.
+              fadeDragRef.current = null;
+              seekDragRef.current = false;
+              dragRef.current = null;
+              svgRef.current.setPointerCapture?.(e.pointerId);
+              const [a, b] = Array.from(touchPointsRef.current.values());
+              const rect = svgRef.current.getBoundingClientRect();
+              const v = viewRef.current;
+              pinchRef.current = { dist: Math.max(12, Math.abs(a - b)), mid: (a + b) / 2, view: v, anchor: xToSec((a + b) / 2 - rect.left, v, rect.width) };
+              e.preventDefault();
+              return;
+            }
+          }
           const target = e.target as Element | null;
           if (target?.closest?.('[data-band-id], [data-q-handle]')) return;
           if (fades && onFadesChange && durationSec > 0 && svgRef.current) {
@@ -380,7 +474,7 @@ export const EqGraph: React.FC<Props> = ({
         }}
         tabIndex={0}
         role="group"
-        aria-label={`${ariaLabel} Drag the cyan top handles to set fade-in and fade-out on this waveform.`}
+        aria-label={`${ariaLabel} Drag the cyan top handles to set fade-in and fade-out on this waveform. Ctrl + wheel or pinch zooms the waveform, Shift + wheel scrolls it.`}
       >
         <defs>
           <linearGradient id={`${uid}-curve`} x1="0" x2="1" y1="0" y2="0">
@@ -423,16 +517,16 @@ export const EqGraph: React.FC<Props> = ({
                   ))}
                 </linearGradient>
                 <rect className="syn-wf-fade-shade" x={Math.min(g.x0, g.x1)} y={0} width={Math.abs(g.x1 - g.x0)} height={H} fill={`url(#${uid}-fade-${side})`} />
-                <path className="syn-wf-fade-region" d={g.shade} />
-                <path className="syn-wf-fade-glow" d={g.line} />
-                <path className="syn-wf-fade-line" d={g.line} data-fade-line={side} />
+                <path className="syn-wf-fade-region" d={g.shade} fill="none" />
+                <path className="syn-wf-fade-glow" d={g.line} fill="none" />
+                <path className="syn-wf-fade-line" d={g.line} fill="none" stroke="#E040FB" strokeWidth={2.2} data-fade-line={side} />
               </g>
             ))}
             {fadeOverlay.inX >= -8 && fadeOverlay.inX <= W + 8 && (
-              <circle data-fade-handle="in" className="syn-wf-fade-handle" cx={Math.max(10, Math.min(W - 10, fadeOverlay.inX))} cy={12} r={7} pointerEvents="all" />
+              <circle data-fade-handle="in" className="syn-wf-fade-handle" cx={Math.max(10, Math.min(W - 10, fadeOverlay.inX))} cy={12} r={7} fill="#3FE0FF" pointerEvents="all" />
             )}
             {fadeOverlay.outX >= -8 && fadeOverlay.outX <= W + 8 && (
-              <circle data-fade-handle="out" className="syn-wf-fade-handle" cx={Math.min(W - 10, Math.max(10, fadeOverlay.outX))} cy={28} r={7} pointerEvents="all" />
+              <circle data-fade-handle="out" className="syn-wf-fade-handle" cx={Math.min(W - 10, Math.max(10, fadeOverlay.outX))} cy={28} r={7} fill="#3FE0FF" pointerEvents="all" />
             )}
           </g>
         )}

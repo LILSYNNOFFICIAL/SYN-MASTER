@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fadeGain } from '../../../dsp/fades';
+import { buildPeakBlocks, envelopeFromSamples } from './waveformDetail';
 import {
-  blanketPathFromEnvelope, buildPeakBlocks, clampView, envelopeFromGlobalPeaks, envelopeFromSamples, fadeGainAt,
+  blanketPathFromEnvelope, clampView, envelopeFromGlobalPeaks, fadeGainAt,
   fadeGeometry, fullView, minViewSpan, panBy, secToX, wheelZoomFactor, xToSec, zoomAround,
 } from './waveformView';
 import { timelineSecondsFromPointer } from './EqGraph';
