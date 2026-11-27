@@ -67,7 +67,7 @@ interface Props {
   onSeek?: (sec: number) => void;
   /** Fade curves and handles layered directly over the existing waveform blanket. */
   fades?: FadeSettings;
-  onFadesChange?: (next: FadeSettings) => void;
+  onFadesChange?: (next: FadeSettings | ((current: FadeSettings) => FadeSettings)) => void;
   ariaLabel: string;
   /** Popover rendered over the plot. */
   children?: React.ReactNode;
@@ -173,16 +173,14 @@ export const EqGraph: React.FC<Props> = ({
   };
 
   const updateFadeFromPointer = (side: 'in' | 'out', sec: number) => {
-    const current = fadesRef.current;
-    if (!current || !onFadesChange || durationSec <= 0) return;
+    if (!onFadesChange || durationSec <= 0) return;
     const maxLen = durationSec * 0.5;
-    const next = side === 'in'
+    // Queue a functional state update. React applies this against the latest committed
+    // state, so a rapid fade-in followed by fade-out cannot overwrite the first change
+    // with a snapshot captured by an earlier render.
+    onFadesChange((current) => side === 'in'
       ? { ...current, inSec: Number(Math.min(maxLen, sec).toFixed(2)) }
-      : { ...current, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) };
-    // Keep same-gesture and immediately-following gestures based on the newest value,
-    // even before React has committed the parent state update and rerendered this graph.
-    fadesRef.current = next;
-    onFadesChange(next);
+      : { ...current, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
   };
 
   const onMove = (e: React.PointerEvent) => {
