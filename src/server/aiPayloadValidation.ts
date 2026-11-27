@@ -1,6 +1,6 @@
 import { MASTERING_OBJECTIVE_IDS, type AudioAnalysis, type MasteringMode, type MasteringObjectiveId } from '../types/mastering.ts';
 import { MODE_MEANINGS } from '../ai/masteringPrompt.ts';
-import { GUARD_FEEDBACK_REASON_CODES, type GuardBalanceMetric, type GuardBalanceSnapshot, type GuardFeedback } from '../director/guardFeedback.ts';
+import { GUARD_FEEDBACK_REASON_CODES, type GuardBalanceMetric, type GuardBalanceSnapshot, type GuardFeedback } from '../director/guardFeedbackTypes.ts';
 
 export interface SafeAvailablePlugin {
   name: string;

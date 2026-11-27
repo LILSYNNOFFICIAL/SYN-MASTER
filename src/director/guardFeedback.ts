@@ -1,26 +1,28 @@
 import type { AudioAnalysis } from '../types/mastering.ts';
-import { computeRegionEnergyDb, type DiagnosisThresholds } from './analyzeIntelligence.ts';
+import type { DiagnosisThresholds } from './analyzeIntelligence.ts';
+import {
+  GUARD_FEEDBACK_REASON_CODES,
+  type GuardBalanceMetric,
+  type GuardBalanceSnapshot,
+  type GuardFeedback,
+  type GuardFeedbackReasonCode,
+} from './guardFeedbackTypes.ts';
+export { GUARD_FEEDBACK_REASON_CODES } from './guardFeedbackTypes.ts';
+export type { GuardBalanceMetric, GuardBalanceSnapshot, GuardFeedback, GuardFeedbackReasonCode } from './guardFeedbackTypes.ts';
 
-export const GUARD_FEEDBACK_REASON_CODES = [
-  'regression-guard', 'low-mid-sub-bass-masking', 'technical-finding-regression',
-  'clipping-regression', 'phase-regression', 'dynamics-regression',
-  'transient-regression', 'distortion-regression', 'noise-regression',
-  'true-peak-regression', 'loudness-regression', 'objective-score-regression',
-  'objective-gate-downgrade', 'no-improvement',
-] as const;
-export type GuardFeedbackReasonCode = typeof GUARD_FEEDBACK_REASON_CODES[number];
-export interface GuardBalanceMetric { valueDb: number | null; limitDb: number; remainingDb: number | null }
-export interface GuardBalanceSnapshot {
-  bassVsMid: GuardBalanceMetric;
-  lowMidVsMid: GuardBalanceMetric;
-  region150To400VsMid: GuardBalanceMetric;
-  subVsBass: GuardBalanceMetric;
-}
-export interface GuardFeedback {
-  pass: number;
-  reasonCodes: GuardFeedbackReasonCode[];
-  source: GuardBalanceSnapshot;
-  rejected: GuardBalanceSnapshot;
+function computeRegionEnergyDb(analysis: AudioAnalysis, minHz: number, maxHz: number): number | null {
+  const freqs = analysis.spectrumBinsFreq;
+  const dbs = analysis.spectrumBinsDb;
+  if (!freqs || !dbs || freqs.length === 0 || freqs.length !== dbs.length) return null;
+  let powerSum = 0;
+  let count = 0;
+  for (let i = 0; i < freqs.length; i++) {
+    if (freqs[i] >= minHz && freqs[i] <= maxHz && Number.isFinite(dbs[i])) {
+      powerSum += Math.pow(10, dbs[i] / 10);
+      count++;
+    }
+  }
+  return count === 0 ? null : 10 * Math.log10(Math.max(1e-13, powerSum / count));
 }
 function metric(valueDb: number | null, limitDb: number): GuardBalanceMetric {
   const value = valueDb !== null && Number.isFinite(valueDb) ? Math.round(valueDb * 100) / 100 : null;
