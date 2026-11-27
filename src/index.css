@@ -40,10 +40,34 @@ input,select,textarea { accent-color:#D4AF37; }
 select { color-scheme:dark; }
 select option, select optgroup { background-color:#090704; color:#F7F1E2; }
 :focus-visible { outline-color:#F2CA52; outline-offset:2px; }
-::-webkit-scrollbar { width:7px; height:7px; }
-::-webkit-scrollbar-track { background:#0A0804; }
-::-webkit-scrollbar-thumb { background:#5B4517; border:1px solid #100D06; border-radius:4px; }
-::-webkit-scrollbar-thumb:hover { background:#D4AF37; }
+/* Neon scrollbar (owner request 2026-11-26): purple glass thumb with an electric-blue rim,
+   dark translucent track, gold arrow buttons. WebKit/Blink (Chrome, Edge, Safari, Android Chrome);
+   Firefox gets scrollbar-color only (it has no arrow/border styling). Android and iOS draw
+   overlay scrollbars that auto-hide, so the arrows only show on desktop browsers. */
+::-webkit-scrollbar { width:12px; height:7px; }
+::-webkit-scrollbar-track { background:rgba(6,8,16,.62); border-left:1px solid rgba(139,92,246,.18); }
+::-webkit-scrollbar-thumb {
+  background:linear-gradient(180deg, rgba(168,85,247,.55), rgba(139,92,246,.42));
+  border:1px solid rgba(63,224,255,.85); border-radius:6px;
+  box-shadow:inset 0 0 6px rgba(63,224,255,.55), inset 0 0 2px rgba(255,255,255,.35);
+}
+::-webkit-scrollbar-thumb:hover { background:linear-gradient(180deg, rgba(192,132,252,.72), rgba(139,92,246,.6)); border-color:#3FE0FF; }
+::-webkit-scrollbar-thumb:active { background:rgba(168,85,247,.82); }
+::-webkit-scrollbar-corner { background:transparent; }
+::-webkit-scrollbar-button { display:none; }
+::-webkit-scrollbar-button:vertical:single-button {
+  display:block; height:14px; background-color:rgba(6,8,16,.7);
+  background-repeat:no-repeat; background-position:center; background-size:10px 10px;
+}
+::-webkit-scrollbar-button:vertical:single-button:decrement { background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 8 6 4l3.5 4z' fill='%23F5B82E'/></svg>"); }
+::-webkit-scrollbar-button:vertical:single-button:increment { background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 4 6 8l3.5-4z' fill='%23F5B82E'/></svg>"); }
+::-webkit-scrollbar-button:vertical:single-button:hover { background-color:rgba(245,184,46,.16); }
+@supports (-moz-appearance:none) {
+  html, .syn-daw-main, .syn-library-drawer, .syn-menu-panel, .syn-modal { scrollbar-color:rgba(168,85,247,.7) rgba(6,8,16,.62); }
+}
+/* Keep the page scrollbar on screen (mobile: the page scrolls; desktop: the workstation main panel does). */
+@media (max-width: 1023px) { html { overflow-y:scroll; } }
+@media (min-width: 1024px) { .syn-workstation .syn-daw-main { overflow-y:scroll !important; } }
 
 /* Legacy command menu */
 .syn-menubar { display:flex; align-items:center; justify-content:center; gap:.2rem; min-width:0; color:#E9D9AE; font-size:.78rem; }
