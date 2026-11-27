@@ -54,6 +54,8 @@ import {
 import { type DynamicEqTrace, type ProcessorMeterTelemetry } from './dsp/offlineDsp';
 import { chainHasSoloedBand } from './dsp/eqDesign';
 import { renderAndAnalyzeOffThread } from './dsp/workerClient';
+import { ProgressRing } from './components/ui/ProgressRing';
+import { IMPORT_STAGE_LABELS, importStagePercent, type ImportStage } from './components/ui/progressMath';
 import { getActiveRebalanceStems, getRebalanceStemState, separateActiveRebalanceStems, setActiveRebalanceSource, subscribeRebalanceStems } from './services/rebalanceStemStore';
 import type { VocalBalanceContext } from './ai/vocalBalancePrompt';
 import { filterSourceTransientClickAnalysis } from './dsp/clickDetect';
@@ -388,7 +390,20 @@ export default function App() {
   const [diagnosticArchiveStatus, setDiagnosticArchiveStatus] = useState<
     'loading' | 'idle' | 'saving' | 'saved' | 'session-only' | 'failed'
   >('loading');
-  const [importLoadingPercent, setImportLoadingPercent] = useState<number | null>(null);
+  // Import overlay: real staged progress (no timers). null = hidden.
+  const [importProgress, setImportProgress] = useState<{
+    kind: 'source' | 'reference';
+    fileName: string;
+    stage: ImportStage;
+    percent: number;
+    /** The current stage reports no granular progress: hold the value and pulse. */
+    working: boolean;
+    error: string | null;
+  } | null>(null);
+  const importAbortRef = useRef<AbortController | null>(null);
+  const [fileDragActive, setFileDragActive] = useState(false);
+  /** High-res (1600-bin) source peaks computed in the import worker job, keyed by track id. */
+  const importPeaksHiRef = useRef<{ trackId: string; peaks: number[] } | null>(null);
 
 
 
@@ -503,10 +518,13 @@ export default function App() {
   }, [sourceRenderRevision]);
   const getPostFades = useCallback((): FadeSettings | null => (hasFades(fadesRef.current) ? fadesRef.current : null), []);
 
-  const prePeaksHi = useMemo(
-    () => (activeTrack && sourceChannelsRef.current ? extractWaveformPeaks(sourceChannelsRef.current, 1600) : []),
-    [activeTrack],
-  );
+  const prePeaksHi = useMemo(() => {
+    if (!activeTrack || !sourceChannelsRef.current) return [];
+    // Imported files bring their 1600-bin peaks from the worker job (no UI-thread pass).
+    const cached = importPeaksHiRef.current;
+    if (cached && cached.trackId === activeTrack.id) return cached.peaks;
+    return extractWaveformPeaks(sourceChannelsRef.current, 1600);
+  }, [activeTrack]);
 
   // Vocal Rebalance stem cache follows the active source; a new stem set re-runs the preview render.
   const rebalanceStemState = useSyncExternalStore(subscribeRebalanceStems, getRebalanceStemState, getRebalanceStemState);
@@ -539,12 +557,33 @@ export default function App() {
       const effectiveChain = chainBypassed ? [] : chain;
       void (async () => {
         try {
-          const result = await renderAndAnalyzeOffThread({
+          // D1: with an empty or bypassed rack, no fades and the plain imported source, the
+          // preview render is the identity (processChainOffline returns its input untouched),
+          // so reuse the import's own analysis and peaks instead of measuring the same audio
+          // a second time. Numbers are identical by construction (see analysisIdentity.test.ts).
+          const cachedHi = importPeaksHiRef.current;
+          const canReuseImport =
+            effectiveChain.length === 0 &&
+            !getPostFades() &&
+            src === sourceChannelsRef.current &&
+            cachedHi !== null &&
+            cachedHi.trackId === track.id;
+          const result = canReuseImport
+            ? {
+                channels: src,
+                telemetry: [],
+                analysis: track.analysis,
+                peaks: track.peaks,
+                peaksHi: cachedHi.peaks,
+                dynamicEqTraces: undefined,
+              }
+            : await renderAndAnalyzeOffThread({
             sourceChannels: src,
             sampleRate: track.sampleRate,
             chain: effectiveChain,
             includePeaks: true,
             peakBins: 400,
+            hiPeakBins: 1600,
             externalProcessor: processExternalStage,
             postFades: getPostFades(),
             // Preview only: band solo (listen) and Dynamic EQ traces. Export / Fix All never set these.
@@ -560,7 +599,7 @@ export default function App() {
             result.analysis,
           );
           postChannelsRef.current = result.channels;
-          setPostPeaksHi(extractWaveformPeaks(result.channels, 1600));
+          setPostPeaksHi(result.peaksHi ?? extractWaveformPeaks(result.channels, 1600));
           setStageTelemetry(result.telemetry);
           setDynamicEqTraces(result.dynamicEqTraces ?? []);
           setPostPeaks(result.peaks ?? null);
@@ -1119,7 +1158,7 @@ export default function App() {
       fileSizeBytes: number,
       format: string,
       isDemo = false,
-      precomputed?: { analysis: AudioAnalysis; peaks: number[] },
+      precomputed?: { analysis: AudioAnalysis; peaks: number[]; peaksHi?: number[]; playbackBuffer?: AudioBuffer | null },
     ) => {
       // Cancel any in-flight CHAIN WITH AI run targeting the previous source track
       vocalPreparationAbortRef.current?.abort();
@@ -1159,7 +1198,7 @@ export default function App() {
       matchEqStore.setSource(channels, sampleRate);
       setFades(NO_FADES);
       setPostPeaksHi(null);
-      engine.setSourceChannels(channels, sampleRate);
+      engine.setSourceChannels(channels, sampleRate, precomputed?.playbackBuffer ?? null);
       setIsPlaying(false);
       telemetryStore.reset();
       setAuditionTarget('mastered');
@@ -1168,6 +1207,7 @@ export default function App() {
       const peaks = precomputed?.peaks ?? extractWaveformPeaks(channels, 400);
       const trackId = `trk-${Date.now()}`;
       activeTrackIdRef.current = trackId;
+      importPeaksHiRef.current = precomputed?.peaksHi ? { trackId, peaks: precomputed.peaksHi } : null;
       const asset: AudioTrackAsset = {
         id: trackId,
         name,
@@ -1219,62 +1259,153 @@ export default function App() {
   // fast desktop, several seconds on a phone) and re-ran every time the track was closed. The workstation opens
   // straight into the console with Import ("Load demo session" stays available as an explicit button).
 
+  /**
+   * Shared import pipeline with REAL staged progress: read (FileReader bytes) -> decode
+   * (browser decoder, no granular progress: hold + pulse) -> analyze (worker posts progress
+   * between measurement sections) -> waveform (worker) -> finishing. The decoded channels are
+   * transferred to the worker (no clone) and come back untouched (empty chain, no fades).
+   * Cancel aborts reading / drops the decode / terminates the worker job.
+   */
+  const runImportPipeline = useCallback(
+    async (file: File, kind: 'source' | 'reference', isCurrent: () => boolean) => {
+      importAbortRef.current?.abort();
+      const controller = new AbortController();
+      importAbortRef.current = controller;
+      const update = (stage: ImportStage, fraction: number, working = false) => {
+        if (!isCurrent() || controller.signal.aborted) return;
+        const percent = importStagePercent(stage, fraction);
+        setImportProgress((prev) => ({
+          kind,
+          fileName: file.name,
+          stage,
+          percent: prev && prev.kind === kind && prev.fileName === file.name ? Math.max(prev.percent, percent) : percent,
+          working,
+          error: null,
+        }));
+      };
+      update('reading', 0);
+      // Let the overlay paint before any heavy work starts.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      // A decoder that never answers (seen on Android) must end in an error, not a hang.
+      const decodeWatchdogMs = Math.min(300_000, Math.max(60_000, (file.size / 1_048_576) * 2_000));
+      let watchdog: number | undefined;
+      const decoded = await Promise.race([
+        engineRef.current!.decodeFile(file, {
+          signal: controller.signal,
+          onReadProgress: (f) => update('reading', f),
+          onDecodeStart: () => update('decoding', 0, true),
+        }),
+        new Promise<never>((_, reject) => {
+          watchdog = window.setTimeout(() => {
+            const err = new Error('decode-timeout');
+            err.name = 'DecodeTimeout';
+            reject(err);
+          }, decodeWatchdogMs);
+        }),
+      ]).finally(() => window.clearTimeout(watchdog));
+      update('decoding', 1);
+      if (!isCurrent() || controller.signal.aborted) return null;
+      const playbackBuffer = decoded.buffer;
+      const offThread = await renderAndAnalyzeOffThread({
+        sourceChannels: decoded.channels,
+        sampleRate: decoded.sampleRate,
+        chain: [],
+        includePeaks: true,
+        peakBins: 400,
+        hiPeakBins: kind === 'source' ? 1600 : undefined,
+        transferSource: true,
+        signal: controller.signal,
+        onProgress: (stage, fraction) => {
+          if (stage === 'analyzing') update('analyzing', fraction);
+          else if (stage === 'waveform') update('waveform', fraction);
+          else update('analyzing', 0);
+        },
+      });
+      if (!isCurrent() || controller.signal.aborted) return null;
+      update('finishing', 0);
+      // The worker hands back the very same samples (identity render): use them as the source.
+      return { offThread, channels: offThread.channels, sampleRate: decoded.sampleRate, playbackBuffer };
+    },
+    [],
+  );
+
+  const describeImportError = useCallback((err: unknown, fileName: string): string => {
+    const name = err instanceof Error ? err.name : '';
+    const msg = err instanceof Error ? err.message : '';
+    if (name === 'DecodeTimeout') {
+      return `"${fileName}" took too long to decode on this device. Try a shorter file or a WAV/MP3 export.`;
+    }
+    if (name === 'NotReadableError') return `"${fileName}" could not be read. Check the file and try again.`;
+    if (name === 'RangeError' && /memory|allocation|array buffer/i.test(msg)) {
+      return `"${fileName}" is too large for this device's memory. Try a shorter file or a lower sample rate.`;
+    }
+    if (/memory|allocation/i.test(msg)) {
+      return `"${fileName}" is too large for this device's memory. Try a shorter file or a lower sample rate.`;
+    }
+    if (/Off-thread DSP|DSP worker/.test(msg)) {
+      return `"${fileName}" was decoded but could not be analyzed (${msg.slice(0, 140)}).`;
+    }
+    return `Could not decode "${fileName}". It may be unsupported or damaged. Supported: WAV, MP3, FLAC, AAC/M4A, OGG, AIFF.`;
+  }, []);
+
+  const showImportError = useCallback((kind: 'source' | 'reference', fileName: string, message: string) => {
+    setImportProgress((prev) => ({
+      kind,
+      fileName,
+      stage: prev?.stage ?? 'decoding',
+      percent: prev?.percent ?? 0,
+      working: false,
+      error: message,
+    }));
+    setStatusNotice(message);
+  }, []);
+
+  const handleCancelImport = useCallback(() => {
+    importAbortRef.current?.abort();
+    importAbortRef.current = null;
+    // Invalidate both pipelines; a late result is ignored by its sequence check.
+    sourceUploadSeqRef.current += 1;
+    referenceUploadSeqRef.current += 1;
+    setImportProgress(null);
+    setStatusNotice('Import cancelled.');
+  }, []);
+
   const handleUploadSourceFile = useCallback(
     async (file: File) => {
       const uploadSeq = ++sourceUploadSeqRef.current;
-      const attemptName = file.name;
-      setImportLoadingPercent(4);
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      let targetCap = 54;
-      const progressTimer = window.setInterval(() => {
-        setImportLoadingPercent((prev) => (prev !== null && prev < targetCap ? prev + 2 : prev));
-      }, 90);
+      const isCurrent = () => uploadSeq === sourceUploadSeqRef.current;
       try {
-        const decoded = await engineRef.current!.decodeFile(file);
-        if (uploadSeq !== sourceUploadSeqRef.current) {
-          setImportLoadingPercent(null);
-          return;
-        }
-        targetCap = 94;
-        setImportLoadingPercent((prev) => Math.max(prev ?? 60, 60));
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const offThread = await renderAndAnalyzeOffThread({
-          sourceChannels: decoded.channels,
-          sampleRate: decoded.sampleRate,
-          chain: [],
-          includePeaks: true,
-          peakBins: 400,
-        });
-        if (uploadSeq !== sourceUploadSeqRef.current) {
-          setImportLoadingPercent(null);
-          return;
-        }
+        const done = await runImportPipeline(file, 'source', isCurrent);
+        if (!done || !isCurrent()) return;
         const ext = file.name.split('.').pop()?.toUpperCase() ?? 'AUDIO';
         loadChannelsAsSource(
-          decoded.channels,
-          decoded.sampleRate,
+          done.channels,
+          done.sampleRate,
           file.name,
           file.size,
           ext,
           false,
           {
-            analysis: offThread.analysis,
-            peaks: offThread.peaks ?? extractWaveformPeaks(decoded.channels, 400),
+            analysis: done.offThread.analysis,
+            peaks: done.offThread.peaks ?? extractWaveformPeaks(done.channels, 400),
+            peaksHi: done.offThread.peaksHi,
+            playbackBuffer: done.playbackBuffer,
           },
         );
-        setImportLoadingPercent(100);
-        window.setTimeout(() => setImportLoadingPercent(null), 320);
+        setImportProgress((prev) => (prev ? { ...prev, stage: 'finishing', percent: 100, working: false } : prev));
+        window.setTimeout(() => {
+          if (isCurrent()) setImportProgress((prev) => (prev && !prev.error ? null : prev));
+        }, 320);
       } catch (err) {
-        if (uploadSeq !== sourceUploadSeqRef.current) return;
-        setImportLoadingPercent(null);
-        setStatusNotice(
-          `Could not decode "${attemptName}". Please ensure it is a valid WAV, MP3, FLAC, AAC, M4A, OGG, or AIFF audio file.`,
-        );
-      } finally {
-        window.clearInterval(progressTimer);
+        if (!isCurrent()) return;
+        if (err instanceof Error && err.name === 'AbortError') {
+          setImportProgress(null);
+          return;
+        }
+        showImportError('source', file.name, describeImportError(err, file.name));
       }
     },
-    [loadChannelsAsSource],
+    [loadChannelsAsSource, runImportPipeline, describeImportError, showImportError],
   );
 
   const handleLoadDemoReference = useCallback(() => {
@@ -1309,39 +1440,19 @@ export default function App() {
 
   const handleUploadReferenceFile = useCallback(async (file: File) => {
     const uploadSeq = ++referenceUploadSeqRef.current;
-    setImportLoadingPercent(4);
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    let targetCap = 54;
-    const progressTimer = window.setInterval(() => {
-      setImportLoadingPercent((prev) => (prev !== null && prev < targetCap ? prev + 2 : prev));
-    }, 90);
+    const isCurrent = () => uploadSeq === referenceUploadSeqRef.current;
     try {
-      const decoded = await engineRef.current!.decodeFile(file);
-      if (uploadSeq !== referenceUploadSeqRef.current) {
-        setImportLoadingPercent(null);
-        return;
-      }
-      targetCap = 94;
-      setImportLoadingPercent((prev) => Math.max(prev ?? 60, 60));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const offThread = await renderAndAnalyzeOffThread({
-        sourceChannels: decoded.channels,
-        sampleRate: decoded.sampleRate,
-        chain: [],
-        includePeaks: true,
-        peakBins: 400,
-      });
-      if (uploadSeq !== referenceUploadSeqRef.current) {
-        setImportLoadingPercent(null);
-        return;
-      }
+      const done = await runImportPipeline(file, 'reference', isCurrent);
+      if (!done || !isCurrent()) return;
+      const decoded = { channels: done.channels, sampleRate: done.sampleRate };
+      const offThread = done.offThread;
       vocalPreparationAbortRef.current?.abort();
       vocalPreparationAbortRef.current = null;
       vocalPreparationCacheRef.current.clear();
       vocalSourceOverrideRef.current = null;
       setSourceRenderRevision((revision) => revision + 1);
       referenceChannelsRef.current = decoded.channels;
-      engineRef.current!.setReferenceChannels(decoded.channels, decoded.sampleRate);
+      engineRef.current!.setReferenceChannels(decoded.channels, decoded.sampleRate, done.playbackBuffer);
       matchEqStore.setReference(decoded.channels, decoded.sampleRate, file.name);
       const analysis = offThread.analysis;
       const peaks = offThread.peaks ?? extractWaveformPeaks(decoded.channels, 400);
@@ -1359,17 +1470,20 @@ export default function App() {
         peaks,
         analysis,
       });
-      setImportLoadingPercent(100);
-      window.setTimeout(() => setImportLoadingPercent(null), 320);
+      setImportProgress((prev) => (prev ? { ...prev, stage: 'finishing', percent: 100, working: false } : prev));
+      window.setTimeout(() => {
+        if (isCurrent()) setImportProgress((prev) => (prev && !prev.error ? null : prev));
+      }, 320);
       setStatusNotice(`Loaded reference "${file.name}"`);
-    } catch {
-      if (uploadSeq !== referenceUploadSeqRef.current) return;
-      setImportLoadingPercent(null);
-      setStatusNotice(`Failed to decode reference file "${file.name}".`);
-    } finally {
-      window.clearInterval(progressTimer);
+    } catch (err) {
+      if (!isCurrent()) return;
+      if (err instanceof Error && err.name === 'AbortError') {
+        setImportProgress(null);
+        return;
+      }
+      showImportError('reference', file.name, `Reference: ${describeImportError(err, file.name)}`);
     }
-  }, []);
+  }, [runImportPipeline, describeImportError, showImportError]);
 
   const switchAuditionTarget = useCallback(
     (target: AuditionTarget, customTrimDb?: number) => {
@@ -3234,6 +3348,7 @@ export default function App() {
         vocalPreparationAbortRef.current?.abort();
         getActiveAiCall()?.cancel();
       }}
+      fixError={aiError}
       onDemo={() => handleLoadDemoSource('main-mix')}
       onImport={handleUploadSourceFile}
       targetPresetId={targetPresetId}
@@ -3295,27 +3410,71 @@ export default function App() {
   );
 
   return (
-    <div className="syn-workstation min-h-screen lg:h-screen w-full flex flex-col bg-[#070709] text-[#F7F8FA] lg:overflow-hidden">
-      {importLoadingPercent !== null && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-md">
-          <div
-            className="w-36 h-36 rounded-full flex items-center justify-center relative"
-            style={{
-              background: `conic-gradient(from 0deg, #38BDF8 0% ${importLoadingPercent}%, #D4AF37 ${importLoadingPercent}% 100%)`,
-              boxShadow: '0 0 0 6px rgba(5,7,13,0.9), 0 0 28px rgba(56,189,248,0.4)',
-            }}
-          >
-            <div
-              className="w-32 h-32 rounded-full flex flex-col items-center justify-center text-center p-2"
-              style={{
-                background: `conic-gradient(from 0deg, rgba(56,189,248,0.28) 0% ${importLoadingPercent}%, rgba(10,14,26,0.94) ${importLoadingPercent}% 100%)`,
-              }}
-            >
-              <span className="font-display font-extrabold text-2xl text-[#F2CA52]">{importLoadingPercent}%</span>
-              <span className="text-[10px] font-mono text-[#38BDF8] tracking-widest mt-0.5">LOADING</span>
+    <div
+      className="syn-workstation min-h-screen lg:h-screen w-full flex flex-col bg-[#070709] text-[#F7F8FA] lg:overflow-hidden"
+      onDragOver={(e) => {
+        // Drag-and-drop import anywhere on the workstation (inner drop zones handle their own drops).
+        if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          if (!fileDragActive) setFileDragActive(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node | null)) setFileDragActive(false);
+      }}
+      onDrop={(e) => {
+        setFileDragActive(false);
+        if (e.defaultPrevented) return;
+        const file = Array.from(e.dataTransfer?.files ?? []).find((f) => f.type.startsWith('audio/') || /\.(wav|flac|mp3|aac|m4a|ogg|aiff?|opus|webm)$/i.test(f.name));
+        if (!file) return;
+        e.preventDefault();
+        void handleUploadSourceFile(file);
+      }}
+    >
+      {fileDragActive && (
+        <div className="fixed inset-0 z-40 pointer-events-none flex items-center justify-center border-4 border-dashed border-[#38BDF8] bg-[#05070D]/70" data-testid="drop-hint">
+          <p className="font-display text-lg text-[#F3D58A]">Drop your track to import</p>
+        </div>
+      )}
+      {importProgress !== null && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-md p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="syn-import-overlay-title"
+          data-testid="import-overlay"
+        >
+          <div className="syn-import-overlay-card">
+            <ProgressRing
+              percent={importProgress.percent}
+              size={144}
+              label={importProgress.error ? 'Failed' : IMPORT_STAGE_LABELS[importProgress.stage]}
+              state={importProgress.error ? 'error' : 'running'}
+              working={importProgress.working}
+              ariaLabel={importProgress.kind === 'reference' ? 'Importing reference track' : 'Importing track'}
+            />
+            <p id="syn-import-overlay-title" className="font-display text-sm text-[#F5EEDC] tracking-wide">
+              {importProgress.error
+                ? 'Import failed'
+                : `${importProgress.kind === 'reference' ? 'Importing reference' : 'Importing'} · ${IMPORT_STAGE_LABELS[importProgress.stage]}…`}
+            </p>
+            <p className="text-xs text-[#9AA3B2]" title={importProgress.fileName}>{importProgress.fileName}</p>
+            {importProgress.error && (
+              <p className="text-xs text-[#FCA5A5]" role="alert" data-testid="import-error">{importProgress.error}</p>
+            )}
+            <div className="syn-import-overlay-actions">
+              {importProgress.error ? (
+                <button type="button" className="border border-[#D4A84A] text-[#F3D58A]" onClick={() => setImportProgress(null)} autoFocus>
+                  Dismiss
+                </button>
+              ) : (
+                <button type="button" className="border border-[#F0475A] text-[#FCA5A5]" onClick={handleCancelImport} data-testid="import-cancel">
+                  Cancel
+                </button>
+              )}
             </div>
           </div>
-          <p className="mt-4 font-display text-sm text-[#F5EEDC] tracking-wide">Importing &amp; decoding audio track...</p>
         </div>
       )}
       {/* Zone 3-Part Top Bar Contract */}

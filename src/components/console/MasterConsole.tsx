@@ -34,6 +34,8 @@ import { LightRibbons } from './LightRibbons';
 import { StereoMeters, StereoScope } from './StereoScope';
 import { telemetryStore, type RuntimeTelemetryState } from '../../engine/telemetryStore';
 import { isMasterFullyVerified } from '../../director/postFixVerification';
+import { ProgressRing, type ProgressRingState } from '../ui/ProgressRing';
+import { clampPercent, fixAllPercent, fixAllStageLabel, nextMonotonicPercent } from '../ui/progressMath';
 
 /**
  * SYN-MASTER console (reference-mockup layout). A presentation layer only: every control
@@ -63,6 +65,8 @@ export interface MasterConsoleProps {
   report: MasterFinalReport | null;
   onFix: () => void;
   onStop: () => void;
+  /** Error from the last FIX ALL run (shown as the ring's error state when the run ends without a report). */
+  fixError?: string | null;
   onDemo: () => void;
   onImport: (file: File) => void;
   targetPresetId: string | null;
@@ -267,33 +271,46 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
     return () => window.clearTimeout(t);
   }, []);
   const [presetId, setPresetId] = useState<string>(p.presets[0]?.id ?? '');
+  // FIX ALL ring: driven only by the Director's own stage/pass events (no timers).
+  // Monotonic while running, eases toward 95, 100 only on completion.
   const [fixProgress, setFixProgress] = useState<number>(0);
+  const [fixRingState, setFixRingState] = useState<ProgressRingState>('idle');
   const wasRunningRef = React.useRef(false);
   useEffect(() => {
     if (p.running) {
+      const target = fixAllPercent(p.stage, p.pass);
+      const fresh = !wasRunningRef.current;
       wasRunningRef.current = true;
-      const stageLower = (p.stage ?? '').toLowerCase();
-      const targetFloor = p.pass === 0
-        ? (stageLower.includes('stem') ? 16 : stageLower.includes('think') ? 22 : 8)
-        : Math.min(95, 25 + Math.round((p.pass / Math.max(1, Math.min(p.maxPasses, 5))) * 70));
-      setFixProgress((prev) => Math.max(prev < 6 ? 6 : prev, targetFloor));
-      const ceiling = p.pass === 0 ? 28 : Math.min(96, targetFloor + 12);
-      const timer = window.setInterval(() => {
-        setFixProgress((prev) => (prev < ceiling ? prev + 1 : prev));
-      }, 280);
-      return () => window.clearInterval(timer);
+      setFixRingState('running');
+      setFixProgress((prev) => nextMonotonicPercent(prev, target, fresh));
+      return undefined;
     }
-    if (wasRunningRef.current) {
-      wasRunningRef.current = false;
-      if (p.report && p.report.status !== 'stopped-by-user') {
-        setFixProgress(100);
-        const resetTimer = window.setTimeout(() => setFixProgress(0), 500);
-        return () => window.clearTimeout(resetTimer);
-      }
+    if (!wasRunningRef.current) return undefined;
+    wasRunningRef.current = false;
+    const stopped = p.report?.status === 'stopped-by-user' || /stop/i.test(p.stage ?? '');
+    let next: ProgressRingState;
+    let holdMs: number;
+    if (p.report && !stopped) {
+      next = 'running';
+      holdMs = 900;
+      setFixProgress(100);
+    } else if (stopped) {
+      next = 'stopped';
+      holdMs = 1600;
+    } else if (p.fixError) {
+      next = 'error';
+      holdMs = 3000;
+    } else {
+      next = 'idle';
+      holdMs = 0;
+    }
+    setFixRingState(next);
+    const resetTimer = window.setTimeout(() => {
+      setFixRingState('idle');
       setFixProgress(0);
-    }
-    return undefined;
-  }, [p.running, p.pass, p.maxPasses, p.stage, p.report]);
+    }, holdMs);
+    return () => window.clearTimeout(resetTimer);
+  }, [p.running, p.pass, p.stage, p.report, p.fixError]);
   const modeInfo = p.mode ? MODE_INFO[p.mode] : undefined;
   const suggestedPreset = modeInfo?.preset && p.presets.some((x) => x.id === modeInfo.preset) ? modeInfo.preset : null;
   useEffect(() => {
@@ -400,11 +417,13 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
       <AddModule type="maximizer" onAdd={add} />
     );
 
-  const progressPercent = p.running || fixProgress > 0 ? Math.min(100, Math.max(0, fixProgress)) : 0;
-  const isFilling = p.running || fixProgress > 0;
+  const progressPercent = Math.round(clampPercent(fixProgress));
+  const isFilling = p.running || fixRingState !== 'idle';
+  const fixStageText = p.running ? fixAllStageLabel(p.stage, p.pass) : fixRingState === 'stopped' ? 'Stopped' : fixRingState === 'error' ? 'Error' : progressPercent >= 100 ? 'Done' : '';
 
   const fixButton = (
     <div className="syn2-fix-centerpiece syn-fixai-wrap">
+      <div className="syn-fixai-ringbox">
       <button
         type="button"
         className={`syn-fixai${p.running ? ' is-running' : ''}`}
@@ -419,36 +438,31 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
         }}
       >
         <span className="syn-fixai-ring" aria-hidden="true" />
-        {isFilling && (
-          <>
-            <span
-              className="syn-fixai-fill"
-              aria-hidden="true"
-              style={{
-                background: `conic-gradient(from 0deg, #38BDF8 0% ${progressPercent}%, #D4AF37 ${progressPercent}% 100%)`,
-              }}
-            />
-            <span
-              className="syn-fixai-inner-disc"
-              aria-hidden="true"
-              style={{
-                background: `conic-gradient(from 0deg, rgba(56,189,248,0.28) 0% ${progressPercent}%, rgba(10,14,26,0.94) ${progressPercent}% 100%)`,
-              }}
-            />
-          </>
-        )}
         <BrainCircuit className="syn-fixai-icon" aria-hidden="true" />
         <span className="syn-fixai-text">
           <span>FIX ALL</span>
           <strong>AI</strong>
-          {isFilling && <small className="syn-fixai-pct">{progressPercent}%</small>}
+          {isFilling && <small className="syn-fixai-pct">{fixRingState === 'error' ? '!' : `${progressPercent}%`}</small>}
         </span>
         <svg className="syn-fixai-wave" viewBox="0 0 60 16" aria-hidden="true">
           <path d="M0 8 L8 8 L11 3 L14 13 L17 1 L20 15 L23 5 L26 11 L29 7 L32 9 L35 4 L38 12 L41 6 L44 10 L47 8 L60 8" />
         </svg>
       </button>
+      {isFilling && (
+        <ProgressRing
+          className="syn-fixai-progress"
+          percent={progressPercent}
+          size={180}
+          state={fixRingState}
+          working={p.running && /think|stem/i.test(p.stage ?? '')}
+          label={fixStageText}
+          ariaLabel="Fix All with AI progress"
+          hideText
+        />
+      )}
+      </div>
       <div id="syn-fixai-status" className="syn-fixai-status" role="status" aria-live="polite">
-        {p.running ? statusLine : p.hasTrack ? 'AI POWERED · ADAPTIVE · VERIFIED' : 'IMPORT A TRACK TO ENABLE'}
+        {p.running ? `${fixStageText} · ${progressPercent}%` : fixRingState === 'stopped' ? 'Stopped · nothing more will be changed' : fixRingState === 'error' ? `Fix All failed${p.fixError ? `: ${p.fixError}` : ''}` : p.hasTrack ? 'AI POWERED · ADAPTIVE · VERIFIED' : 'IMPORT A TRACK TO ENABLE'}
       </div>
       {p.onAskAi && (
         <button type="button" className="syn-askai" onClick={p.onAskAi} aria-label="Ask AI: open the AI Assistant to plan, explain and review changes step by step">

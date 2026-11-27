@@ -16,6 +16,20 @@ export interface DspWorkerRequest {
   audition?: boolean;
   /** Preview-only: record Dynamic EQ traces. */
   collectDynamicEqTraces?: boolean;
+  /** Also compute high-resolution waveform peaks (e.g. 1600 bins) here instead of on the UI thread. */
+  hiPeakBins?: number;
+  /** Post DspWorkerProgressMessage updates while the job runs (also keeps the client watchdog alive). */
+  reportProgress?: boolean;
+}
+
+export type DspWorkerProgressStage = 'processing' | 'analyzing' | 'waveform';
+
+/** Stage progress for one job (fraction 0..1 within the stage). Never carries audio. */
+export interface DspWorkerProgressMessage {
+  id: number;
+  kind: 'progress';
+  stage: DspWorkerProgressStage;
+  fraction: number;
 }
 
 /**
@@ -37,6 +51,8 @@ export interface DspWorkerSuccessResponse {
   peaks?: number[];
   analysis: AudioAnalysis;
   dynamicEqTraces?: DynamicEqTrace[];
+  /** High-resolution peaks when the request set hiPeakBins. */
+  peaksHi?: number[];
 }
 
 export interface DspWorkerErrorResponse {
@@ -56,17 +72,37 @@ self.onmessage = (ev: MessageEvent<DspWorkerMessage>) => {
     return;
   }
   const req = msg;
+  const post = (self as unknown as { postMessage: (msg: unknown, transfer?: Transferable[]) => void }).postMessage.bind(self);
+  let lastPostAt = 0;
+  const progress = (stage: DspWorkerProgressStage, fraction: number, force = false) => {
+    if (!req.reportProgress) return;
+    const now = Date.now();
+    if (!force && now - lastPostAt < 50) return;
+    lastPostAt = now;
+    const m: DspWorkerProgressMessage = { id: req.id, kind: 'progress', stage, fraction };
+    post(m);
+  };
   try {
+    progress('processing', 0, true);
     const processed = processChainOffline(req.channels, req.sampleRate, req.chain, req.postFades, {
       takeOwnership: true,
       audition: req.audition === true,
       collectDynamicEqTraces: req.collectDynamicEqTraces === true,
     });
-    const analysis = analyzeAudioBuffer(processed.channels, req.sampleRate);
+    progress('analyzing', 0, true);
+    const analysis = analyzeAudioBuffer(
+      processed.channels,
+      req.sampleRate,
+      req.reportProgress ? (f) => progress('analyzing', f) : undefined,
+    );
+    progress('waveform', 0, true);
     const peaks =
       req.kind === 'render-and-analyze'
         ? extractWaveformPeaks(processed.channels, req.peakBins ?? 400)
         : undefined;
+    const peaksHi =
+      req.hiPeakBins && req.hiPeakBins > 0 ? extractWaveformPeaks(processed.channels, req.hiPeakBins) : undefined;
+    progress('waveform', 1, true);
 
     const resp: DspWorkerSuccessResponse = {
       id: req.id,
@@ -76,13 +112,13 @@ self.onmessage = (ev: MessageEvent<DspWorkerMessage>) => {
       peaks,
       analysis,
       dynamicEqTraces: processed.dynamicEqTraces,
+      ...(peaksHi ? { peaksHi } : {}),
     };
 
-    const transferList = processed.channels.map((ch) => ch.buffer);
-    (self as unknown as { postMessage: (msg: unknown, transfer?: Transferable[]) => void }).postMessage(
-      resp,
-      transferList,
-    );
+    // Transfer (not copy) the rendered audio back. Mono input renders to two channels that
+    // may share one buffer; transfer each underlying buffer once.
+    const transferList = Array.from(new Set(processed.channels.map((ch) => ch.buffer)));
+    post(resp, transferList);
   } catch (err) {
     const resp: DspWorkerErrorResponse = {
       id: req.id,

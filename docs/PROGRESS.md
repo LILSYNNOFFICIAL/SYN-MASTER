@@ -38,3 +38,27 @@ Dated entries, newest last, so work can resume if a session is cut off.
 **Not verified:** a live Gemini call with the new prompt (no `GEMINI_API_KEY` here), so the real effect on strategy-call time (~17 s before) and on tool choice is unmeasured.
 
 **Next:** E2 (schema) and E4 (merge-rule logging) by the other agents; then a live run to compare strategy-call time and chosen tools.
+
+## 2026-11-26 — Parts C + D1: real progress rings, import overlay, faster import
+
+**What changed (plain language)**
+- **One progress ring for everything (C2).** New `src/components/ui/ProgressRing.tsx`: gold base ring, electric-blue fill, % in the middle, optional stage text, states idle / running / stopped / error. It is a real `role="progressbar"` with `aria-valuenow/min/max`, it never moves backwards while a job runs, and animation turns off under "reduce motion". The maths lives in `src/components/ui/progressMath.ts` with unit tests (clamping, never-backwards, stage windows, FIX ALL mapping).
+- **Import overlay shows real progress (C3).** The fake timers are gone. The ring now follows the actual work: Reading file 0–5 % (real byte progress), Decoding audio 5–30 % (the browser gives no detail here, so the ring holds and pulses), Analyzing 30–90 % (the background worker reports after each measurement section), Building waveform 90–96 %, Preparing playback 96–100 %. There is a **Cancel** button. If decoding fails, or takes too long on a phone (watchdog: 60 s minimum, about 2 s per MB, max 5 min), you get a clear error with a Dismiss button instead of a hang. (Nothing is saved to storage during import, so the last stage is called "Preparing playback", not "Saving".)
+- **FIX ALL ring (C4).** Same ring around the gold button, driven only by the Director's own stage/pass events: analysis 0–10, AI strategy 10–25, then passes ease toward 95; 100 only when the run finishes. Stage text: "AI is thinking…", "Rendering pass N", "Verifying pass N". Stop stays visible while running; on Stop the ring turns to a stopped state, on a failed run to an error state, then it resets cleanly. The "Cloud AI was not used because…" banner is unchanged.
+- **Drag-and-drop anywhere (C1 check).** You can now drop an audio file anywhere on the workstation. The empty-state Import button / file picker and "Load demo session" were already there.
+- **Faster, lighter import (D1).**
+  - The decoded song is **handed** to the worker instead of copied (one ~138 MB copy fewer for a 6-min song), and the playback buffer reuses the browser's decoded audio instead of building another copy (one more copy fewer, stereo files).
+  - The 1600-point waveforms (before and after) are now built in the worker, not on the screen thread.
+  - The worker's watchdog now resets every time the worker reports progress, so a long song on a slow phone is not killed at a flat 120 s while it is still working; only a silent worker is stopped.
+  - When the rack is empty or bypassed (no fades), the preview reuses the import's measurement instead of measuring the same audio twice. **Note:** the app starts with a starter chain (EQ, compressor, maximizer switched on), so on a normal import the second pass is a real render of that chain, not a duplicate; the saving applies when the rack is empty/bypassed.
+- **Numbers unchanged.** New `src/dsp/analysisIdentity.test.ts` proves analysis is identical with and without the progress hook, that the import "identity render" returns the exact same samples, and that worker-built peaks equal the old ones. A one-off run on the real 6-min `Shadows_Opening_Click_Repair.wav` also compared the new analyzer against the original file: identical JSON.
+
+**Files:** `src/components/ui/ProgressRing.tsx` (new), `src/components/ui/progressMath.ts` (new), `src/components/ui/progressMath.test.ts` (new), `src/dsp/analysisIdentity.test.ts` (new), `src/dsp/analyzer.ts` (optional progress callback only, no maths changed), `src/dsp/dspWorker.ts`, `src/dsp/workerClient.ts`, `src/engine/audioEngine.ts`, `src/App.tsx`, `src/components/console/MasterConsole.tsx`, `src/index.css`.
+
+**Tests:** one existing test's error-message regex is still matched (message now "timed out after N ms without progress"); nothing skipped or weakened.
+
+**Checks run 2026-11-26:** `npm run lint` pass · `npm test` 465/465 pass · `npm run build` pass (main chunk 845.68 kB raw / 825.9 KiB; still over the 800 KiB budget, D2 next) · `NODE_ENV=production PORT=3456 npm start` → `/api/health` `{"ok":true,"aiConfigured":false}`.
+
+**Not verified:** real Android Chrome behaviour (no device here).
+
+**Next:** D2 lazy-loading to get the main chunk under budget, then D3 mobile checks.

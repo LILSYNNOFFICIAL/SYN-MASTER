@@ -157,14 +157,36 @@ export class SynAudioEngine {
     return this.ctx;
   }
 
-  public async decodeFile(file: File): Promise<{
+  public async decodeFile(
+    file: File,
+    opts: {
+      /** 0..1 while the file bytes are read (FileReader progress events). */
+      onReadProgress?: (fraction: number) => void;
+      /** Called once reading is done and the browser decoder starts. */
+      onDecodeStart?: () => void;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<{
     buffer: AudioBuffer;
     channels: Float32Array[];
     sampleRate: number;
   }> {
     const ctx = this.ensureContext();
-    const arrayBuffer = await file.arrayBuffer();
-    const decoded = await ctx.decodeAudioData(arrayBuffer);
+    const abortError = () => {
+      const err = new Error('The operation was cancelled.');
+      err.name = 'AbortError';
+      return err;
+    };
+    if (opts.signal?.aborted) throw abortError();
+    let arrayBuffer: ArrayBuffer | null = await readFileWithProgress(file, opts.onReadProgress, opts.signal);
+    if (opts.signal?.aborted) throw abortError();
+    opts.onDecodeStart?.();
+    const pending = ctx.decodeAudioData(arrayBuffer);
+    // decodeAudioData detaches/consumes the bytes; drop our reference so the encoded file can
+    // be garbage-collected as soon as the decoder is done with it.
+    arrayBuffer = null;
+    const decoded = await pending;
+    if (opts.signal?.aborted) throw abortError();
     if (decoded.length === 0) throw new RangeError('The decoded audio file contains no frames.');
     if (!Number.isFinite(decoded.sampleRate) || decoded.sampleRate < 8000 || decoded.sampleRate > 384000) {
       throw new RangeError(`Unsupported decoded sample rate: ${decoded.sampleRate} Hz`);
@@ -192,16 +214,30 @@ export class SynAudioEngine {
     return buf;
   }
 
-  public setSourceChannels(channels: Float32Array[], sampleRate: number): void {
+  /**
+   * @param playbackBuffer optional already-decoded AudioBuffer holding exactly these samples
+   * (same channel count, length and rate). Reusing it skips a full-length copy on import.
+   */
+  public setSourceChannels(channels: Float32Array[], sampleRate: number, playbackBuffer?: AudioBuffer | null): void {
     this.stop();
-    this.sourceBuffer = this.createAudioBufferFromChannels(channels, sampleRate);
+    const reusable =
+      playbackBuffer &&
+      playbackBuffer.numberOfChannels === channels.length &&
+      playbackBuffer.length === channels[0].length &&
+      playbackBuffer.sampleRate === sampleRate;
+    this.sourceBuffer = reusable ? playbackBuffer : this.createAudioBufferFromChannels(channels, sampleRate);
     this.pauseOffsetSec = 0;
     this.loopStartSec = 0;
     this.loopEndSec = this.sourceBuffer.duration;
   }
 
-  public setReferenceChannels(channels: Float32Array[], sampleRate: number): void {
-    this.referenceBuffer = this.createAudioBufferFromChannels(channels, sampleRate);
+  public setReferenceChannels(channels: Float32Array[], sampleRate: number, playbackBuffer?: AudioBuffer | null): void {
+    const reusable =
+      playbackBuffer &&
+      playbackBuffer.numberOfChannels === channels.length &&
+      playbackBuffer.length === channels[0].length &&
+      playbackBuffer.sampleRate === sampleRate;
+    this.referenceBuffer = reusable ? playbackBuffer : this.createAudioBufferFromChannels(channels, sampleRate);
   }
 
   public setOverrideBuffer(key: string, channels: Float32Array[], sampleRate: number): void {
@@ -1081,4 +1117,40 @@ function makeClipperCurve(ceiling: number, soft: number): Float32Array<ArrayBuff
     curve[i] = soft <= 0 ? hard : hard * (1 - soft) + c * Math.tanh(x / c) * soft;
   }
   return curve;
+}
+
+/** Read a File into an ArrayBuffer with real byte progress where FileReader exists. */
+async function readFileWithProgress(
+  file: File,
+  onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<ArrayBuffer> {
+  if (typeof FileReader === 'undefined' || !onProgress) {
+    const buf = await file.arrayBuffer();
+    onProgress?.(1);
+    return buf;
+  }
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    const onAbort = () => reader.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    reader.onprogress = (ev) => {
+      if (ev.lengthComputable && ev.total > 0) onProgress(ev.loaded / ev.total);
+    };
+    reader.onload = () => {
+      signal?.removeEventListener('abort', onAbort);
+      onProgress(1);
+      resolve(reader.result as ArrayBuffer);
+    };
+    reader.onerror = () => {
+      signal?.removeEventListener('abort', onAbort);
+      reject(reader.error ?? new Error('Could not read the file.'));
+    };
+    reader.onabort = () => {
+      const err = new Error('The operation was cancelled.');
+      err.name = 'AbortError';
+      reject(err);
+    };
+    reader.readAsArrayBuffer(file);
+  });
 }

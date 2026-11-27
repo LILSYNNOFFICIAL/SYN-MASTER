@@ -312,10 +312,23 @@ export function isNoiseLikeFloor(a: { noiseFloorHfRatio?: number }): boolean {
   return a.noiseFloorHfRatio === undefined || a.noiseFloorHfRatio >= 0.05;
 }
 
+/**
+ * Optional progress hook for analyzeAudioBuffer. It is called between measurement sections
+ * with a 0..1 fraction (weights calibrated from section timings). It only reports; it never
+ * reads or changes any measured value, so results are bit-identical with or without it.
+ */
+export type AnalysisProgressCallback = (fraction: number) => void;
+
 export function analyzeAudioBuffer(
   channels: Float32Array[],
   sampleRate: number,
+  onProgress?: AnalysisProgressCallback,
 ): AudioAnalysis {
+  const report = (fraction: number) => {
+    if (onProgress) {
+      try { onProgress(fraction); } catch { /* progress must never break analysis */ }
+    }
+  };
   if (!channels.length) {
     throw new RangeError('Audio analysis requires at least one channel.');
   }
@@ -342,6 +355,7 @@ export function analyzeAudioBuffer(
       }
     }
   }
+  report(0.03);
   const numChannels = channels.length;
   const right = numChannels > 1 ? channels[1] : channels[0];
   const durationSec = length / sampleRate;
@@ -349,6 +363,7 @@ export function analyzeAudioBuffer(
   // 1. Sample Peak, True Peak, Clipping, DC Offset, RMS
   const tpLeft = estimateChannelTruePeak(left);
   const tpRight = numChannels > 1 ? estimateChannelTruePeak(right) : tpLeft;
+  report(0.15);
 
   const samplePeak = Math.max(tpLeft.samplePeak, tpRight.samplePeak);
   const truePeak = Math.max(tpLeft.truePeak, tpRight.truePeak);
@@ -385,6 +400,7 @@ export function analyzeAudioBuffer(
   const truePeakDb = linearToDb(truePeak);
   const dcOffset = Math.max(Math.abs(sumL / Math.max(1, length)), Math.abs(sumR / Math.max(1, length)));
   const clicks = detectClicks(numChannels > 1 ? [left, right] : [left], sampleRate);
+  report(0.25);
 
   // 2. Stereo Correlation & Width
   const denom = Math.sqrt(sumSqL * sumSqR);
@@ -428,13 +444,17 @@ export function analyzeAudioBuffer(
   };
 
   const lowEndCorrelation = measureFilteredCorrelation(designLowPass(120, Math.SQRT1_2, sampleRate));
+  report(0.3);
   const lp150 = designLowPass(150, Math.SQRT1_2, sampleRate);
   const hp150 = designHighPass(150, Math.SQRT1_2, sampleRate);
   const lp3500 = designLowPass(3500, Math.SQRT1_2, sampleRate);
   const hp3500 = designHighPass(3500, Math.SQRT1_2, sampleRate);
   const lowBandCorrelation = measureFilteredCorrelation(lp150);
+  report(0.34);
   const midBandCorrelation = measureFilteredCorrelation(hp150, lp3500);
+  report(0.59);
   const highBandCorrelation = measureFilteredCorrelation(hp3500);
+  report(0.71);
 
   const stereoBandCorrelation = {
     low: Number(lowBandCorrelation.toFixed(3)),
@@ -455,6 +475,7 @@ export function analyzeAudioBuffer(
     sampleRate,
   );
   const integratedLufs = integratedLufsFromBlocks(blockMeanSquares);
+  report(0.95);
 
   const momentaryLufsMax = blockLufsList.reduce((max, value) => Math.max(max, value), integratedLufs);
 
@@ -526,6 +547,7 @@ export function analyzeAudioBuffer(
     frameCount++;
   }
   const transientDensity = Math.min(1, transientHits / Math.max(1, durationSec * 6));
+  report(0.96);
 
   // 5. Spectral Analysis via averaged Hann-windowed 4096-pt FFT across full track span
   const fftSize = 4096;
@@ -770,6 +792,7 @@ export function analyzeAudioBuffer(
     Math.min(50, Math.max(harmonicThdPercent, clipThdPercent)).toFixed(3),
   );
 
+  report(0.97);
   // 6. Noise Floor estimation from 50ms RMS windows (5th percentile of active/quiet frames)
   const noiseWinSamples = Math.max(64, Math.round(sampleRate * 0.05));
   const frameRmsDb: number[] = [];
@@ -813,6 +836,7 @@ export function analyzeAudioBuffer(
   const quietSlice = quietFrames.slice(0, Math.max(1, Math.ceil(quietFrames.length * 0.05)));
   const quietHfSorted = quietSlice.map((f) => f.hf).sort((a, b) => a - b);
   const noiseFloorHfRatio = Number((quietHfSorted[Math.floor(quietHfSorted.length / 2)] ?? 0).toFixed(4));
+  report(0.98);
 
   return {
     durationSec: Number(durationSec.toFixed(3)),
