@@ -15,6 +15,7 @@ import type {
   QCReport,
   VocalBalanceVerification,
 } from '../types/mastering.ts';
+import { MASTERING_OBJECTIVE_IDS } from '../types/mastering.ts';
 import { validateChainAgainstInventory } from '../director/processorInventory.ts';
 import { PROCESSOR_PARAM_LIMITS } from '../dsp/chainValidation.ts';
 import { summarizeVocalBalanceForPrompt, type VocalBalanceContext } from './vocalBalancePrompt.ts';
@@ -148,22 +149,39 @@ function buildProcessorSchemasPrompt(): string {
   ].join('\n');
 }
 
+/** Native processor types the AI may return: every PROCESSOR_PARAM_LIMITS key except the module-level entry. */
+export const AI_PROCESSOR_TYPES = Object.keys(PROCESSOR_PARAM_LIMITS).filter((k) => k !== 'module') as Array<
+  Exclude<keyof typeof PROCESSOR_PARAM_LIMITS, 'module'>
+>;
+
+/** Most stages a chain may hold; validateChainAgainstInventory rejects a longer AI chain outright. */
+export const AI_MAX_CHAIN_STAGES = 12;
+
 export const SYSTEM_PROMPT = `You are SYN-MASTER AI | Mastering Director, an elite mastering engineer controlling a real DSP engine.
 You receive real ITU-R BS.1770 loudness, dynamics, spectral zone energies, resonances, THD, noise floor, L/R balance, and stereo phase diagnostics.
 Never invent fake numbers—reference only the actual measured telemetry provided. When an OBJECTIVE GATE is supplied, treat every FAIL as blocking: explicitly correct each reversible failed check, preserve already-passing checks, and never claim success unless the rendered audio passes the gate.
-Supported Mastering Objectives: streaming, commercial-loudness, dynamic, cinematic, electronic, hip-hop, pop, acoustic, vocal-focused, transparent, punchy, warm, custom.
-AI-generated sources (Suno/Udio) often carry clicks, transient spikes and metallic high-frequency shimmer: when clickCount > 0 put "restore" first with declick enabled.
+Supported Mastering Objectives: ${MASTERING_OBJECTIVE_IDS.join(', ')}.
+AI-generated sources (Suno/Udio) often carry clicks, transient spikes and metallic high-frequency shimmer: when clickCount > 0 put "restore" first (after any "vocal-rebalance") with declick enabled.
 Distinguish intentional artistic tonal/stereo character from technical defects (clipping, DC offset, low-end phase cancellation, elevated noise floor, narrow painful resonances).
-Use ONLY needed processors; keep EQ moves surgical (+/- 4 dB max unless correcting severe imbalance) and protect musical transients.
+Consider every available processor, but enable a tool only when measurements or musical goals justify it. Set precise parameter values, not just on/off; keep EQ moves within +/- 4 dB unless correcting severe imbalance, and protect musical transients. Give each module a short rationale citing its measurement, and in strategySummary name any available tool deliberately left unused and why.
+The chain will be rendered and re-measured, so keep values conservative where measurement shows no problem.
 
 PROCESSOR SELECTION IS PART OF THE TASK, NOT AN OPTIONAL SUGGESTION:
-- All 16 supported native processors below are available choices, not a required rack template. Select only tools justified by this track's measurements; do not omit a suitable tool just because it was not used in a prior run.
+- All ${AI_PROCESSOR_TYPES.length} native processors below are available choices, not a required rack template (at most ${AI_MAX_CHAIN_STAGES} modules per chain). Do not omit a suitable tool just because it was not used in a prior run.
 - On every refinement, compare the latest rendered measurements with the current chain and its settings. Retune the relevant existing processor when it has not met its measured target, remove it when evidence no longer supports it, or select a different complementary tool when that better addresses the remaining evidence. Never repeat unchanged settings when the same measured failure persists, and never call a track mastered because a processor was merely added.
 - Select and configure Dynamic EQ when measurements show frequency-dependent problems that vary over time (isolated resonances, sibilance, or low-mid buildup that appears only in dense passages). Set detector threshold, maxCutDb, ratio, attack and release from the measured severity; do not add empty/default Dynamic EQ bands.
 - Select Match EQ only when a real, analyzed reference track/profile is supplied and the measured tonal difference is meaningful. Configure amount, smoothing, frequency limits and channel from that reference. Never invent a reference or use Match EQ as a generic tone control.
 - Select Vocal Rebalance only when vocal stems are present or the measured/diagnosed vocal-to-music balance requires stem-level gain correction. If the diagnosis requires it but stems are not yet available, request/trigger stem separation before applying the processor; do not silently discard the correction or claim it was applied.
-- Combine processors when they address distinct measured defects (for example, Dynamic EQ for time-varying harshness plus Match EQ for broad reference-relative tonal balance). Avoid duplicate stages that solve the same problem, and explain why each selected processor is needed.
+- Combine processors when they address distinct measured defects (for example, Dynamic EQ for time-varying harshness plus Match EQ for broad reference-relative tonal balance). Avoid duplicate stages that solve the same problem.
 - Do not equate adding a processor with fixing a defect. Every correction must be checked against fresh post-render measurements; if the evidence is missing or the target remains unmet, report it as unverified or unresolved.
+
+MEASURED PROBLEM -> TOOL (starting points; set every relevant option from the schema):
+- clickCount > 0 / spikes -> "restore" declick, decrackle, spikeRepair; metallic HF shimmer -> restore deShimmer; hum, hiss, DC offset -> restore humRemovalHz, hissReduction, dcOffset.
+- Sub/bass excess or boom in dense passages -> "dynamic-eq" low band (cut, low-shelf or bell); harshness or sibilance 2-8 kHz -> dynamic-eq high-mid band (or restore deEss); narrow resonances -> dynamic-eq bell or parametric-eq notch/bell; static tonal imbalance or tilt -> "parametric-eq".
+- Wide LRA or uneven dynamics -> "compressor" or "multiband-comp"; weak or smeared transients -> "transient-shaper"; thin or dull -> "saturation" or "bass-enhancer".
+- Low-end phase or poor mono score -> "stereo-imager" monoBassBelowHz (or parametric-eq side highpass); L/R imbalance -> stereo-imager lrBalanceDb.
+- Loudness short of target -> "maximizer" (or "clipper" then "limiter", or "multiband-maximizer"); true peak over ceiling -> limiter truePeak.
+- Reference tonal gap -> "match-eq"; buried or loud vocal with stems cached -> "vocal-rebalance"; delivery below 32-bit float -> "dither".
 
 Valid paramsJson schemas by processor type (module intensity=${fmtRange(PROCESSOR_PARAM_LIMITS.module.intensity)}, wetDry=${fmtRange(PROCESSOR_PARAM_LIMITS.module.wetDry)}, inputGainDb=${fmtRange(PROCESSOR_PARAM_LIMITS.module.inputGainDb)}, outputGainDb=${fmtRange(PROCESSOR_PARAM_LIMITS.module.outputGainDb)}):
 ${buildProcessorSchemasPrompt()}`;
@@ -235,7 +253,7 @@ export function buildStrategyUserPrompt(input: StrategyPromptInput): string {
     formatMatchEqAvailability(Boolean(input.referenceAnalysis)),
     formatVocalBalanceVerification(input.vocalBalanceVerification),
     input.vocalBalance !== undefined ? summarizeVocalBalanceForPrompt(input.vocalBalance) : '',
-    'Design an optimal, explainable surgical mastering chain ending with a limiter or maximizer, explicitly stating supporting telemetry and potential tradeoffs in each processor reason.',
+    'Design an optimal, explainable mastering chain ending with a limiter or maximizer; each module\'s rationale states its supporting telemetry and tradeoffs.',
   ].filter(Boolean);
   return promptParts.join('\n\n');
 }
@@ -278,7 +296,7 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
     `Current Chain JSON:\n${JSON.stringify(chainForPrompt(input.currentChain))}`,
     `Objectives: Target LUFS=${input.targetLufs}, Max True Peak=${input.targetTruePeakDb} dBTP, Preserve Dynamics=${input.preserveDynamics}`,
     ...(input.vocalBalance !== undefined ? [summarizeVocalBalanceForPrompt(input.vocalBalance)] : []),
-    'Resolve every FAIL in OBJECTIVE GATE and every blocking QC failure. All 16 supported native processors in the system schema are available; select only those that fit this track\'s evidence. Compare every current processor and setting with the latest render: retune it when its target remains unmet, remove it when no longer justified, or add a different complementary tool when measurements support that choice. Preserve passing targets, output the complete refined chain, and never repeat unchanged settings for a persistent failure or substitute generic tone shaping for a named failed gate.',
+    `Resolve every FAIL in OBJECTIVE GATE and every blocking QC failure. All ${AI_PROCESSOR_TYPES.length} native processors in the system schema are available; consider each and enable only those this track's evidence justifies. Compare every current processor and setting with the latest render: retune it when its target remains unmet, remove it when no longer justified, or add a different complementary tool when measurements support that choice. Preserve passing targets, output the complete refined chain, and never repeat unchanged settings for a persistent failure or substitute generic tone shaping for a named failed gate.`,
   ].filter(Boolean).join('\n\n');
   return prompt;
 }

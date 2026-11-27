@@ -41,7 +41,22 @@ test('strategy and refinement prompts expose every supported processor and requi
   }
   assert.match(SYSTEM_PROMPT, /never repeat unchanged settings when the same measured failure persists/i);
   assert.match(refinePrompt, /retune it when its target remains unmet/i);
-  assert.match(refinePrompt, /select only those that fit this track's evidence/i);
+  assert.match(refinePrompt, /consider each and enable only those this track's evidence justifies/i);
+});
+
+test('E3: prompt asks the AI to consider every tool, justify each, set precise values and explain unused tools', () => {
+  const strategyPrompt = buildStrategyUserPrompt({ analysis, mode: 'ai-auto', objective: 'pop' });
+  for (const text of [SYSTEM_PROMPT, strategyPrompt]) {
+    assert.ok(!/use ONLY needed processors/i.test(text), 'old "use ONLY needed processors" wording removed');
+    assert.ok(!/surgical/i.test(text), 'old "surgical" wording removed');
+  }
+  assert.match(SYSTEM_PROMPT, /Consider every available processor, but enable a tool only when measurements or musical goals justify it/);
+  assert.match(SYSTEM_PROMPT, /Set precise parameter values, not just on\/off/);
+  assert.match(SYSTEM_PROMPT, /short rationale/);
+  assert.match(SYSTEM_PROMPT, /in strategySummary name any available tool deliberately left unused and why/);
+  assert.match(SYSTEM_PROMPT, /The chain will be rendered and re-measured, so keep values conservative where measurement shows no problem/);
+  assert.match(strategyPrompt, /rationale states its supporting telemetry and tradeoffs/);
+  assert.match(SYSTEM_PROMPT, /"restore" first \(after any "vocal-rebalance"\)/, 'restore-first rule agrees with vocal-rebalance always first');
 });
 
 test('refinement receives the reference and the latest unresolved findings', () => {
