@@ -159,25 +159,6 @@ export const EqGraph: React.FC<Props> = ({
   const pinchRef = useRef<null | { dist: number; mid: number; view: TimeView; anchor: number }>(null);
   const tl = (clientX: number, rect: DOMRect) => timelineSecondsFromPointer(clientX, rect.left, rect.width, durationSec, viewRef.current);
 
-  const updateFadeFromPointer = (side: 'in' | 'out', sec: number) => {
-    const current = fadesRef.current;
-    if (!current || !onFadesChange || durationSec <= 0) return;
-    const maxLen = durationSec * 0.5;
-    const next = side === 'in'
-      ? { ...current, inSec: Number(Math.min(maxLen, sec).toFixed(2)) }
-      : { ...current, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) };
-    // Keep same-gesture and immediately-following gestures based on the newest value,
-    // even before React has committed the parent state update and rerendered this graph.
-    fadesRef.current = next;
-    onFadesChange(next);
-  };
-
-  const onMove = (e: React.PointerEvent) => {
-    if (fadeDragRef.current && fadesRef.current && onFadesChange && durationSec > 0 && svgRef.current) {
-      const rect = svgRef.current.getBoundingClientRect();
-      updateFadeFromPointer(fadeDragRef.current, tl(e.clientX, rect));
-      return;
-    }
   const toLocal = (e: { clientX: number; clientY: number }) => {
     const r = svgRef.current!.getBoundingClientRect();
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
