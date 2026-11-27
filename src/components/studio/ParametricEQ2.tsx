@@ -50,7 +50,7 @@ interface Props {
   onSeek?: (sec: number) => void;
   /** Fade curves are rendered over the same waveform blanket. */
   fades?: FadeSettings;
-  onFadesChange?: (next: FadeSettings) => void;
+  onFadesChange?: (next: FadeSettings | ((current: FadeSettings) => FadeSettings)) => void;
   /** Source (pre-chain) analysis. */
   preSpectrum?: AudioAnalysis | null;
   /** Rendered (post-chain) analysis. */
