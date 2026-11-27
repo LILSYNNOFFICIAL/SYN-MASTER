@@ -409,17 +409,24 @@ async function runWavExportE2E(browser) {
     // Use the last visible graph; hidden responsive/tab copies may still exist in the DOM.
     const box = await waveform.boundingBox();
     assert.ok(box && box.width > 100, `Imported track must expose a visible interactive EQ waveform (matches: ${await page.locator('.syn-eqx-svg').count()})`);
-    const fadeInY = box.y + box.height * 0.05;
-    const fadeOutY = box.y + box.height * (28 / 240);
-    const dragHandle = async (fromX, toX, y) => {
-      await page.mouse.move(fromX, y);
+    const dragFadeHandle = async (side, toXRatio) => {
+      const handle = page.locator(`[data-fade-handle="${side}"]:visible`);
+      await handle.waitFor({ state: 'visible', timeout: 5000 });
+      const handleBox = await handle.boundingBox();
+      assert.ok(handleBox, `The visible ${side} fade handle must have a hit target`);
+      const fromX = handleBox.x + handleBox.width / 2;
+      const fromY = handleBox.y + handleBox.height / 2;
+      const toX = box.x + box.width * toXRatio;
+      await page.mouse.move(fromX, fromY);
       await page.mouse.down();
-      await page.mouse.move(toX, y, { steps: 4 });
+      await page.mouse.move(toX, fromY, { steps: 4 });
       await page.mouse.up();
     };
     step('fades');
-    await dragHandle(box.x + 10, box.x + box.width * 0.1, fadeInY);
-    await dragHandle(box.x + box.width - 10, box.x + box.width * 0.9, fadeOutY);
+    // Drag the actual SVG handles rather than approximating their hit targets
+    // with fixed pixel offsets that vary with viewport and SVG scaling.
+    await dragFadeHandle('in', 0.1);
+    await dragFadeHandle('out', 0.9);
     const fadeControls = await page.locator('.syn-player-fades').innerText();
     assert.match(fadeControls, /Fade in\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-in');
     assert.match(fadeControls, /Fade out\s+0\.10s/i, 'Timeline interaction must set a non-zero fade-out');
