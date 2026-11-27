@@ -57,7 +57,7 @@ export interface MasterConsoleProps {
   scopeChannels: Float32Array[] | null;
   waveformPeaks: number[];
   fades: FadeSettings;
-  onFadesChange: (next: FadeSettings | ((current: FadeSettings) => FadeSettings)) => void;
+  onFadesChange: (next: FadeSettings) => void;
   durationSec: number;
   hasTrack: boolean;
   running: boolean;
