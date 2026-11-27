@@ -115,15 +115,24 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectru
     setSelectedId(null);
   }, [commit]);
 
-  const addBand = useCallback((freq = 1200) => {
+  const addBand = useCallback((freq?: number, gainDb = -3) => {
     const current = viewRef.current;
     if (!current || current.bands.length >= MAX_DYNAMIC_EQ_BANDS) return;
     const used = new Set(current.bands.map((b) => b.id));
     let n = current.bands.length + 1;
     while (used.has('d' + n)) n++;
+    const preferredFreqs = [1200, 500, 3000, 200, 7000, 80, 1600, 10000];
+    const separatedFreq = preferredFreqs.find((candidate) => current.bands.every((band) => Math.max(candidate, band.freq) / Math.min(candidate, band.freq) > 1.5));
+    const distanceFromBands = (candidate: number) => current.bands.length
+      ? Math.min(...current.bands.map((band) => Math.abs(Math.log2(candidate / band.freq))))
+      : Number.POSITIVE_INFINITY;
+    const fallbackFreq = preferredFreqs.reduce((best, candidate) => distanceFromBands(candidate) > distanceFromBands(best) ? candidate : best, preferredFreqs[0]);
+    const nextFreq = freq ?? separatedFreq ?? fallbackFreq;
+    const mode = gainDb > 0 ? 'boost' : 'cut';
+    const rangeDb = gainDb > 0 ? Math.max(0.05, gainDb) : Math.min(-0.05, gainDb);
     const nextBand: Band = {
-      id: 'd' + n, enabled: true, freq: clamp(freq, 30, 16000), q: 2,
-      thresholdDb: -20, maxCutDb: -3, ratio: LEGACY_RATIO, mode: 'cut',
+      id: 'd' + n, enabled: true, freq: clamp(nextFreq, 30, 16000), q: 2,
+      thresholdDb: -20, maxCutDb: rangeDb, ratio: LEGACY_RATIO, mode,
       attackMs: 10, releaseMs: 110,
     };
     commit({ ...current, bands: [...current.bands, nextBand] });
@@ -159,7 +168,7 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectru
   }), [maxCurves, liveCurves, liveAvailable]);
 
   const nodes: EqGraphNode[] = bands.map((b, i) => ({
-    id: b.id, freq: b.freq, yDb: 0, yMode: 'none', q: b.q, enabled: b.enabled,
+    id: b.id, freq: b.freq, yDb: rangeOf(b), yMode: 'gain', q: b.q, enabled: b.enabled,
     color: BAND_COLORS[i % BAND_COLORS.length], label: String(i + 1),
     description: 'Band ' + (i + 1) + ': ' + DYNAMIC_TYPE_LABELS[b.type ?? 'bell'] + ', ' + fmtHz(b.freq) + ', Q ' + b.q.toFixed(2) + ', ' + modeOf(b) + (b.enabled ? '' : ', off') + (b.solo ? ', soloed' : ''),
     showQ: true, solo: b.solo,
@@ -255,8 +264,17 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectru
         nodes={nodes}
         selectedId={selectedId}
         onSelect={setSelectedId}
-        onNodeChange={(id, patch, phase) => patchBand(id, patch, phase)}
-        onAdd={(freq) => addBand(freq)}
+        onNodeChange={(id, patch, phase) => {
+          const band = bands.find((item) => item.id === id);
+          if (!band) return;
+          if (patch.yDb !== undefined) {
+            const mode = patch.yDb > 0 ? 'boost' : 'cut';
+            patchBand(id, { ...patch, mode, maxCutDb: patch.yDb > 0 ? Math.max(0.05, patch.yDb) : Math.min(-0.05, patch.yDb) }, phase);
+          } else {
+            patchBand(id, patch, phase);
+          }
+        }}
+        onAdd={(freq, gainDb) => addBand(freq, gainDb)}
         onDelete={removeBand}
         onToggleSolo={toggleSolo}
         curves={curves}
@@ -268,7 +286,7 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectru
         onSeek={onSeek}
         fades={fades}
         onFadesChange={onFadesChange}
-        ariaLabel="Dynamic EQ frequency response graph. Click or drag the waveform background to seek; focus the graph background and use Left/Right to seek (Shift for 1-second steps, Home/End for start/end). Drag a node to change frequency, use the handles or mouse wheel to change Q, and double-click to add a band."
+        ariaLabel="Dynamic EQ frequency response graph. Click or drag the waveform background to seek; focus the graph background and use Left/Right to seek (Shift for 1-second steps, Home/End for start/end). Drag a node horizontally to change frequency and vertically to set its maximum cut or boost; use the handles or mouse wheel to change Q, and double-click to add a band."
         className="syn-deq-graph"
       >
         {popover}
