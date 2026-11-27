@@ -49,9 +49,9 @@ function aiRateLimiter(
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const result = allowAiRequest(ip);
   res.setHeader('X-RateLimit-Limit', '20');
-  res.setHeader('X-RateLimit-Remaining', String(result.remaining));
+  res.setHeader('X-RateLimit-Remaining', String(result.remaining ?? 0));
   if (!result.allowed) {
-    const retryAfterSec = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
+    const retryAfterSec = Math.max(1, Math.ceil((result.retryAfterMs ?? 1000) / 1000));
     res.setHeader('Retry-After', String(retryAfterSec));
     res.status(429).json({ error: 'Rate limit exceeded. Try again shortly.' });
     return;
@@ -69,7 +69,7 @@ app.post('/api/ai/session', (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const result = guestBootstrapLimiter(ip);
   if (!result.allowed) {
-    const retryAfterSec = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
+    const retryAfterSec = Math.max(1, Math.ceil((result.retryAfterMs ?? 1000) / 1000));
     res.setHeader('Retry-After', String(retryAfterSec));
     res.status(429).json({
       error: 'Cloud AI session setup is temporarily rate-limited. Try again shortly.',
@@ -116,6 +116,14 @@ if (sharedSpendMode === 'local' && process.env.NODE_ENV === 'production' && proc
 const sharedAiSpendStore = sharedSpendMode === 'firestore' ? createFirestoreAiSpendStore() : null;
 app.use('/api/ai', aiRateLimiter, aiGuestSession.middleware, aiConcurrencyGuard);
 
+async type AiSpendDecision = {
+  allowed: boolean;
+  remaining?: number;
+  retryAfterMs?: number;
+  message?: string;
+  scope?: string;
+};
+
 async function consumeAiSpend(res: express.Response, kind: 'strategy' | 'refine'): Promise<boolean> {
   const sessionId = String(res.locals.guestSessionId ?? '');
   if (!sessionId) {
@@ -123,14 +131,14 @@ async function consumeAiSpend(res: express.Response, kind: 'strategy' | 'refine'
     return false;
   }
 
-  const localCheck = aiSpendLimiter.peek(sessionId, kind);
+  const localCheck = aiSpendLimiter.peek(sessionId, kind) as AiSpendDecision;
   if (!localCheck.allowed) {
-    const retryAfterSec = Math.max(1, Math.ceil(localCheck.retryAfterMs / 1000));
+    const retryAfterSec = Math.max(1, Math.ceil((localCheck.retryAfterMs ?? 1000) / 1000));
     res.setHeader('Retry-After', String(retryAfterSec));
     res.status(429).json({
-      error: localCheck.message,
+      error: localCheck.message ?? 'Cloud AI is rate-limited. FIX ALL keeps working with the local DSP planner.',
       code: 'ai_rate_limited',
-      scope: localCheck.scope,
+      scope: localCheck.scope ?? 'global-day',
       retryAfterSec,
       fallback: 'local-dsp-planner',
     });
@@ -164,20 +172,20 @@ async function consumeAiSpend(res: express.Response, kind: 'strategy' | 'refine'
     }
   }
 
-  const result = aiSpendLimiter.consume(sessionId, kind);
+  const result = aiSpendLimiter.consume(sessionId, kind) as AiSpendDecision;
   if (!result.allowed) {
-    const retryAfterSec = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
+    const retryAfterSec = Math.max(1, Math.ceil((result.retryAfterMs ?? 1000) / 1000));
     res.setHeader('Retry-After', String(retryAfterSec));
     res.status(429).json({
-      error: result.message,
+      error: result.message ?? 'Cloud AI is rate-limited. FIX ALL keeps working with the local DSP planner.',
       code: 'ai_rate_limited',
-      scope: result.scope,
+      scope: result.scope ?? 'global-day',
       retryAfterSec,
       fallback: 'local-dsp-planner',
     });
     return false;
   }
-  res.setHeader('X-AI-Budget-Remaining', String(result.remaining));
+  res.setHeader('X-AI-Budget-Remaining', String(result.remaining ?? 0));
   return true;
 }
 // Offline codec jobs are CPU-intensive but must not compete with AI requests for the
@@ -187,9 +195,9 @@ app.use('/api/export', (req, res, next) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const result = allowExportRequest(ip);
   res.setHeader('X-RateLimit-Limit', '30');
-  res.setHeader('X-RateLimit-Remaining', String(result.remaining));
+  res.setHeader('X-RateLimit-Remaining', String(result.remaining ?? 0));
   if (!result.allowed) {
-    res.setHeader('Retry-After', String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))));
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((result.retryAfterMs ?? 1000) / 1000))));
     req.resume();
     res.status(429).json({ error: 'Export rate limit exceeded. Try again shortly.' });
     return;
