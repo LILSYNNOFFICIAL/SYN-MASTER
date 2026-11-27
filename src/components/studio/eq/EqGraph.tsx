@@ -304,6 +304,8 @@ export const EqGraph: React.FC<Props> = ({
 
   const prePath = useMemo(() => (analyzer === 'pre' || analyzer === 'both' ? spectrumPath(preSpectrum, analyzer === 'pre') : null), [analyzer, preSpectrum]);
   const postPath = useMemo(() => (analyzer === 'post' || analyzer === 'both' ? spectrumPath(postSpectrum ?? preSpectrum, true) : null), [analyzer, postSpectrum, preSpectrum]);
+  // Upper envelope outline of the analyser blanket, drawn as a translucent neon line.
+  const neonLine = useMemo(() => (analyzer === 'off' ? null : spectrumPath(analyzer === 'pre' ? preSpectrum : postSpectrum ?? preSpectrum, false)), [analyzer, postSpectrum, preSpectrum]);
 
   const waveSource = getWaveformSource(waveformPeaks);
   // Peaks measured before the fades (dry / bypassed view) get the fade gain applied here so
@@ -492,6 +494,17 @@ export const EqGraph: React.FC<Props> = ({
             <stop offset="50%" stopColor="#2EA8FF" stopOpacity={0.12} />
             <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0.32} />
           </linearGradient>
+          <linearGradient id={`${uid}-neon`} x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#3FE0FF" />
+            <stop offset="38%" stopColor="#8B5CF6" />
+            <stop offset="70%" stopColor="#E040FB" />
+            <stop offset="100%" stopColor="#F5C451" />
+          </linearGradient>
+          <linearGradient id={`${uid}-neonfill`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.2} />
+            <stop offset="55%" stopColor="#3FE0FF" stopOpacity={0.06} />
+            <stop offset="100%" stopColor="#3FE0FF" stopOpacity={0} />
+          </linearGradient>
           <filter id={`${uid}-glow`} x="-20%" y="-20%" width="140%" height="140%">
             <feGaussianBlur stdDeviation="2.2" result="b" />
             <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
@@ -530,7 +543,13 @@ export const EqGraph: React.FC<Props> = ({
             )}
           </g>
         )}
-        {postPath && <path d={postPath} className="syn-eqx-spec-post" pointerEvents="none" />}
+        {postPath && <path d={postPath} className="syn-eqx-spec-post" pointerEvents="none" style={neonLine ? { fill: `url(#${uid}-neonfill)`, stroke: 'none' } : undefined} />}
+        {neonLine && (
+          <g className="syn-wf-neon" pointerEvents="none" data-envelope="neon">
+            <path d={neonLine} className="syn-wf-neon-bloom" fill="none" stroke={`url(#${uid}-neon)`} />
+            <path d={neonLine} className="syn-wf-neon-line" fill="none" stroke={`url(#${uid}-neon)`} />
+          </g>
+        )}
         {curves.spectra?.map((sp) => {
           const d = curvePath(sp.freqs as number[], sp.values);
           return (

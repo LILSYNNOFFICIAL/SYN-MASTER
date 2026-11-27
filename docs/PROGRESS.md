@@ -147,3 +147,8 @@ Dated entries, newest last, so work can resume if a session is cut off.
 - The EQ curve, nodes and analyser stay frequency-based; only the waveform, fades, fade handles, playhead and seeking follow the zoomed time window.
 - Bundle: zoom bar, zoom detail and the waveform styles are lazy chunks; main chunk 798.4 KiB raw / 245.3 KiB gzip (limit 800 / 250). 498 tests pass.
 - Next: neon envelope line.
+
+## 2026-11-26 — Waveform part 4/4: neon envelope line
+- The upper envelope outline over the waveform (the analyser blanket's top line) is now a semi-transparent neon gradient: cyan -> violet -> magenta -> gold, with a soft bloom and a faint violet-to-cyan gradient fill under it.
+- Cheap on phones: the bloom is a wide translucent stroke (no blur filter on touch / narrow screens); desktop adds a small blur and a slow breathing glow that is off for prefers-reduced-motion.
+- Test: EqGraph render test (neon envelope, both fade lines, EQ curve). 499 tests pass. Main chunk 799.4 KiB raw / 245.5 KiB gzip (limit 800 / 250) - very little headroom left.

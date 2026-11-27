@@ -77,6 +77,23 @@ export const WAVEFORM_CSS = `
   .syn-wfzoom-grip.is-left { left: -6px; }
   .syn-wfzoom-grip.is-right { right: -6px; }
 }
+/* ---- Neon upper envelope (analyser outline): cyan > violet > magenta > gold ---- */
+.syn-wf-neon-line {
+  stroke-width: 1.6; stroke-opacity: 0.78; stroke-linejoin: round; stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+/* Bloom = a wide translucent copy of the line (no blur filter on phones: cheap). */
+.syn-wf-neon-bloom {
+  stroke-width: 7; stroke-opacity: 0.16; stroke-linejoin: round; stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+@media (pointer: fine) and (min-width: 700px) {
+  .syn-wf-neon-bloom { filter: blur(2.5px); stroke-opacity: 0.3; }
+}
+@media (prefers-reduced-motion: no-preference) and (pointer: fine) {
+  .syn-wf-neon-bloom { animation: syn-wf-neon-breathe 4.8s ease-in-out infinite; }
+}
+@keyframes syn-wf-neon-breathe { 0%, 100% { stroke-opacity: 0.22; } 50% { stroke-opacity: 0.36; } }
 `;
 
 let injected = false;

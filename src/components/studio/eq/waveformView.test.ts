@@ -80,3 +80,24 @@ test('zoomed envelope recomputes at higher resolution from the audio', () => {
   assert.deepEqual(wide, direct, 'block pyramid gives the same peaks as a raw scan');
   assert.ok(blanketPathFromEnvelope(fine, 640, 240)?.endsWith('Z'));
 });
+
+test('EQ graph draws the neon envelope, smooth fade lines and keeps the EQ curve frequency-based', async () => {
+  const React = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { EqGraph } = await import('./EqGraph');
+  const freqs = [20, 1000, 20000];
+  const analysis = { spectrumBinsFreq: [20, 100, 1000, 10000, 20000], spectrumBinsDb: [-20, -18, -30, -45, -60] };
+  const html = renderToStaticMarkup(React.createElement(EqGraph, {
+    nodes: [], selectedId: null, onSelect: () => {}, onNodeChange: () => {},
+    curves: { freqs, main: [0, 0, 0] },
+    postSpectrum: analysis as never, analyzer: 'post',
+    waveformPeaks: Array.from({ length: 400 }, (_, i) => 0.3 + 0.2 * Math.sin(i / 9)),
+    durationSec: 120, fades: { inSec: 6, outSec: 10, inCurve: 'scurve', outCurve: 'linear' }, onFadesChange: () => {},
+    ariaLabel: 'EQ',
+  }));
+  assert.match(html, /data-envelope="neon"/, 'neon envelope group rendered');
+  assert.equal((html.match(/syn-wf-neon-line/g) ?? []).length, 1);
+  assert.match(html, /data-fade-line="in"/);
+  assert.match(html, /data-fade-line="out"/);
+  assert.match(html, /data-curve="main"/, 'EQ curve still drawn');
+});
