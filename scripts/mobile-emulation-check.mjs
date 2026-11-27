@@ -59,7 +59,7 @@ async function runViewport(browser, width, height) {
   page.on('pageerror', (e) => errors.push(e.message));
   try {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: /Try the demo mix/i }).click({ timeout: 20000 });
+    await page.getByRole('button', { name: /Load demo session|Try the demo mix/i }).click({ timeout: 20000 });
     await page.locator('.syn-eqx-svg:visible').last().waitFor({ state: 'visible', timeout: 30000 });
     const docWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     assert.ok(docWidth <= width + 1, `no horizontal page scroll at ${width}px (document ${docWidth}px)`);

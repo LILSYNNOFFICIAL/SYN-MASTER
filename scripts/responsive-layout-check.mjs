@@ -141,7 +141,7 @@ async function runViewport(browser, width, height, mobile) {
       assert.match(await cloudHelpLink.getAttribute('href') ?? '', /#cloud-ai$/, 'First-use dialog must link to the Cloud AI guide');
       await cloudHelpDialog.getByRole('button', { name: /Close Cloud AI help/i }).click();
       assert.equal(await cloudHelpDialog.count(), 0, 'Cloud AI help dialog must close cleanly');
-      await page.getByRole('button', { name: /Try the demo mix/i }).click({ timeout: 15000 });
+      await page.getByRole('button', { name: /Load demo session|Try the demo mix/i }).click({ timeout: 15000 });
     } else {
       await page.locator('[data-testid="syn-console"]').waitFor({ state: 'visible', timeout: 15000 });
       assert.equal(await page.locator('.syn-wordmark').isVisible(), true, 'Desktop must show the SYN-MASTER serif wordmark');

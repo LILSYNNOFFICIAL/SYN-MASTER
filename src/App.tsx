@@ -1215,12 +1215,9 @@ export default function App() {
     [loadChannelsAsSource],
   );
 
-  // Auto-load demo mix on startup if no active track is loaded (bypassing initial import screen completely)
-  useEffect(() => {
-    if (!activeTrack) {
-      handleLoadDemoSource('main-mix');
-    }
-  }, [activeTrack, handleLoadDemoSource]);
+  // No automatic demo load: generating and analysing the 14 s demo mix runs on the main thread (about 0.8 s on a
+  // fast desktop, several seconds on a phone) and re-ran every time the track was closed. The workstation opens
+  // straight into the console with Import ("Load demo session" stays available as an explicit button).
 
   const handleUploadSourceFile = useCallback(
     async (file: File) => {
