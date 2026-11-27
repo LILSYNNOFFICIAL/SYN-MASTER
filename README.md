@@ -52,7 +52,7 @@ SYN MASTER is an AI-assisted mastering workstation (React + TypeScript + Vite fr
 
 ## Current handoff: AI evidence, processor telemetry, and EQ interactions (Nov 27, 2026)
 
-Current `main`: `01ae34cc95cff1ae35fdadb5d3f2cf4dbea4c3fa`.
+Application code reviewed at `01ae34cc95cff1ae35fdadb5d3f2cf4dbea4c3fa`; this handoff update is on `main`.
 
 - Autonomous and assisted FIX ALL runs now attempt source stem analysis before AI tool selection, so the strategy prompt receives a measured vocal balance or an explicit unavailable result. This adds separation time when stems are not already cached.
 - Each rendered Director checkpoint now records processor peak and gain-reduction telemetry. Diagnostic exports show the measurements for the exact modules in each pass, including whether Vocal Rebalance applied and its effective stem gains. Dynamic EQ traces remain separate preview data.
