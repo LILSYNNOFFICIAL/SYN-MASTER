@@ -96,3 +96,22 @@ Dated entries, newest last, so work can resume if a session is cut off.
 **Not verified:** a live Gemini call with the new enum schema (no API key here). The Vocal Rebalance gate runs in App.tsx (other agent's file), so its changes are detected by comparing the AI's answer with what the Director receives, not inside App.tsx.
 
 **Next:** end-to-end proof test that every AI parameter reaches the render and changes the audio.
+
+## 2026-11-26 — AI drives every tool: end-to-end parameter proof
+
+**What changed (plain language)**
+- New test `src/director/aiParamEndToEnd.test.ts`. For **all 16 processor types and every parameter in the limits table** (153 cases, including Dynamic EQ bands/threshold/ratio/attack/release/knee/mode/channel/sidechain, parametric EQ bands/shapes/subtypes/slopes/channels, multiband compressor and multiband maximizer per band, maximizer, limiter, clipper, restore, Match EQ, Vocal Rebalance with stems, dither, plus the on/off switches and the module mix/intensity/gain controls) a mocked AI answer goes through the same path Fix All uses: AI answer → validation → Director merge → Match EQ guard → the real offline render.
+- It checks two things for every setting: (a) the rendered chain really holds the AI's value, or the change is recorded in the log (never silent), and (b) changing that one value really changes the rendered audio.
+- **Result: no setting is silently dropped and none is ignored by the audio engine.** Only Match EQ amount / max boost / max cut get capped (the Director's safety ceiling for AI-proposed Match EQ), and that cap is now logged. The full table is in `docs/AI_PARAMETER_PROOF.md`.
+- While building the test, a few settings first looked "dead". Each one was a test-signal issue, not a wiring bug:
+  - Proportional Q is identical to a normal bell at exactly 6 dB, by design.
+  - Dynamic EQ boost only works when the band is above its threshold.
+  - De-crackle and spike repair have nothing left to fix once De-click already removed the clicks.
+  - The multiband maximizer's high band was below its threshold, and its output limiter was never reached.
+  
+  The test now uses settings where each control has something to act on. No DSP code was changed.
+- Small latency-safe tweak: the schema now tells the AI to send *either* `rationale` or `reason`, not both, so the answer does not grow.
+
+**Checks run 2026-11-26:** `npm run lint` pass · `npm test` 485/485 pass · `npm run build` pass · `npm run check:bundle` pass (main chunk 792.1 KiB raw / 242.8 KiB gzip, unchanged by this test-only step) · `NODE_ENV=production PORT=3458 npm start` → `/api/health` `{"ok":true,"aiConfigured":false}`.
+
+**Timeout ideas noted, not shipped:** see the final report (the prompt builders belong to the E1/E3 work).

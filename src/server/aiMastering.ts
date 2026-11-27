@@ -192,7 +192,7 @@ export const PROCESSOR_SCHEMA = {
     wetDry: { type: Type.NUMBER, description: '0 to 100' },
     inputGainDb: { type: Type.NUMBER, description: '-12 to +12' },
     outputGainDb: { type: Type.NUMBER, description: '-12 to +12' },
-    rationale: { type: Type.STRING, description: 'Short engineering rationale for this module referencing measured metrics' },
+    rationale: { type: Type.STRING, description: 'Optional short rationale citing the measurement; same meaning as reason, so send one of them, not both' },
     reason: { type: Type.STRING, description: 'Engineering justification referencing measured metrics & tradeoffs (alias of rationale)' },
     paramsJson: {
       type: Type.STRING,
