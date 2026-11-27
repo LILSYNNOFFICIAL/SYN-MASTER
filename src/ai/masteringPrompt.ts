@@ -302,11 +302,6 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
   return prompt;
 }
 
-/** Processor types the AI may return: derived from the validator's limits table (single source of truth). */
-export const AI_PROCESSOR_TYPES = Object.keys(PROCESSOR_PARAM_LIMITS).filter(
-  (k) => k !== 'module',
-) as Array<Exclude<keyof typeof PROCESSOR_PARAM_LIMITS, 'module'>>;
-
 /** Standard JSON Schema for the strategy object (OpenAI json_schema, Anthropic tool input, Gemini REST). */
 export const PROCESSOR_JSON_SCHEMA = {
   type: 'object',
