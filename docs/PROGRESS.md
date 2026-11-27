@@ -133,3 +133,9 @@ Dated entries, newest last, so work can resume if a session is cut off.
 - Every new animation is switched off under "reduce motion". No DSP, gate, test or bundle-budget changes.
 - Checks: lint pass · tests 492/492 pass (+2 new levelGlow tests) · build pass · check:bundle pass (main chunk 793.2 KiB raw / 243.2 KiB gzip, was 792.1 / 242.8) · `NODE_ENV=production PORT=3460 npm start` → `/api/health` ok:true. Screenshots taken at 1440 px and 360 px with headless Chromium.
 - Next: check on a real Android phone; the waveform agent can use `var(--syn-level)` in its styles.
+## 2026-11-26 — Waveform part 2/4: smooth fade curves + attenuation shading
+- Fade lines are drawn from the exact render gain law (160 samples per fade, non-scaling round strokes with a soft glow) instead of a 41-point stretched polyline.
+- The faded region is shaded with a gradient that gets darker where the fade is quieter (opacity = 1 - gain), plus a faint tint above the curve.
+- The waveform is scaled by the fade: post-render peaks already include fades; when the graph shows dry peaks (rack bypassed / original), the drawn envelope is multiplied by the same gain law.
+- New: src/components/studio/eq/waveformView.ts (view + fade geometry math), waveformSource.ts (links peaks to audio for zoom detail), waveformStyles.ts (styles injected at runtime; a .css import would break the Node tests that render MasterConsole). Tests: waveformView.test.ts (6). 496 tests pass.
+- Next: FL-style zoom.

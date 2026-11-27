@@ -150,6 +150,7 @@ import { usePlatformPreviewSelection } from './components/platform/usePlatformPr
 const PlatformPreviewSelector = React.lazy(() => import('./components/platform/PlatformPreviewSelector'));
 import { compressorMakeupDb, getPlatformRule, predictForPlatform, type MasterLevels } from './dsp/platformRules';
 import { hasFades, NO_FADES, type FadeSettings } from './dsp/fades';
+import { registerWaveformSource } from './components/studio/eq/waveformSource';
 import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
 import { buildDiagnosticLog, summarizeAiFallbackBanner } from './director/diagnosticLog';
 import { BUILTIN_LABEL, requestRefine, requestStrategy } from './ai/masteringClient';
@@ -524,8 +525,10 @@ export default function App() {
     if (!activeTrack || !sourceChannelsRef.current) return [];
     // Imported files bring their 1600-bin peaks from the worker job (no UI-thread pass).
     const cached = importPeaksHiRef.current;
-    if (cached && cached.trackId === activeTrack.id) return cached.peaks;
-    return extractWaveformPeaks(sourceChannelsRef.current, 1600);
+    const peaks = cached && cached.trackId === activeTrack.id ? cached.peaks : extractWaveformPeaks(sourceChannelsRef.current, 1600);
+    // Lets the EQ waveform layer recompute detail when zoomed (dry source: no fades in it).
+    registerWaveformSource(peaks, { channels: sourceChannelsRef.current, sampleRate: activeTrack.sampleRate, includesFades: false });
+    return peaks;
   }, [activeTrack]);
 
   // Vocal Rebalance stem cache follows the active source; a new stem set re-runs the preview render.
@@ -601,7 +604,13 @@ export default function App() {
             result.analysis,
           );
           postChannelsRef.current = result.channels;
-          setPostPeaksHi(result.peaksHi ?? extractWaveformPeaks(result.channels, 1600));
+          const nextPeaksHi = result.peaksHi ?? extractWaveformPeaks(result.channels, 1600);
+          registerWaveformSource(nextPeaksHi, {
+            channels: result.channels,
+            sampleRate: track.sampleRate,
+            includesFades: Boolean(getPostFades()) && !canReuseImport,
+          });
+          setPostPeaksHi(nextPeaksHi);
           setStageTelemetry(result.telemetry);
           setDynamicEqTraces(result.dynamicEqTraces ?? []);
           setPostPeaks(result.peaks ?? null);

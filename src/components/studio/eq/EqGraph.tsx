@@ -1,8 +1,11 @@
-import React, { useEffect, useId, useMemo, useRef } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { AudioAnalysis } from '../../../types/mastering';
 import { qEdgeRatio, qFromEdgeRatio } from '../../../dsp/eqDesign';
 import { telemetryStore } from '../../../engine/telemetryStore';
-import { fadeGain, type FadeSettings } from '../../../dsp/fades';
+import type { FadeSettings } from '../../../dsp/fades';
+import { blanketPathFromEnvelope, clampView, envelopeFromGlobalPeaks, fadeGainAt, fadeGeometry, fullView, secToX, type TimeView } from './waveformView';
+import { getWaveformSource } from './waveformSource';
+import { ensureWaveformStyles } from './waveformStyles';
 import { F_MAX, F_MIN, G_MAX, H, W, clampF, clampG, curvePath, fToX, fmtF, gToY, xToF, yToG } from './graphMath';
 
 export interface EqGraphNode {
@@ -71,9 +74,11 @@ interface Props {
 const GRID_F = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
 
 /** Convert a pointer's horizontal position into the shared linear track-time coordinate. */
-export function timelineSecondsFromPointer(clientX: number, left: number, width: number, durationSec: number): number {
+export function timelineSecondsFromPointer(clientX: number, left: number, width: number, durationSec: number, view?: TimeView): number {
   if (!Number.isFinite(clientX) || !Number.isFinite(left) || !Number.isFinite(width) || width <= 0 || !Number.isFinite(durationSec) || durationSec <= 0) return 0;
-  return Math.max(0, Math.min(durationSec, ((clientX - left) / width) * durationSec));
+  const start = view ? view.start : 0;
+  const span = view ? view.end - view.start : durationSec;
+  return Math.max(0, Math.min(durationSec, start + ((clientX - left) / width) * span));
 }
 
 function spectrumPath(a: AudioAnalysis | null | undefined, closed: boolean): string | null {
@@ -122,12 +127,22 @@ export const EqGraph: React.FC<Props> = ({
   className = '',
 }) => {
   const uid = useId().replace(/:/g, '');
+  useEffect(() => { ensureWaveformStyles(); }, []);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<null | { id: string; kind: 'node' | 'qlo' | 'qhi'; fine: boolean; sx: number; sy: number; node: EqGraphNode; last: { freq?: number; yDb?: number; q?: number } }>(null);
   const seekDragRef = useRef(false);
   const fadeDragRef = useRef<null | 'in' | 'out'>(null);
   const lastSeekAtRef = useRef(0);
   const lastPointerXRef = useRef(0);
+  // Visible waveform time window (zoom). The EQ curve stays frequency-based.
+  const [viewState, setViewState] = useState<TimeView>(() => fullView(durationSec));
+  const view = useMemo(() => {
+    const v = viewState.end > viewState.start ? viewState : fullView(durationSec);
+    return clampView(v, durationSec);
+  }, [viewState, durationSec]);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const tl = (clientX: number, rect: DOMRect) => timelineSecondsFromPointer(clientX, rect.left, rect.width, durationSec, viewRef.current);
 
   const toLocal = (e: { clientX: number; clientY: number }) => {
     const r = svgRef.current!.getBoundingClientRect();
@@ -145,7 +160,7 @@ export const EqGraph: React.FC<Props> = ({
   const onMove = (e: React.PointerEvent) => {
     if (fadeDragRef.current && fades && onFadesChange && durationSec > 0 && svgRef.current) {
       const rect = svgRef.current.getBoundingClientRect();
-      const sec = timelineSecondsFromPointer(e.clientX, rect.left, rect.width, durationSec);
+      const sec = tl(e.clientX, rect);
       const maxLen = durationSec * 0.5;
       if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
       else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
@@ -156,7 +171,7 @@ export const EqGraph: React.FC<Props> = ({
       if (now - lastSeekAtRef.current >= 60) {
         lastSeekAtRef.current = now;
         const rect = svgRef.current.getBoundingClientRect();
-        onSeek(timelineSecondsFromPointer(e.clientX, rect.left, rect.width, durationSec));
+        onSeek(tl(e.clientX, rect));
       }
       return;
     }
@@ -186,7 +201,7 @@ export const EqGraph: React.FC<Props> = ({
   const endDrag = () => {
     if (fadeDragRef.current && fades && onFadesChange && durationSec > 0 && svgRef.current) {
       const rect = svgRef.current.getBoundingClientRect();
-      const sec = timelineSecondsFromPointer(lastPointerXRef.current, rect.left, rect.width, durationSec);
+      const sec = tl(lastPointerXRef.current, rect);
       const maxLen = durationSec * 0.5;
       if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
       else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
@@ -197,7 +212,7 @@ export const EqGraph: React.FC<Props> = ({
       seekDragRef.current = false;
       if (onSeek && durationSec > 0 && svgRef.current) {
         const rect = svgRef.current.getBoundingClientRect();
-        onSeek(timelineSecondsFromPointer(lastPointerXRef.current, rect.left, rect.width, durationSec));
+        onSeek(tl(lastPointerXRef.current, rect));
       }
       return;
     }
@@ -264,56 +279,50 @@ export const EqGraph: React.FC<Props> = ({
   const prePath = useMemo(() => (analyzer === 'pre' || analyzer === 'both' ? spectrumPath(preSpectrum, analyzer === 'pre') : null), [analyzer, preSpectrum]);
   const postPath = useMemo(() => (analyzer === 'post' || analyzer === 'both' ? spectrumPath(postSpectrum ?? preSpectrum, true) : null), [analyzer, postSpectrum, preSpectrum]);
 
+  const waveSource = getWaveformSource(waveformPeaks);
+  // Peaks measured before the fades (dry / bypassed view) get the fade gain applied here so
+  // the drawn waveform always shows what the render does.
+  const scaleByFades = Boolean(waveSource && !waveSource.includesFades && fades);
   const blanketPath = useMemo(() => {
-    if (!waveformPeaks || waveformPeaks.length < 2) return null;
-    const N = Math.min(480, waveformPeaks.length);
-    const step = waveformPeaks.length / N;
-    const mid = H / 2;
-    const amp = H * 0.44;
-    const env: number[] = [];
-    for (let i = 0; i < N; i++) {
-      let m = 0;
-      const a = Math.floor(i * step);
-      const b = Math.max(a + 1, Math.floor((i + 1) * step));
-      for (let k = a; k < b && k < waveformPeaks.length; k++) if (waveformPeaks[k] > m) m = waveformPeaks[k];
-      env.push(Math.min(1, m));
+    if (!waveformPeaks || waveformPeaks.length < 2 || !(durationSec > 0)) {
+      if (!waveformPeaks || waveformPeaks.length < 2) return null;
+      return blanketPathFromEnvelope(envelopeFromGlobalPeaks(waveformPeaks, 1, { start: 0, end: 1 }, Math.min(480, waveformPeaks.length)), W, H);
     }
-    let d = `M0,${mid}`;
-    for (let i = 0; i < N; i++) d += ` L${((i / (N - 1)) * W).toFixed(1)},${(mid - env[i] * amp).toFixed(1)}`;
-    for (let i = N - 1; i >= 0; i--) d += ` L${((i / (N - 1)) * W).toFixed(1)},${(mid + env[i] * amp).toFixed(1)}`;
-    return d + ' Z';
-  }, [waveformPeaks]);
+    const bins = Math.min(480, Math.max(2, waveformPeaks.length));
+    const env = envelopeFromGlobalPeaks(waveformPeaks, durationSec, view, bins);
+    if (scaleByFades) {
+      const span = view.end - view.start;
+      for (let i = 0; i < env.length; i++) env[i] *= fadeGainAt(view.start + ((i + 0.5) / env.length) * span, durationSec, fades);
+    }
+    return blanketPathFromEnvelope(env, W, H);
+  }, [waveformPeaks, durationSec, view, scaleByFades, fades]);
   const fadeOverlay = useMemo(() => {
     if (!fades || durationSec <= 0) return null;
-    const inX = Math.max(0, Math.min(W, (fades.inSec / durationSec) * W));
-    const outX = Math.max(0, Math.min(W, W - (fades.outSec / durationSec) * W));
-    const inPath = fades.inSec > 0
-      ? Array.from({ length: 41 }, (_, i) => {
-          const t = i / 40;
-          return `${i ? 'L' : 'M'}${(t * inX).toFixed(1)},${(H - fadeGain(t, fades.inCurve) * H).toFixed(1)}`;
-        }).join(' ')
-      : '';
-    const outPath = fades.outSec > 0
-      ? Array.from({ length: 41 }, (_, i) => {
-          const t = i / 40;
-          return `${i ? 'L' : 'M'}${(W - t * (W - outX)).toFixed(1)},${(H - fadeGain(t, fades.outCurve) * H).toFixed(1)}`;
-        }).join(' ')
-      : '';
-    return { inX, outX, inPath, outPath };
-  }, [fades, durationSec]);
+    const inX = secToX(fades.inSec, view, W);
+    const outX = secToX(durationSec - fades.outSec, view, W);
+    return {
+      inX,
+      outX,
+      fin: fadeGeometry('in', fades, durationSec, view, W, H),
+      fout: fadeGeometry('out', fades, durationSec, view, W, H),
+    };
+  }, [fades, durationSec, view]);
   const headRef = useRef<SVGLineElement | null>(null);
   useEffect(() => {
     if (!blanketPath || !durationSec) return;
     const update = (sec: number) => {
       const el = headRef.current;
       if (!el) return;
-      const x = (Math.max(0, Math.min(1, sec / durationSec)) * W).toFixed(1);
+      const v = viewRef.current;
+      const raw = secToX(Math.max(0, Math.min(durationSec, sec)), v, W);
+      el.style.visibility = raw < -1 || raw > W + 1 ? 'hidden' : 'visible';
+      const x = raw.toFixed(1);
       el.setAttribute('x1', x);
       el.setAttribute('x2', x);
     };
     update(telemetryStore.getSnapshot().currentTimeSec);
     return telemetryStore.subscribe((s) => update(s.currentTimeSec));
-  }, [blanketPath, durationSec]);
+  }, [blanketPath, durationSec, view]);
 
   const mainPath = curvePath(curves.freqs, curves.main);
   const zeroY = gToY(0);
@@ -337,8 +346,8 @@ export const EqGraph: React.FC<Props> = ({
           if (target?.closest?.('[data-band-id], [data-q-handle]')) return;
           if (fades && onFadesChange && durationSec > 0 && svgRef.current) {
             const p = toLocal(e);
-            const inX = (fades.inSec / durationSec) * W;
-            const outX = W - (fades.outSec / durationSec) * W;
+            const inX = Math.max(10, secToX(fades.inSec, viewRef.current, W));
+            const outX = Math.min(W - 10, secToX(durationSec - fades.outSec, viewRef.current, W));
             if (p.y <= 20 && Math.abs(p.x - inX) <= 15) fadeDragRef.current = 'in';
             else if (p.y >= 20 && p.y <= 40 && Math.abs(p.x - outX) <= 15) fadeDragRef.current = 'out';
             if (fadeDragRef.current) {
@@ -354,7 +363,7 @@ export const EqGraph: React.FC<Props> = ({
             lastPointerXRef.current = e.clientX;
             svgRef.current.setPointerCapture?.(e.pointerId);
             const rect = svgRef.current.getBoundingClientRect();
-            onSeek(timelineSecondsFromPointer(e.clientX, rect.left, rect.width, durationSec));
+            onSeek(tl(e.clientX, rect));
             return;
           }
           if (e.target === svgRef.current) onSelect(null);
@@ -406,10 +415,25 @@ export const EqGraph: React.FC<Props> = ({
         )}
         {fadeOverlay && (
           <g data-fade-overlay="true" className="syn-eqx-fade-overlay" pointerEvents="none">
-            {fadeOverlay.inPath && <path d={fadeOverlay.inPath} fill="none" stroke="#E040FB" strokeWidth={2.5} strokeLinecap="round" filter={`url(#${uid}-glow)`} />}
-            {fadeOverlay.outPath && <path d={fadeOverlay.outPath} fill="none" stroke="#E040FB" strokeWidth={2.5} strokeLinecap="round" filter={`url(#${uid}-glow)`} />}
-            <circle data-fade-handle="in" cx={Math.max(10, fadeOverlay.inX)} cy={12} r={7} fill="#3FE0FF" stroke="#07111C" strokeWidth={2} pointerEvents="all" />
-            <circle data-fade-handle="out" cx={Math.min(W - 10, fadeOverlay.outX)} cy={28} r={7} fill="#3FE0FF" stroke="#07111C" strokeWidth={2} pointerEvents="all" />
+            {([['in', fadeOverlay.fin], ['out', fadeOverlay.fout]] as const).map(([side, g]) => g && (
+              <g key={side} data-fade-side={side}>
+                <linearGradient id={`${uid}-fade-${side}`} x1={g.x0} x2={g.x1} y1={0} y2={0} gradientUnits="userSpaceOnUse">
+                  {g.stops.map((st) => (
+                    <stop key={st.offset} offset={st.offset} stopColor="#02030A" stopOpacity={(0.68 * st.attenuation).toFixed(3)} />
+                  ))}
+                </linearGradient>
+                <rect className="syn-wf-fade-shade" x={Math.min(g.x0, g.x1)} y={0} width={Math.abs(g.x1 - g.x0)} height={H} fill={`url(#${uid}-fade-${side})`} />
+                <path className="syn-wf-fade-region" d={g.shade} />
+                <path className="syn-wf-fade-glow" d={g.line} />
+                <path className="syn-wf-fade-line" d={g.line} data-fade-line={side} />
+              </g>
+            ))}
+            {fadeOverlay.inX >= -8 && fadeOverlay.inX <= W + 8 && (
+              <circle data-fade-handle="in" className="syn-wf-fade-handle" cx={Math.max(10, Math.min(W - 10, fadeOverlay.inX))} cy={12} r={7} pointerEvents="all" />
+            )}
+            {fadeOverlay.outX >= -8 && fadeOverlay.outX <= W + 8 && (
+              <circle data-fade-handle="out" className="syn-wf-fade-handle" cx={Math.min(W - 10, Math.max(10, fadeOverlay.outX))} cy={28} r={7} pointerEvents="all" />
+            )}
           </g>
         )}
         {postPath && <path d={postPath} className="syn-eqx-spec-post" pointerEvents="none" />}
