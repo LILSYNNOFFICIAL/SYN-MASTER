@@ -416,6 +416,10 @@ async function runWavExportE2E(browser) {
       assert.ok(handleBox, `The visible ${side} fade handle must have a hit target`);
       const fromX = handleBox.x + handleBox.width / 2;
       const fromY = handleBox.y + handleBox.height / 2;
+      const hitTarget = await page.evaluate(({ x, y }) => {
+        const el = document.elementFromPoint(x, y);
+        return el ? { tag: el.tagName, fadeHandle: el.getAttribute('data-fade-handle'), className: String(el.getAttribute('class') ?? '') } : null;
+      }, { x: fromX, y: fromY });
       const toX = box.x + box.width * toXRatio;
       await page.mouse.move(fromX, fromY);
       await page.mouse.down();
@@ -424,6 +428,7 @@ async function runWavExportE2E(browser) {
         side: el.getAttribute('data-fade-drag-side'),
         seconds: el.getAttribute('data-fade-last-seconds'),
         controls: document.querySelector('.syn-player-fades')?.innerText ?? '',
+        hitTarget,
       }));
       await page.mouse.up();
       return diagnostics;
@@ -432,7 +437,7 @@ async function runWavExportE2E(browser) {
     // Drag the actual SVG handles rather than approximating their hit targets
     // with fixed pixel offsets that vary with viewport and SVG scaling.
     const fadeInDragDiagnostics = await dragFadeHandle('in', 0.1);
-    assert.equal(fadeInDragDiagnostics.side, 'in', 'Fade-in handle must receive its pointer drag');
+    assert.equal(fadeInDragDiagnostics.side, 'in', `Fade-in handle must receive its pointer drag; diagnostics: ${JSON.stringify(fadeInDragDiagnostics)}`);
     assert.ok(Number(fadeInDragDiagnostics.seconds) > 0, `Fade-in graph must track drag time; got: ${JSON.stringify(fadeInDragDiagnostics)}`);
     const fadeInAfterFirstDrag = await page.locator('.syn-player-fades').innerText();
     assert.match(fadeInAfterFirstDrag, /Fade in\s+0\.10s/i, `Fade-in must update immediately after its own drag; got: ${fadeInAfterFirstDrag}; drag: ${JSON.stringify(fadeInDragDiagnostics)}`);
