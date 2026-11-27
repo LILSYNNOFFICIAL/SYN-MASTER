@@ -87,6 +87,7 @@ import { takeAiChainProvenance } from '../ai/aiProvenance';
 import type { AiParamCorrection } from '../ai/aiParamCorrections';
 import { computeChainFingerprint, isMasterFullyVerified, verifyPostFixAnalysis } from './postFixVerification';
 import { deriveReferenceMatchBands } from './referenceMatch';
+import { buildGuardFeedback, type GuardFeedback, type GuardFeedbackReasonCode } from './guardFeedback';
 
 export function resolveObjectiveTarget(
   objectiveId: MasteringObjectiveId,
@@ -1896,6 +1897,7 @@ export interface RunAutonomousDirectorOptions {
     preserveDynamics: boolean;
     qcReport: QCReport;
     targetGate: MasterTargetGate;
+    guardFeedback?: GuardFeedback;
   }) => Promise<ProcessorModule[] | null | AiRefineSuggestion>;
   initialAiTrace?: AiPassTrace;
   maxIterations?: number;
@@ -2861,6 +2863,36 @@ export async function runAutonomousDirectorLoop(
       let refineAiIds = new Set<string>();
       if (opts.aiRefineCallback) {
         try {
+          const guardReasonCodes: GuardFeedbackReasonCode[] = [];
+          if (hardRegression) guardReasonCodes.push('regression-guard');
+          if (introducedTechnicalFindings.some((finding) => finding.id === 'diag-mud') ||
+              worsenedTechnicalFindings.some((finding) => finding.id === 'diag-mud')) {
+            guardReasonCodes.push('low-mid-sub-bass-masking');
+          }
+          if (introducedTechnicalFindings.some((finding) => finding.id !== 'diag-mud') ||
+              worsenedTechnicalFindings.some((finding) => finding.id !== 'diag-mud')) {
+            guardReasonCodes.push('technical-finding-regression');
+          }
+          if (introducedClipping) guardReasonCodes.push('clipping-regression');
+          if (bandPhaseRegressed) guardReasonCodes.push('phase-regression');
+          if (processingDynamicsRegressed) guardReasonCodes.push('dynamics-regression');
+          if (transientDetailRegressed) guardReasonCodes.push('transient-regression');
+          if (distortionRegressed) guardReasonCodes.push('distortion-regression');
+          if (noiseRegressed) guardReasonCodes.push('noise-regression');
+          if (introducedTruePeakBreach) guardReasonCodes.push('true-peak-regression');
+          if (introducedLoudnessOvershoot) guardReasonCodes.push('loudness-regression');
+          if (severeDimensionRegressions.length > 0) guardReasonCodes.push('objective-score-regression');
+          if (gateDowngrade) guardReasonCodes.push('objective-gate-downgrade');
+          if (guardReasonCodes.length === 0) guardReasonCodes.push('no-improvement');
+          const guardFeedback = !improved
+            ? buildGuardFeedback({
+                pass,
+                reasonCodes: guardReasonCodes,
+                source: preAnalysis,
+                rejected: post,
+                limits: getDiagnosisThresholds(objective, opts.referenceAnalysis),
+              })
+            : undefined;
           const rawSuggestion = await opts.aiRefineCallback({
             preAnalysis,
             postAnalysis: post,
@@ -2874,6 +2906,7 @@ export async function runAutonomousDirectorLoop(
             preserveDynamics: objective.preserveTransients,
             qcReport,
             targetGate,
+            ...(guardFeedback ? { guardFeedback } : {}),
           });
           if (opts.shouldStop?.()) {
             stoppedDuringAiRefine = true;

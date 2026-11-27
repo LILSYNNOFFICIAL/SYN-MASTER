@@ -20,6 +20,7 @@ import {
   sanitizeMasteringMode,
   sanitizeObjectiveId,
   sanitizeVocalBalance,
+  sanitizeGuardFeedback,
 } from './src/server/aiPayloadValidation.ts';
 import { createRateLimiter } from './src/server/requestLimiter.mjs';
 import { createAiSpendLimiter, createAiSpendMiddleware, readAiSpendLimitsFromEnv } from './src/server/aiSpendLimiter.mjs';
@@ -467,6 +468,7 @@ app.post('/api/ai/refine', async (req, res) => {
       qcReport,
       targetGate,
       vocalBalance,
+      guardFeedback,
     } = req.body ?? {};
     if (
       !isValidAnalysisPayload(preAnalysis) ||
@@ -508,6 +510,7 @@ app.post('/api/ai/refine', async (req, res) => {
       preserveDynamics: preserveDynamics !== false,
       qcReport,
       targetGate,
+      guardFeedback: sanitizeGuardFeedback(guardFeedback),
       vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
     res.json({ refined, meta: aiMeta });

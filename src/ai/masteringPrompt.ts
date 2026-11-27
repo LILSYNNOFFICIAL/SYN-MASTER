@@ -22,6 +22,7 @@ import { summarizeVocalBalanceForPrompt, type VocalBalanceContext } from './voca
 import { formatPlatformHintsForPrompt } from '../dsp/platformRules.ts';
 import type { MasterTargetGate } from '../director/masterTargets.ts';
 import { collectModuleCorrections, MAX_AI_PARAM_CORRECTIONS, type AiParamCorrection } from './aiParamCorrections.ts';
+import { formatGuardFeedbackForPrompt, type GuardFeedback } from '../director/guardFeedback.ts';
 
 export interface StrategyPromptInput {
   analysis: AudioAnalysis;
@@ -59,6 +60,7 @@ export interface RefinePromptInput {
   preserveDynamics: boolean;
   qcReport?: QCReport | null;
   targetGate?: MasterTargetGate | null;
+  guardFeedback?: GuardFeedback;
   vocalBalance?: VocalBalanceContext | null;
 }
 
@@ -291,6 +293,7 @@ export function buildRefineUserPrompt(input: RefinePromptInput): string {
     formatMatchEqAvailability(Boolean(input.referenceAnalysis)),
     formatVocalBalanceVerification(input.vocalBalanceVerification),
     findingsSummary,
+    formatGuardFeedbackForPrompt(input.guardFeedback),
     `INDEPENDENT SYN-QC EVALUATION:\n${qcSummary}`,
     objectiveGateSummary,
     formatPlatformHintsForPrompt(input.qcReport?.platformHints),

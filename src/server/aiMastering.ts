@@ -1,6 +1,7 @@
 import type { MasterTargetGate } from '../director/masterTargets.ts';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import type { VocalBalanceContext } from '../ai/vocalBalancePrompt.ts';
+import type { GuardFeedback } from '../director/guardFeedback.ts';
 import type {
   AudioAnalysis,
   CustomObjectiveSpec,
@@ -305,6 +306,7 @@ export async function refineGeminiIteration(input: {
   preserveDynamics: boolean;
   qcReport?: QCReport | null;
   targetGate?: MasterTargetGate | null;
+  guardFeedback?: GuardFeedback;
   vocalBalance?: VocalBalanceContext | null;
 }) {
   const ai = getAiClient();

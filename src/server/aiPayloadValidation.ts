@@ -1,5 +1,6 @@
 import { MASTERING_OBJECTIVE_IDS, type AudioAnalysis, type MasteringMode, type MasteringObjectiveId } from '../types/mastering.ts';
 import { MODE_MEANINGS } from '../ai/masteringPrompt.ts';
+import { GUARD_FEEDBACK_REASON_CODES, type GuardBalanceMetric, type GuardBalanceSnapshot, type GuardFeedback } from '../director/guardFeedback.ts';
 
 export interface SafeAvailablePlugin {
   name: string;
@@ -157,6 +158,43 @@ export function sanitizeObjectiveId(value: unknown): MasteringObjectiveId | unde
   return typeof value === 'string' && VALID_OBJECTIVE_SET.has(value)
     ? (value as MasteringObjectiveId)
     : undefined;
+}
+
+
+/** Accept only fixed reason codes and finite, bounded measurements; never forward arbitrary prompt text. */
+export function sanitizeGuardFeedback(value: unknown): GuardFeedback | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.pass !== 'number' || !Number.isInteger(value.pass) || value.pass < 1 || value.pass > 10) return undefined;
+  if (!Array.isArray(value.reasonCodes) || value.reasonCodes.length < 1 || value.reasonCodes.length > 14) return undefined;
+  const allowed = new Set<string>(GUARD_FEEDBACK_REASON_CODES);
+  if (!value.reasonCodes.every((code) => typeof code === 'string' && allowed.has(code))) return undefined;
+  const readMetric = (raw: unknown): GuardBalanceMetric | null => {
+    if (!isRecord(raw)) return null;
+    const limit = raw.limitDb, measured = raw.valueDb;
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit < -120 || limit > 120) return null;
+    if (measured !== null && (typeof measured !== 'number' || !Number.isFinite(measured) || measured < -120 || measured > 120)) return null;
+    const valueDb = measured === null ? null : Math.round(measured * 100) / 100;
+    const limitDb = Math.round(limit * 100) / 100;
+    return { valueDb, limitDb, remainingDb: valueDb === null ? null : Math.round((limitDb - valueDb) * 100) / 100 };
+  };
+  const readSnapshot = (raw: unknown): GuardBalanceSnapshot | null => {
+    if (!isRecord(raw)) return null;
+    const bassVsMid = readMetric(raw.bassVsMid);
+    const lowMidVsMid = readMetric(raw.lowMidVsMid);
+    const region150To400VsMid = readMetric(raw.region150To400VsMid);
+    const subVsBass = readMetric(raw.subVsBass);
+    return bassVsMid && lowMidVsMid && region150To400VsMid && subVsBass
+      ? { bassVsMid, lowMidVsMid, region150To400VsMid, subVsBass }
+      : null;
+  };
+  const source = readSnapshot(value.source), rejected = readSnapshot(value.rejected);
+  if (!source || !rejected) return undefined;
+  return {
+    pass: value.pass,
+    reasonCodes: [...new Set(value.reasonCodes as GuardFeedback['reasonCodes'])],
+    source,
+    rejected,
+  };
 }
 
 export function sanitizeMasteringMode(value: unknown): MasteringMode | undefined {
