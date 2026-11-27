@@ -135,6 +135,8 @@ export const EqGraph: React.FC<Props> = ({
   const dragRef = useRef<null | { id: string; kind: 'node' | 'qlo' | 'qhi'; fine: boolean; sx: number; sy: number; node: EqGraphNode; last: { freq?: number; yDb?: number; q?: number } }>(null);
   const seekDragRef = useRef(false);
   const fadeDragRef = useRef<null | 'in' | 'out'>(null);
+  const fadesRef = useRef(fades);
+  fadesRef.current = fades;
   // Fade handle under the pointer or being dragged: shows its length on the curve.
   const [fadeHot, setFadeHot] = useState<null | 'in' | 'out'>(null);
   const [fadeDragSide, setFadeDragSide] = useState<null | 'in' | 'out'>(null);
@@ -157,6 +159,25 @@ export const EqGraph: React.FC<Props> = ({
   const pinchRef = useRef<null | { dist: number; mid: number; view: TimeView; anchor: number }>(null);
   const tl = (clientX: number, rect: DOMRect) => timelineSecondsFromPointer(clientX, rect.left, rect.width, durationSec, viewRef.current);
 
+  const updateFadeFromPointer = (side: 'in' | 'out', sec: number) => {
+    const current = fadesRef.current;
+    if (!current || !onFadesChange || durationSec <= 0) return;
+    const maxLen = durationSec * 0.5;
+    const next = side === 'in'
+      ? { ...current, inSec: Number(Math.min(maxLen, sec).toFixed(2)) }
+      : { ...current, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) };
+    // Keep same-gesture and immediately-following gestures based on the newest value,
+    // even before React has committed the parent state update and rerendered this graph.
+    fadesRef.current = next;
+    onFadesChange(next);
+  };
+
+  const onMove = (e: React.PointerEvent) => {
+    if (fadeDragRef.current && fadesRef.current && onFadesChange && durationSec > 0 && svgRef.current) {
+      const rect = svgRef.current.getBoundingClientRect();
+      updateFadeFromPointer(fadeDragRef.current, tl(e.clientX, rect));
+      return;
+    }
   const toLocal = (e: { clientX: number; clientY: number }) => {
     const r = svgRef.current!.getBoundingClientRect();
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
@@ -170,13 +191,23 @@ export const EqGraph: React.FC<Props> = ({
     svgRef.current?.setPointerCapture?.(e.pointerId);
   };
 
+  const updateFadeFromPointer = (side: 'in' | 'out', sec: number) => {
+    const current = fadesRef.current;
+    if (!current || !onFadesChange || durationSec <= 0) return;
+    const maxLen = durationSec * 0.5;
+    const next = side === 'in'
+      ? { ...current, inSec: Number(Math.min(maxLen, sec).toFixed(2)) }
+      : { ...current, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) };
+    // Keep same-gesture and immediately-following gestures based on the newest value,
+    // even before React has committed the parent state update and rerendered this graph.
+    fadesRef.current = next;
+    onFadesChange(next);
+  };
+
   const onMove = (e: React.PointerEvent) => {
-    if (fadeDragRef.current && fades && onFadesChange && durationSec > 0 && svgRef.current) {
+    if (fadeDragRef.current && fadesRef.current && onFadesChange && durationSec > 0 && svgRef.current) {
       const rect = svgRef.current.getBoundingClientRect();
-      const sec = tl(e.clientX, rect);
-      const maxLen = durationSec * 0.5;
-      if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
-      else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
+      updateFadeFromPointer(fadeDragRef.current, tl(e.clientX, rect));
       return;
     }
     if (seekDragRef.current && onSeek && durationSec > 0 && svgRef.current) {
@@ -212,12 +243,9 @@ export const EqGraph: React.FC<Props> = ({
   };
 
   const endDrag = () => {
-    if (fadeDragRef.current && fades && onFadesChange && durationSec > 0 && svgRef.current) {
+    if (fadeDragRef.current && fadesRef.current && onFadesChange && durationSec > 0 && svgRef.current) {
       const rect = svgRef.current.getBoundingClientRect();
-      const sec = tl(lastPointerXRef.current, rect);
-      const maxLen = durationSec * 0.5;
-      if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
-      else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
+      updateFadeFromPointer(fadeDragRef.current, tl(lastPointerXRef.current, rect));
       fadeDragRef.current = null;
       setFadeDragSide(null);
       return;
