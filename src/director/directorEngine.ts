@@ -82,7 +82,6 @@ import {
 import { applyStructuredChainCommands } from './chainCommands';
 import { inspectPluginInventory } from './pluginIntelligence';
 import { validateChainAgainstInventory } from './processorInventory';
-import { describeModuleSettings } from './diagnosticLog';
 import { OVERRIDE_REASONS, recordPreDirectorOverrides, recordStageOverrides } from './directorOverrides';
 import { takeAiChainProvenance } from '../ai/aiProvenance';
 import type { AiParamCorrection } from '../ai/aiParamCorrections';
@@ -2728,7 +2727,7 @@ export async function runAutonomousDirectorLoop(
       if (chosenIds && chosenIds.size > 0) {
         pendingAiTrace.aiChosenTools = cp.chain
           .filter((m) => chosenIds.has(m.id))
-          .map((m) => ({ name: m.name, type: m.type, enabled: m.enabled && !m.bypassed, settings: describeModuleSettings(m) }));
+          .map((m) => ({ name: m.name, type: m.type, enabled: m.enabled && !m.bypassed, module: structuredClone(m) }));
       }
       pendingAiTrace = null;
     }

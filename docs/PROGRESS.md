@@ -91,7 +91,7 @@ Dated entries, newest last, so work can resume if a session is cut off.
 
 **Files:** `src/ai/aiParamCorrections.ts` (new), `src/ai/aiProvenance.ts` (new), `src/director/directorOverrides.ts` (new), `src/ai/masteringPrompt.ts` (schema block + parseAiChain/normalize only), `src/ai/masteringClient.ts`, `src/server/aiMastering.ts`, `server.ts`, `src/types/mastering.ts` (optional fields only), `src/director/directorEngine.ts`, `src/director/diagnosticLog.ts`; tests `src/ai/aiParamCorrections.test.ts`, `src/director/directorOverrides.test.ts` (new).
 
-**Checks run 2026-11-26:** `npm run lint` pass · `npm test` 483/483 pass (after rebasing onto the C/D and E1/E3 commits) · `npm run build` pass (main chunk `index-*.js` 857.99 kB raw after rebase; my part added about 11 kB; budget not touched) · `NODE_ENV=production PORT=3458 npm start` → `/api/health` `{"ok":true,"aiConfigured":false}`.
+**Checks run 2026-11-26 (after rebasing onto the C/D1, D2/D3 and E1/E3 commits):** `npm run lint` pass · `npm test` 483/483 pass · `npm run build` pass · `npm run check:bundle` pass (main chunk `index-*.js` 811.1 kB raw = 792.1 KiB, under the 800 KiB budget; upstream before my commits measured 800.2 kB, so this part adds about 11 kB) · `NODE_ENV=production PORT=3458 npm start` → `/api/health` `{"ok":true,"aiConfigured":false}`.
 
 **Not verified:** a live Gemini call with the new enum schema (no API key here). The Vocal Rebalance gate runs in App.tsx (other agent's file), so its changes are detected by comparing the AI's answer with what the Director receives, not inside App.tsx.
 

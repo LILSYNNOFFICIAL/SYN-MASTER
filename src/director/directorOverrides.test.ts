@@ -77,8 +77,10 @@ test('E4 (a): with no failing gate the AI values reach the render unchanged and 
   assert.ok(strategy);
   assert.equal(strategy.directorOverrides, undefined, 'nothing overridden, nothing logged');
   assert.deepEqual(strategy.aiChosenTools?.map((t) => t.name), ['AI EQ', 'AI Glue', 'AI Limiter']);
-  assert.match(strategy.aiChosenTools![1].settings, /thresholdDb=-22/);
-  const text = diagnosticLogToText(buildDiagnosticLog({ trackName: 't', objective: report.objective, source: report.preAnalysis, findings: [], chain: [], report }));
+  const log = buildDiagnosticLog({ trackName: 't', objective: report.objective, source: report.preAnalysis, findings: [], chain: [], report });
+  assert.match(log.aiPasses[0].aiChosenTools![1].settings ?? '', /thresholdDb=-22/);
+  assert.equal(log.aiPasses[0].aiChosenTools![1].module, undefined, 'export carries the settings line, not the raw module');
+  const text = diagnosticLogToText(log);
   assert.match(text, /== Director overrides ==\n  none/);
   assert.match(text, /AI-chosen tools as rendered:\n      - AI EQ \(parametric-eq\)/);
 

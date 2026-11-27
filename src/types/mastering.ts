@@ -1207,8 +1207,11 @@ export interface AiPassTrace {
   paramCorrections?: import('../ai/aiParamCorrections').AiParamCorrection[];
   /** AI values the Director (or the app's policy gates) changed or removed before rendering, with the reason. */
   directorOverrides?: DirectorOverride[];
-  /** Every tool the AI chose for this pass, with the settings actually rendered. */
-  aiChosenTools?: Array<{ name: string; type: ProcessorType; enabled: boolean; settings: string }>;
+  /**
+   * Every tool the AI chose for this pass as actually rendered. The Director stores the rendered
+   * module; the diagnostic log turns it into a one-line `settings` summary (and drops `module`).
+   */
+  aiChosenTools?: Array<{ name: string; type: ProcessorType; enabled: boolean; settings?: string; module?: ProcessorModule }>;
 }
 
 /** One AI-provided value the Director changed, removed or clamped (or a stage it added), and why. */

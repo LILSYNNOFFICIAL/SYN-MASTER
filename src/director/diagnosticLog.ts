@@ -404,6 +404,13 @@ export function buildDiagnosticLog(input: {
     : input.aiPasses
       ? structuredClone(input.aiPasses)
       : [];
+  for (const a of aiPasses) {
+    if (!a.aiChosenTools) continue;
+    a.aiChosenTools = a.aiChosenTools.map(({ module, ...tool }) => ({
+      ...tool,
+      settings: tool.settings ?? (module ? describeModuleSettings(module) : ''),
+    }));
+  }
   const aiFallbackBanner = summarizeAiFallbackBanner(aiPasses);
   const aiParamCorrections = aiPasses.flatMap((a) => (a.paramCorrections ?? []).map((c) => ({ ...c, pass: a.pass, stage: a.stage })));
   const directorOverrides = aiPasses.flatMap((a) => a.directorOverrides ?? []);
