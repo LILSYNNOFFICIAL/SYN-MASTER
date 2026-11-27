@@ -79,18 +79,18 @@ export const TimelinePlayer: React.FC<Props> = (p) => {
         <div className="syn-player-fades" role="group" aria-label="Fades">
           <label>
             <span>Fade in <b>{p.fades.inSec.toFixed(2)}s</b></span>
-            <select value={p.fades.inCurve} onChange={(e) => p.onFadesChange({ ...p.fades, inCurve: e.target.value as FadeCurve })} aria-label="Fade-in curve">
+            <select value={p.fades.inCurve} onChange={(e) => p.onFadesChange((current) => ({ ...current, inCurve: e.target.value as FadeCurve }))} aria-label="Fade-in curve">
               {CURVES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
           </label>
           <label>
             <span>Fade out <b>{p.fades.outSec.toFixed(2)}s</b></span>
-            <select value={p.fades.outCurve} onChange={(e) => p.onFadesChange({ ...p.fades, outCurve: e.target.value as FadeCurve })} aria-label="Fade-out curve">
+            <select value={p.fades.outCurve} onChange={(e) => p.onFadesChange((current) => ({ ...current, outCurve: e.target.value as FadeCurve }))} aria-label="Fade-out curve">
               {CURVES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
           </label>
           {(p.fades.inSec > 0 || p.fades.outSec > 0) && (
-            <button type="button" className="syn-player-clear" onClick={() => p.onFadesChange({ ...p.fades, inSec: 0, outSec: 0 })}>Clear fades</button>
+            <button type="button" className="syn-player-clear" onClick={() => p.onFadesChange((current) => ({ ...current, inSec: 0, outSec: 0 }))}>Clear fades</button>
           )}
         </div>
       </div>
