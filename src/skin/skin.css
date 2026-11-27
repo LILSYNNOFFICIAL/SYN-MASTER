@@ -1017,7 +1017,22 @@ g.is-solo .syn-eqx-node{stroke-dasharray:3 2;}
    =================================================================================== */
 
 /* 1 + 8. Import track pill in the session ribbon (moved from the fades row). */
-@media (min-width:1024px){.syn-workstation > .syn-session-ribbon > div:first-child{flex:1 1 auto;}}
+/* Desktop ribbon: left tools | Import pill | right tools. Neither side ever shrinks under the pill
+   (the row scrolls sideways if it truly cannot fit, instead of overlapping).
+   - 1024-1439 px: the two groups are too wide for a true centre, so the pill centres in the gap between them.
+   - >=1440 px: three-column grid with equal 1fr sides = the true centre of the row/page; each side keeps its
+     natural width as a minimum, so a wider group nudges the pill instead of overlapping it. */
+@media (min-width:1024px){
+  .syn-workstation > .syn-session-ribbon{overflow-x:auto;scrollbar-width:thin;}
+  .syn-workstation > .syn-session-ribbon > div{flex:0 0 auto !important;flex-wrap:nowrap !important;}
+  .syn-workstation > .syn-session-ribbon > .syn-ribbon-import{margin-inline:auto;}
+}
+@media (min-width:1440px){
+  .syn-workstation > .syn-session-ribbon{display:grid !important;grid-template-columns:minmax(max-content,1fr) auto minmax(max-content,1fr);}
+  .syn-workstation > .syn-session-ribbon > div:first-child{justify-self:start;}
+  .syn-workstation > .syn-session-ribbon > div:last-child{justify-self:end;}
+  .syn-workstation > .syn-session-ribbon > .syn-ribbon-import{justify-self:center;margin-inline:0;}
+}
 .syn-ribbon-import{position:relative;display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;margin-inline:auto;
   padding:4px 12px;border-radius:999px;border:1px solid var(--skin-gold);background:rgba(245,184,46,.06);
   color:var(--skin-gold-bright);font-size:12px;font-weight:600;line-height:16px;white-space:nowrap;cursor:pointer;

@@ -153,3 +153,11 @@ Dated entries, newest last, so work can resume if a session is cut off.
 - Cheap on phones: the bloom is a wide translucent stroke (no blur filter on touch / narrow screens); desktop adds a small blur and a slow breathing glow that is off for prefers-reduced-motion.
 - Test: EqGraph render test (neon envelope, both fade lines, EQ curve). 499 tests pass. Main chunk 799.4 KiB raw / 245.5 KiB gzip (limit 800 / 250) - very little headroom left.
 - Browser check (headless Chromium, production build, demo session): fades dragged to 2.52 s / 2.80 s, Ctrl+wheel x4 -> 2.9x zoom on desktop, right-edge drag of the zoom bar -> 3.5x at 360 px width; fade lines, shading, neon envelope and zoomed detail render with no page errors. Pinch and trackpad gestures were not exercised on a real device.
+
+## 2026-11-26 — Import pill centred in the session toolbar
+- The gold "Import track" pill is now its own item in the session toolbar (moved out of the Save/undo/redo group; same button, same file picker, drag-and-drop unchanged).
+- 1440 px and wider: the toolbar is a three-column row with equal sides, so the pill sits in the true centre of the row/page (measured: pill centre = page centre at 1440, 1600, 1920).
+- 1024-1439 px: the left and right tool groups are too wide for a true centre (right group is ~624 px), so the pill centres in the gap between them. The groups no longer shrink under the pill; if the row cannot fit (about 1024-1167 px) it scrolls sideways with a thin scrollbar instead of overlapping (before this change the pill overlapped the Mode selector at 1024 px).
+- 480 px and below: unchanged behaviour, icon-only pill right after redo, fully on screen at 360 px with no overlap.
+- Checks: lint ok, 499 tests pass, build ok, bundle 799.4 KiB raw / 245.5 KiB gzip (limit 800/250), production /api/health ok:true. Playwright/Chromium measured 1920-360 px widths: no overlap with any toolbar control.
+- Next: bundle headroom (lazy-load more panels).
