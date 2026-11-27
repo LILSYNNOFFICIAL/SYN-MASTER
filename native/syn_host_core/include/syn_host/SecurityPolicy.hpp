@@ -19,7 +19,7 @@ public:
   // Cryptographically random hex pairing/session token
   static std::string generateSecureToken(size_t numBytes = 32);
 
-  // Short human-enterable pairing code (e.g., 64-bit random uppercase base32/hex)
+  // Short human-enterable code with 40 bits of cryptographic entropy (8 base32 symbols).
   static std::string generatePairingCode();
 
   // Constant-time string comparison to prevent timing side-channels

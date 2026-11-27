@@ -107,6 +107,14 @@ void testSecurityPolicy() {
 
   auto code = SecurityPolicy::generatePairingCode();
   assert(code.rfind("SYN-", 0) == 0 && code.size() == 13);
+  const std::string pairingAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  for (size_t i = 4; i < code.size(); ++i) {
+    if (i == 8) {
+      assert(code[i] == '-');
+    } else {
+      assert(pairingAlphabet.find(code[i]) != std::string::npos);
+    }
+  }
 
   auto tmpVst = std::filesystem::temp_directory_path() / "syn_safe_vst_root";
   std::filesystem::create_directories(tmpVst);

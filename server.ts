@@ -23,7 +23,7 @@ import {
   sanitizeGuardFeedback,
 } from './src/server/aiPayloadValidation.ts';
 import { createRateLimiter } from './src/server/requestLimiter.mjs';
-import { createAiSpendLimiter, createAiSpendMiddleware, readAiSpendLimitsFromEnv } from './src/server/aiSpendLimiter.mjs';
+import { createAiSpendLimiter, readAiSpendLimitsFromEnv } from './src/server/aiSpendLimiter.mjs';
 import { createAiGuestSession } from './src/server/aiAccess.ts';
 import { createConcurrencyLimiter } from './src/server/aiConcurrencyLimiter.mjs';
 import { validateChainAgainstInventory } from './src/director/processorInventory.ts';
@@ -104,8 +104,31 @@ function aiConcurrencyGuard(req: express.Request, res: express.Response, next: e
   res.once('close', slot.release);
   next();
 }
-const aiSpendGuard = createAiSpendMiddleware(createAiSpendLimiter({ limits: readAiSpendLimitsFromEnv(process.env) }));
-app.use('/api/ai', aiRateLimiter, aiGuestSession.middleware, aiConcurrencyGuard, aiSpendGuard);
+const aiSpendLimiter = createAiSpendLimiter({ limits: readAiSpendLimitsFromEnv(process.env) });
+app.use('/api/ai', aiRateLimiter, aiGuestSession.middleware, aiConcurrencyGuard);
+
+function consumeAiSpend(res: express.Response, kind: 'strategy' | 'refine'): boolean {
+  const sessionId = String(res.locals.guestSessionId ?? '');
+  if (!sessionId) {
+    res.status(401).json({ error: 'A valid Cloud AI guest session is required.' });
+    return false;
+  }
+  const result = aiSpendLimiter.consume(sessionId, kind);
+  if (!result.allowed) {
+    const retryAfterSec = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
+    res.setHeader('Retry-After', String(retryAfterSec));
+    res.status(429).json({
+      error: result.message,
+      code: 'ai_rate_limited',
+      scope: result.scope,
+      retryAfterSec,
+      fallback: 'local-dsp-planner',
+    });
+    return false;
+  }
+  res.setHeader('X-AI-Budget-Remaining', String(result.remaining));
+  return true;
+}
 // Offline codec jobs are CPU-intensive but must not compete with AI requests for the
 // same budget, so export has its own per-client limiter.
 const allowExportRequest = createRateLimiter({ limit: 30, windowMs: 60_000, maxKeys: 10_000 });
@@ -278,11 +301,11 @@ app.post('/api/export/encode', async (req, res) => {
   const mimeTypes: Record<string, string> = {
     wav: 'audio/wav', mp3: 'audio/mpeg', ogg: 'audio/ogg', flac: 'audio/flac', m4a: 'audio/mp4', 'webm-opus': 'audio/webm',
   };
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'syn-master-export-'));
-  const inputPath = path.join(tempDir, 'master-intermediate.wav');
-  const outputPath = path.join(tempDir, 'master.' + extension);
-
+  let tempDir: string | undefined;
   try {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'syn-master-export-'));
+    const inputPath = path.join(tempDir, 'master-intermediate.wav');
+    const outputPath = path.join(tempDir, 'master.' + extension);
     let uploadedBytes = 0;
     const byteLimit = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
@@ -384,7 +407,7 @@ app.post('/api/export/encode', async (req, res) => {
         : unavailable ? message : 'The selected audio codec could not render this master. Check FFmpeg codec support on the server.',
     });
   } finally {
-    await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
 });
 
@@ -435,6 +458,8 @@ app.post('/api/ai/master', async (req, res) => {
     // Same allowlist as /api/ai/refine: unknown objective/mode strings never reach the prompt.
     const safeMode = sanitizeMasteringMode(mode) ?? 'ai-auto';
     const safeObjective = sanitizeObjectiveId(objective);
+
+    if (!consumeAiSpend(res, 'strategy')) return;
 
     const { aiMeta, ...strategy } = await generateGeminiMasterStrategy({
       analysis,
@@ -498,6 +523,8 @@ app.post('/api/ai/refine', async (req, res) => {
 
     const safeMode = sanitizeMasteringMode(mode);
     const safeObjective = sanitizeObjectiveId(objective);
+
+    if (!consumeAiSpend(res, 'refine')) return;
 
     const { aiMeta, ...refined } = await refineGeminiIteration({
       preAnalysis,

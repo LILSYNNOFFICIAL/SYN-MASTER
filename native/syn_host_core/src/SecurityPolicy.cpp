@@ -7,7 +7,9 @@
 #include <cctype>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_set>
 
 #ifdef _WIN32
@@ -74,15 +76,17 @@ void SecurityPolicy::setExtraAllowedOrigins(std::vector<std::string> origins) {
 std::string SecurityPolicy::generateSecureToken(size_t numBytes) {
   std::vector<uint8_t> bytes(numBytes, 0);
 #ifdef _WIN32
-  if (BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()),
+  if (bytes.size() > static_cast<size_t>(std::numeric_limits<ULONG>::max()) ||
+      BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()),
                       BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
-    // Fallback unlikely on modern Windows 10/11
-    for (size_t i = 0; i < bytes.size(); ++i) bytes[i] = static_cast<uint8_t>(i ^ 0xA5);
+    throw std::runtime_error("Cryptographic random number generation failed");
   }
 #else
   std::ifstream urandom("/dev/urandom", std::ios::binary);
-  if (urandom.is_open()) {
-    urandom.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  if (!urandom.is_open()) throw std::runtime_error("Could not open the system random source");
+  urandom.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  if (!urandom || urandom.gcount() != static_cast<std::streamsize>(bytes.size())) {
+    throw std::runtime_error("Could not read enough cryptographic random data");
   }
 #endif
   std::ostringstream oss;
@@ -98,8 +102,9 @@ std::string SecurityPolicy::generatePairingCode() {
   std::string raw = generateSecureToken(8);
   std::string code = "SYN-";
   for (size_t i = 0; i < 8; ++i) {
-    unsigned int val = static_cast<unsigned int>(raw[i * 2]);
-    code.push_back(kAlphabet[val % (sizeof(kAlphabet) - 1)]);
+    const auto byteText = raw.substr(i * 2, 2);
+    const unsigned int val = static_cast<unsigned int>(std::stoul(byteText, nullptr, 16));
+    code.push_back(kAlphabet[val & 0x1f]);
     if (i == 3) code.push_back('-');
   }
   return code;

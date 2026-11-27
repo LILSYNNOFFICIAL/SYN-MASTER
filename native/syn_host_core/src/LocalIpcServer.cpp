@@ -287,16 +287,27 @@ bool LocalIpcServer::start(std::string& errorOut) {
             std::string code = payload.value("pairingCode", "");
             std::string tok = payload.value("pairToken", "");
 
-            bool codeMatch = !code.empty() && SecurityPolicy::constantTimeEquals(code, m_config.pairingCode);
             bool tokMatch = !tok.empty() && SecurityPolicy::constantTimeEquals(tok, m_config.sessionToken);
+            bool codeMatch = false;
+            if (!tokMatch && !code.empty()) {
+              const int attempt = m_failedPairingAttempts.fetch_add(1);
+              if (attempt >= 5 || m_pairedOnce.load()) {
+                return std::make_shared<ix::HttpResponse>(
+                    429, "Too Many Requests", ix::HttpErrorCode::Ok, respHeaders,
+                    nlohmann::json({{"error", "Pairing code is unavailable; restart the host to pair again"}}).dump());
+              }
+              codeMatch = SecurityPolicy::constantTimeEquals(code, m_config.pairingCode);
+              if (codeMatch) {
+                bool expected = false;
+                if (!m_pairedOnce.compare_exchange_strong(expected, true)) codeMatch = false;
+              }
+            }
 
             if (!codeMatch && !tokMatch) {
               return std::make_shared<ix::HttpResponse>(
                   401, "Unauthorized", ix::HttpErrorCode::Ok, respHeaders,
                   nlohmann::json({{"error", "Invalid pairing code or token"}}).dump());
             }
-
-            m_pairedOnce = true;
             nlohmann::json body = {
                 {"paired", true},
                 {"sessionToken", m_config.sessionToken},

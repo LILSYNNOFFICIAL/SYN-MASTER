@@ -168,8 +168,13 @@ int main(int argc, char* argv[]) {
   HostServerConfig cfg;
   cfg.httpPort = httpPort;
   cfg.wsPort = wsPort;
-  cfg.pairingCode = SecurityPolicy::generatePairingCode();
-  cfg.sessionToken = SecurityPolicy::generateSecureToken(32);
+  try {
+    cfg.pairingCode = SecurityPolicy::generatePairingCode();
+    cfg.sessionToken = SecurityPolicy::generateSecureToken(32);
+  } catch (const std::exception& error) {
+    std::cerr << "[syn-plugin-host] Secure random initialization failed: " << error.what() << "\n";
+    return 1;
+  }
   cfg.scannerBinaryPath = scannerPath.string();
   cfg.workerBinaryPath = workerPath.string();
   cfg.standardDirectories = stdDirs;

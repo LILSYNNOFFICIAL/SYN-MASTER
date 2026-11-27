@@ -268,8 +268,9 @@ export const DynamicEQPanel: React.FC<Props> = ({ module, sampleRate, preSpectru
           const band = bands.find((item) => item.id === id);
           if (!band) return;
           if (patch.yDb !== undefined) {
-            const mode = patch.yDb > 0 ? 'boost' : 'cut';
-            patchBand(id, { ...patch, mode, maxCutDb: patch.yDb > 0 ? Math.max(0.05, patch.yDb) : Math.min(-0.05, patch.yDb) }, phase);
+            const { yDb, ...bandPatch } = patch;
+            const mode = yDb > 0 ? 'boost' : 'cut';
+            patchBand(id, { ...bandPatch, mode, maxCutDb: yDb > 0 ? Math.max(0.05, yDb) : Math.min(-0.05, yDb) }, phase);
           } else {
             patchBand(id, patch, phase);
           }

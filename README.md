@@ -56,7 +56,7 @@ Application code reviewed at `01ae34cc95cff1ae35fdadb5d3f2cf4dbea4c3fa`; this ha
 
 - Autonomous and assisted FIX ALL runs now attempt source stem analysis before AI tool selection, so the strategy prompt receives a measured vocal balance or an explicit unavailable result. This adds separation time when stems are not already cached.
 - Each rendered Director checkpoint now records processor peak and gain-reduction telemetry. Diagnostic exports show the measurements for the exact modules in each pass, including whether Vocal Rebalance applied and its effective stem gains. Dynamic EQ traces remain separate preview data.
-- Dynamic EQ graph bands now have distinct default positions, graph double-click adds at the chosen frequency and range, and dragging a node vertically adjusts its maximum cut or boost. Review note: the current drag handler also copies its graph-only `yDb` field into the saved band object; see the current code review findings before relying on serialization of dragged bands.
+- Dynamic EQ graph bands have distinct default positions, graph double-click adds at the chosen frequency and range, and dragging adjusts frequency and maximum cut/boost without persisting graph-only coordinates.
 - The supplied Shadows diagnostic confirmed that Dynamic EQ and its chosen settings were included in the rendered passes, but the older report did not include processor activity telemetry. Match EQ was unavailable without a learned reference; click repair was unwarranted because click analysis measured zero clicks.
 - Web CI [#655](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/runs/46026015038): unit tests, TypeScript, production build, bundle check and startup smoke passed; the responsive browser smoke test failed at the fade-in drag assertion (`0.00s`, expected `0.10s`). This is still open.
 - Windows x64 workflow [#363](https://github.com/LILSYNNOFFICIAL/SYN-MASTER/actions/runs/46026015265) passed, including native core/worker and VST3 validation and workstation installer packaging.
@@ -487,7 +487,7 @@ Cloud AI is provided by SYN-MASTER. Ordinary users do not need a Google AI Studi
 
 ## AI endpoint protections and limits
 
-The AI routes are protected by a process-local fixed-window IP limiter: 20 requests per IP per minute. A 429 response includes `Retry-After`. Validated anonymous guest-session IDs key the per-session strategy/refine budgets. The server also allows at most 2 active mastering/refinement requests per guest session and 8 per process; these counters are process-local.
+The AI routes are protected by a process-local fixed-window IP limiter: 20 requests per IP per minute. A 429 response includes `Retry-After`. Validated anonymous guest-session IDs key the per-session strategy/refine budgets; those budgets are consumed only after payload and chain validation, immediately before the Gemini call. The per-process daily global cap is not deployment-wide when Cloud Run has multiple instances. Validated anonymous guest-session IDs key the per-session strategy/refine budgets. The server also allows at most 2 active mastering/refinement requests per guest session and 8 per process; these counters are process-local.
 
 Because cloud AI is on by default for FIX ALL, the two routes that spend `GEMINI_API_KEY` (`POST /api/ai/master`, `POST /api/ai/refine`) also have spend caps (`src/server/aiSpendLimiter.mjs`), checked after signed guest-session validation so unauthenticated traffic never uses the budget:
 

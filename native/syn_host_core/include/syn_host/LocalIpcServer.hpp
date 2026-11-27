@@ -79,6 +79,7 @@ private:
   std::atomic<int> m_scanDone{0};
   std::atomic<int> m_scanTotal{0};
   std::atomic<bool> m_pairedOnce{false};
+  std::atomic<int> m_failedPairingAttempts{0};
   std::atomic<int> m_authedClients{0};
 
   struct Impl;
