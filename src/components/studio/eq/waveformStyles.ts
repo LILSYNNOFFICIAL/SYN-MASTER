@@ -94,7 +94,8 @@ export const WAVEFORM_CSS = `
   .syn-wf-neon-bloom { animation: syn-wf-neon-breathe 4.8s ease-in-out infinite; }
 }
 /* ---- Frequency-colored neon fill + loudness tint (no blur: cheap on phones) ---- */
-.syn-wf-neon-fill, .syn-wf-tint { pointer-events: none; }
+/* Skin gives every EQ svg path a drop-shadow; big translucent fills skip it (GPU cost on phones). */
+.syn-wf-neon-fill, .syn-wf-tint { pointer-events: none; filter: none !important; }
 /* ---- Fade length label on the fade curve (hover / drag) ---- */
 .syn-wf-fade-label {
   position: absolute; z-index: 3; transform: translate(-50%, -135%); pointer-events: none; white-space: nowrap;
