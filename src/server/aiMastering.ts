@@ -32,7 +32,73 @@ export class AiTimeoutError extends Error {
 }
 
 export const BUILTIN_GEMINI_MODEL = 'gemini-4-hydrogen';
+export const FALLBACK_GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const GEMINI_TIMEOUT_MS = 60_000;
+
+export function extractJsonText(raw: string | undefined): string {
+  if (!raw) return '{}';
+  let s = raw.trim();
+  if (s.startsWith('```')) {
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  }
+  return s || '{}';
+}
+
+async function executeGeminiContentWithFallback(
+  ai: GoogleGenAI,
+  contents: string,
+  systemInstruction: string,
+  schema: unknown,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<{ rawText: string; modelName: string }> {
+  // Primary attempt: gemini-4-hydrogen with ThinkingLevel.LOW for fast low-latency strategy
+  try {
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: BUILTIN_GEMINI_MODEL,
+        contents,
+        config: {
+          systemInstruction,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: schema,
+        },
+      }),
+      timeoutMs,
+      timeoutMessage,
+    );
+    const rawText = extractJsonText(response.text);
+    return { rawText, modelName: BUILTIN_GEMINI_MODEL };
+  } catch (err) {
+    const isHighDemandOrQuota =
+      err instanceof Error &&
+      /503|UNAVAILABLE|high demand|429|RESOURCE_EXHAUSTED|quota|rate.*limit/i.test(err.message);
+    if (!isHighDemandOrQuota && err instanceof AiTimeoutError) {
+      throw err;
+    }
+    console.warn(
+      `[SYN-AI] ${BUILTIN_GEMINI_MODEL} unavailable or high demand (${err instanceof Error ? err.message : String(err)}). Falling back to ${FALLBACK_GEMINI_MODEL}.`,
+    );
+  }
+
+  // High-availability fallback: gemini-3.1-flash-lite executes in ~2s and honors the same schema
+  const fallbackResponse = await withTimeout(
+    ai.models.generateContent({
+      model: FALLBACK_GEMINI_MODEL,
+      contents,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: schema,
+      },
+    }),
+    timeoutMs,
+    timeoutMessage,
+  );
+  const rawText = extractJsonText(fallbackResponse.text);
+  return { rawText, modelName: FALLBACK_GEMINI_MODEL };
+}
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -137,23 +203,16 @@ export async function generateGeminiMasterStrategy(input: {
   const promptChars = SYSTEM_PROMPT.length + prompt.length;
   const startedMs = performance.now();
 
-  const response = await withTimeout(
-    ai.models.generateContent({
-      model: BUILTIN_GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
-        responseMimeType: 'application/json',
-        responseSchema: STRATEGY_SCHEMA,
-      },
-    }),
+  const { rawText, modelName } = await executeGeminiContentWithFallback(
+    ai,
+    prompt,
+    SYSTEM_PROMPT,
+    STRATEGY_SCHEMA,
     GEMINI_TIMEOUT_MS,
     'AI mastering strategy timed out after 60s.',
   );
 
   const responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));
-  const rawText = (response.text ?? '{}').trim();
   const data = JSON.parse(rawText);
   const rawProcessors = Array.isArray(data.processors) ? data.processors : [];
   const aiReturnedModules = rawProcessors.map((p: { type?: unknown }) => String(p?.type ?? '')).filter(Boolean);
@@ -175,7 +234,7 @@ export async function generateGeminiMasterStrategy(input: {
     reasoningPerProcessor: reasoning,
     chain,
     aiMeta: {
-      modelName: BUILTIN_GEMINI_MODEL,
+      modelName,
       responseTimeMs,
       promptChars,
       aiReturnedModules,
@@ -201,23 +260,17 @@ export async function refineGeminiIteration(input: {
   const promptChars = SYSTEM_PROMPT.length + prompt.length;
   const startedMs = performance.now();
 
-  const response = await withTimeout(
-    ai.models.generateContent({
-      model: BUILTIN_GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        responseMimeType: 'application/json',
-        responseSchema: STRATEGY_SCHEMA,
-      },
-    }),
+  const { rawText, modelName } = await executeGeminiContentWithFallback(
+    ai,
+    prompt,
+    SYSTEM_PROMPT,
+    STRATEGY_SCHEMA,
     GEMINI_TIMEOUT_MS,
     'AI refinement pass timed out after 60s.',
   );
 
   const responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));
-  const data = JSON.parse((response.text ?? '{}').trim());
+  const data = JSON.parse(rawText);
   const rawProcessors = Array.isArray(data.processors) ? data.processors : [];
   const aiReturnedModules = rawProcessors.map((p: { type?: unknown }) => String(p?.type ?? '')).filter(Boolean);
   const { chain, reasoning } = parseAiChain(rawProcessors);
@@ -228,7 +281,7 @@ export async function refineGeminiIteration(input: {
     reasoningPerProcessor: reasoning,
     chain: chain.length > 0 ? chain : input.currentChain,
     aiMeta: {
-      modelName: BUILTIN_GEMINI_MODEL,
+      modelName,
       responseTimeMs,
       promptChars,
       aiReturnedModules,

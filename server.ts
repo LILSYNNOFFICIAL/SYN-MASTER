@@ -167,7 +167,18 @@ function sendSanitizedAiError(res: express.Response, err: unknown): void {
   }
   const msg = err instanceof Error ? err.message : 'AI mastering request failed.';
   console.error('[SYN-AI] Endpoint error:', msg);
-  res.status(500).json({ error: 'AI mastering service could not complete the request.', code: 'server_error' });
+
+  if (/429|RESOURCE_EXHAUSTED|quota|rate.*limit/i.test(msg)) {
+    res.status(429).json({ error: 'Cloud AI rate limit reached. Retrying or using local DSP.', code: 'ai_rate_limited' });
+    return;
+  }
+  if (/503|UNAVAILABLE|high demand/i.test(msg)) {
+    res.status(503).json({ error: 'Cloud AI model is temporarily experiencing high demand. Please try again shortly.', code: 'server_error' });
+    return;
+  }
+
+  const sanitizedMsg = msg.replace(/key=[^&\s]+/gi, 'key=***').slice(0, 200);
+  res.status(500).json({ error: sanitizedMsg || 'AI mastering service could not complete the request.', code: 'server_error' });
 }
 
 async function measureEncodedLoudness(filePath: string): Promise<{ integratedLufs: number | null; truePeakDbtp: number | null }> {

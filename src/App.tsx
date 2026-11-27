@@ -136,7 +136,6 @@ const ExportModal = React.lazy(() => import('./components/Modals').then(({ Expor
 const SettingsModal = React.lazy(() => import('./components/Modals').then(({ SettingsModal }) => ({ default: SettingsModal })));
 import { WorkspaceNavigation } from './components/WorkspaceNavigation';
 import { WorkspaceHero } from './components/WorkspaceHero';
-import { ImportScreen } from './components/studio/ImportScreen';
 import { MasterConsole } from './components/console/MasterConsole';
 import { Portal } from './ui/Portal';
 import { FixItStage } from './components/studio/FixItStage';
@@ -1113,7 +1112,15 @@ export default function App() {
   }, [redoStack, chain]);
 
   const loadChannelsAsSource = useCallback(
-    (channels: Float32Array[], sampleRate: number, name: string, fileSizeBytes: number, format: string, isDemo = false) => {
+    (
+      channels: Float32Array[],
+      sampleRate: number,
+      name: string,
+      fileSizeBytes: number,
+      format: string,
+      isDemo = false,
+      precomputed?: { analysis: AudioAnalysis; peaks: number[] },
+    ) => {
       // Cancel any in-flight CHAIN WITH AI run targeting the previous source track
       vocalPreparationAbortRef.current?.abort();
       vocalPreparationAbortRef.current = null;
@@ -1157,8 +1164,8 @@ export default function App() {
       telemetryStore.reset();
       setAuditionTarget('mastered');
 
-      const analysis = analyzeAudioBuffer(channels, sampleRate);
-      const peaks = extractWaveformPeaks(channels, 400);
+      const analysis = precomputed?.analysis ?? analyzeAudioBuffer(channels, sampleRate);
+      const peaks = precomputed?.peaks ?? extractWaveformPeaks(channels, 400);
       const trackId = `trk-${Date.now()}`;
       activeTrackIdRef.current = trackId;
       const asset: AudioTrackAsset = {
@@ -1219,26 +1226,55 @@ export default function App() {
     async (file: File) => {
       const uploadSeq = ++sourceUploadSeqRef.current;
       const attemptName = file.name;
-      setImportLoadingPercent(15);
+      setImportLoadingPercent(4);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      let targetCap = 54;
+      const progressTimer = window.setInterval(() => {
+        setImportLoadingPercent((prev) => (prev !== null && prev < targetCap ? prev + 2 : prev));
+      }, 90);
       try {
-        setImportLoadingPercent(45);
         const decoded = await engineRef.current!.decodeFile(file);
         if (uploadSeq !== sourceUploadSeqRef.current) {
           setImportLoadingPercent(null);
           return;
         }
-        setImportLoadingPercent(75);
-        analyzeAudioBuffer(decoded.channels, decoded.sampleRate);
+        targetCap = 94;
+        setImportLoadingPercent((prev) => Math.max(prev ?? 60, 60));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const offThread = await renderAndAnalyzeOffThread({
+          sourceChannels: decoded.channels,
+          sampleRate: decoded.sampleRate,
+          chain: [],
+          includePeaks: true,
+          peakBins: 400,
+        });
+        if (uploadSeq !== sourceUploadSeqRef.current) {
+          setImportLoadingPercent(null);
+          return;
+        }
         const ext = file.name.split('.').pop()?.toUpperCase() ?? 'AUDIO';
-        loadChannelsAsSource(decoded.channels, decoded.sampleRate, file.name, file.size, ext, false);
+        loadChannelsAsSource(
+          decoded.channels,
+          decoded.sampleRate,
+          file.name,
+          file.size,
+          ext,
+          false,
+          {
+            analysis: offThread.analysis,
+            peaks: offThread.peaks ?? extractWaveformPeaks(decoded.channels, 400),
+          },
+        );
         setImportLoadingPercent(100);
-        setTimeout(() => setImportLoadingPercent(null), 350);
+        window.setTimeout(() => setImportLoadingPercent(null), 320);
       } catch (err) {
         if (uploadSeq !== sourceUploadSeqRef.current) return;
         setImportLoadingPercent(null);
         setStatusNotice(
           `Could not decode "${attemptName}". Please ensure it is a valid WAV, MP3, FLAC, AAC, M4A, OGG, or AIFF audio file.`,
         );
+      } finally {
+        window.clearInterval(progressTimer);
       }
     },
     [loadChannelsAsSource],
@@ -1276,10 +1312,32 @@ export default function App() {
 
   const handleUploadReferenceFile = useCallback(async (file: File) => {
     const uploadSeq = ++referenceUploadSeqRef.current;
+    setImportLoadingPercent(4);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    let targetCap = 54;
+    const progressTimer = window.setInterval(() => {
+      setImportLoadingPercent((prev) => (prev !== null && prev < targetCap ? prev + 2 : prev));
+    }, 90);
     try {
       const decoded = await engineRef.current!.decodeFile(file);
-      if (uploadSeq !== referenceUploadSeqRef.current) return;
-      analyzeAudioBuffer(decoded.channels, decoded.sampleRate);
+      if (uploadSeq !== referenceUploadSeqRef.current) {
+        setImportLoadingPercent(null);
+        return;
+      }
+      targetCap = 94;
+      setImportLoadingPercent((prev) => Math.max(prev ?? 60, 60));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const offThread = await renderAndAnalyzeOffThread({
+        sourceChannels: decoded.channels,
+        sampleRate: decoded.sampleRate,
+        chain: [],
+        includePeaks: true,
+        peakBins: 400,
+      });
+      if (uploadSeq !== referenceUploadSeqRef.current) {
+        setImportLoadingPercent(null);
+        return;
+      }
       vocalPreparationAbortRef.current?.abort();
       vocalPreparationAbortRef.current = null;
       vocalPreparationCacheRef.current.clear();
@@ -1288,7 +1346,8 @@ export default function App() {
       referenceChannelsRef.current = decoded.channels;
       engineRef.current!.setReferenceChannels(decoded.channels, decoded.sampleRate);
       matchEqStore.setReference(decoded.channels, decoded.sampleRate, file.name);
-      const analysis = analyzeAudioBuffer(decoded.channels, decoded.sampleRate);
+      const analysis = offThread.analysis;
+      const peaks = offThread.peaks ?? extractWaveformPeaks(decoded.channels, 400);
       const referenceId = `ref-${Date.now()}`;
       referenceTrackIdRef.current = referenceId;
       setReferenceTrack({
@@ -1300,13 +1359,18 @@ export default function App() {
         channels: decoded.channels.length,
         durationSec: analysis.durationSec,
         bitDepthLabel: '32-bit Float',
-        peaks: extractWaveformPeaks(decoded.channels, 400),
+        peaks,
         analysis,
       });
+      setImportLoadingPercent(100);
+      window.setTimeout(() => setImportLoadingPercent(null), 320);
       setStatusNotice(`Loaded reference "${file.name}"`);
     } catch {
       if (uploadSeq !== referenceUploadSeqRef.current) return;
+      setImportLoadingPercent(null);
       setStatusNotice(`Failed to decode reference file "${file.name}".`);
+    } finally {
+      window.clearInterval(progressTimer);
     }
   }, []);
 
@@ -3235,14 +3299,20 @@ export default function App() {
       {importLoadingPercent !== null && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-md">
           <div
-            className="w-32 h-32 rounded-full flex items-center justify-center shadow-2xl relative"
+            className="w-36 h-36 rounded-full flex items-center justify-center relative"
             style={{
-              background: `conic-gradient(#38BDF8 ${importLoadingPercent}%, #D4AF37 ${importLoadingPercent}%)`,
+              background: `conic-gradient(from 0deg, #38BDF8 0% ${importLoadingPercent}%, #D4AF37 ${importLoadingPercent}% 100%)`,
+              boxShadow: '0 0 0 6px rgba(5,7,13,0.9), 0 0 28px rgba(56,189,248,0.4)',
             }}
           >
-            <div className="w-28 h-28 rounded-full bg-[#0A0805] flex flex-col items-center justify-center text-center p-2">
-              <span className="font-display font-extrabold text-lg text-[#F2CA52]">{importLoadingPercent}%</span>
-              <span className="text-[10px] font-mono text-[#A8986E]">LOADING</span>
+            <div
+              className="w-32 h-32 rounded-full flex flex-col items-center justify-center text-center p-2"
+              style={{
+                background: `conic-gradient(from 0deg, rgba(56,189,248,0.28) 0% ${importLoadingPercent}%, rgba(10,14,26,0.94) ${importLoadingPercent}% 100%)`,
+              }}
+            >
+              <span className="font-display font-extrabold text-2xl text-[#F2CA52]">{importLoadingPercent}%</span>
+              <span className="text-[10px] font-mono text-[#38BDF8] tracking-widest mt-0.5">LOADING</span>
             </div>
           </div>
           <p className="mt-4 font-display text-sm text-[#F5EEDC] tracking-wide">Importing &amp; decoding audio track...</p>

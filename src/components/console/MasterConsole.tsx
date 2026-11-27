@@ -267,6 +267,33 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
     return () => window.clearTimeout(t);
   }, []);
   const [presetId, setPresetId] = useState<string>(p.presets[0]?.id ?? '');
+  const [fixProgress, setFixProgress] = useState<number>(0);
+  const wasRunningRef = React.useRef(false);
+  useEffect(() => {
+    if (p.running) {
+      wasRunningRef.current = true;
+      const stageLower = (p.stage ?? '').toLowerCase();
+      const targetFloor = p.pass === 0
+        ? (stageLower.includes('stem') ? 16 : stageLower.includes('think') ? 22 : 8)
+        : Math.min(95, 25 + Math.round((p.pass / Math.max(1, Math.min(p.maxPasses, 5))) * 70));
+      setFixProgress((prev) => Math.max(prev < 6 ? 6 : prev, targetFloor));
+      const ceiling = p.pass === 0 ? 28 : Math.min(96, targetFloor + 12);
+      const timer = window.setInterval(() => {
+        setFixProgress((prev) => (prev < ceiling ? prev + 1 : prev));
+      }, 280);
+      return () => window.clearInterval(timer);
+    }
+    if (wasRunningRef.current) {
+      wasRunningRef.current = false;
+      if (p.report && p.report.status !== 'stopped-by-user') {
+        setFixProgress(100);
+        const resetTimer = window.setTimeout(() => setFixProgress(0), 500);
+        return () => window.clearTimeout(resetTimer);
+      }
+      setFixProgress(0);
+    }
+    return undefined;
+  }, [p.running, p.pass, p.maxPasses, p.stage, p.report]);
   const modeInfo = p.mode ? MODE_INFO[p.mode] : undefined;
   const suggestedPreset = modeInfo?.preset && p.presets.some((x) => x.id === modeInfo.preset) ? modeInfo.preset : null;
   useEffect(() => {
@@ -373,7 +400,8 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
       <AddModule type="maximizer" onAdd={add} />
     );
 
-  const progressPercent = p.running ? Math.min(100, Math.max(0, Math.round((p.pass / Math.max(1, p.maxPasses)) * 100))) : 0;
+  const progressPercent = p.running || fixProgress > 0 ? Math.min(100, Math.max(0, fixProgress)) : 0;
+  const isFilling = p.running || fixProgress > 0;
 
   const fixButton = (
     <div className="syn2-fix-centerpiece syn-fixai-wrap">
@@ -385,20 +413,36 @@ export const MasterConsole: React.FC<MasterConsoleProps> = (p) => {
         aria-describedby="syn-fixai-status"
         aria-label={p.running ? 'Fix All with AI is running' : 'Fix All with AI: analyze, fix, render and verify the master'}
         style={{
-          boxShadow: p.running ? `0 0 0 4px #38BDF8, 0 0 30px rgba(56,189,248,0.5)` : undefined,
+          boxShadow: isFilling
+            ? '0 0 0 6px rgba(5,7,13,0.9), 0 0 28px rgba(56,189,248,0.45)'
+            : undefined,
         }}
       >
-        <span
-          className="syn-fixai-ring"
-          aria-hidden="true"
-          style={{
-            background: p.running
-              ? `conic-gradient(#38BDF8 ${progressPercent}%, rgba(212,175,55,0.4) ${progressPercent}%)`
-              : undefined,
-          }}
-        />
+        <span className="syn-fixai-ring" aria-hidden="true" />
+        {isFilling && (
+          <>
+            <span
+              className="syn-fixai-fill"
+              aria-hidden="true"
+              style={{
+                background: `conic-gradient(from 0deg, #38BDF8 0% ${progressPercent}%, #D4AF37 ${progressPercent}% 100%)`,
+              }}
+            />
+            <span
+              className="syn-fixai-inner-disc"
+              aria-hidden="true"
+              style={{
+                background: `conic-gradient(from 0deg, rgba(56,189,248,0.28) 0% ${progressPercent}%, rgba(10,14,26,0.94) ${progressPercent}% 100%)`,
+              }}
+            />
+          </>
+        )}
         <BrainCircuit className="syn-fixai-icon" aria-hidden="true" />
-        <span className="syn-fixai-text"><span>FIX ALL</span><strong>AI {p.running ? `(${progressPercent}%)` : ''}</strong></span>
+        <span className="syn-fixai-text">
+          <span>FIX ALL</span>
+          <strong>AI</strong>
+          {isFilling && <small className="syn-fixai-pct">{progressPercent}%</small>}
+        </span>
         <svg className="syn-fixai-wave" viewBox="0 0 60 16" aria-hidden="true">
           <path d="M0 8 L8 8 L11 3 L14 13 L17 1 L20 15 L23 5 L26 11 L29 7 L32 9 L35 4 L38 12 L41 6 L44 10 L47 8 L60 8" />
         </svg>
