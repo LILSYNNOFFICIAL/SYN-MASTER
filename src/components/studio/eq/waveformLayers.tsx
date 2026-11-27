@@ -1,9 +1,10 @@
 /**
  * Lazy-loaded extra layers for the EQ graph (kept out of the main bundle):
  * - NeonFill: frequency-colored translucent fill under the analyser's neon outline.
- * - LoudnessTint: neon MESH gradient clipped to the waveform (rainbow hues flowing along time and
- *   shifting from the center line to the peaks, soft glow blobs on the loudest moments), with RMS
- *   loudness driving brightness (quiet = dim, loud = bright and saturated).
+ * - LoudnessTint: bright NEON BLUE body clipped to the waveform (blue/cyan shimmer along time, a
+ *   brighter ice-blue core on the center line, soft cyan blobs on the loudest moments) plus a cheap
+ *   edge bloom (duplicated low-opacity strokes, no blur). RMS loudness drives brightness and glow
+ *   (quiet = dim, loud = bright).
  * - FadeLabel: fade length in seconds, shown on the fade curve while hovering or dragging.
  * Display only. No blur, no animation (cheap on phones, nothing to reduce for reduced-motion).
  */
@@ -12,7 +13,7 @@ import type { FadeSettings } from '../../../dsp/fades';
 import { H, W, fToX } from './graphMath';
 import { fadeGainAt, secToX, type TimeView } from './waveformView';
 import type { WaveformSource } from './waveformSource';
-import { FREQ_FILL_STOPS, meshBlobs, meshColor, meshGlowStops, meshHueStops, meshRate } from './waveformTint';
+import { FREQ_FILL_STOPS, meshBlobs, meshColor, meshGlowStops, meshHueStops, meshRate, NEON_BLUE_CORE, NEON_BLUE_GLOW } from './waveformTint';
 
 export const NeonFill: React.FC<{ uid: string; d: string }> = ({ uid, d }) => (
   <g pointerEvents="none" data-neon-fill="freq">
@@ -81,7 +82,7 @@ export const LoudnessTint: React.FC<TintProps> = ({ uid, d, env, view, durationS
       glow: meshGlowStops(levels, 64),
       blobs: meshBlobs(levels, 3).map((b) => ({
         ...b,
-        // Blob hue = palette half a trip away from the time hue there (contrast, still in-family).
+        // Blob hue = palette half a trip away from the time hue there (contrast, still blue/cyan).
         color: meshColor((durationSec > 0 ? view.start + b.x * span : b.x) * rate + 0.5),
       })),
     };
@@ -89,7 +90,7 @@ export const LoudnessTint: React.FC<TintProps> = ({ uid, d, env, view, durationS
   if (!mesh) return null;
   const id = (k: string) => `${uid}-m${k}`;
   return (
-    <g pointerEvents="none" data-waveform-tint="loudness" data-waveform-mesh="neon">
+    <g pointerEvents="none" data-waveform-tint="loudness" data-waveform-mesh="neon" data-waveform-color="neon-blue">
       <defs>
         <clipPath id={id('clip')}><path d={d} /></clipPath>
         <linearGradient id={id('core')} x1={0} x2={W} y1={0} y2={0} gradientUnits="userSpaceOnUse">
@@ -116,11 +117,13 @@ export const LoudnessTint: React.FC<TintProps> = ({ uid, d, env, view, durationS
         <mask id={id('glowm')} maskUnits="userSpaceOnUse" x={0} y={0} width={W} height={H}>
           <rect width={W} height={H} fill={`url(#${id('glow')})`} />
         </mask>
-        {/* Soft white core along the center line (reads as light inside the glass). */}
+        {/* Bright ice-blue core along the center line (the hot middle of the neon tube). */}
         <linearGradient id={id('cv')} x1={0} x2={0} y1={0} y2={H} gradientUnits="userSpaceOnUse">
-          <stop offset="0.4" stopColor="#fff" stopOpacity={0} />
-          <stop offset="0.5" stopColor="#fff" stopOpacity={0.16} />
-          <stop offset="0.6" stopColor="#fff" stopOpacity={0} />
+          <stop offset="0.3" stopColor={NEON_BLUE_CORE} stopOpacity={0} />
+          <stop offset="0.44" stopColor={NEON_BLUE_CORE} stopOpacity={0.4} />
+          <stop offset="0.5" stopColor="#E6F8FF" stopOpacity={0.62} />
+          <stop offset="0.56" stopColor={NEON_BLUE_CORE} stopOpacity={0.4} />
+          <stop offset="0.7" stopColor={NEON_BLUE_CORE} stopOpacity={0} />
         </linearGradient>
         {mesh.blobs.map((b, i) => (
           <radialGradient key={i} id={id(`b${i}`)} cx={b.x * W} cy={H / 2} r={W * (0.1 + 0.08 * b.t)} gradientUnits="userSpaceOnUse">
@@ -130,11 +133,17 @@ export const LoudnessTint: React.FC<TintProps> = ({ uid, d, env, view, durationS
           </radialGradient>
         ))}
       </defs>
-      <g clipPath={`url(#${id('clip')})`} mask={`url(#${id('glowm')})`} className="syn-wf-tint" opacity={0.94}>
+      <g clipPath={`url(#${id('clip')})`} mask={`url(#${id('glowm')})`} className="syn-wf-tint" opacity={0.84}>
         <rect width={W} height={H} fill={`url(#${id('core')})`} />
         <rect width={W} height={H} fill={`url(#${id('edge')})`} mask={`url(#${id('edgem')})`} />
         {mesh.blobs.map((b, i) => <rect key={i} width={W} height={H} fill={`url(#${id(`b${i}`)})`} data-mesh-blob={i} />)}
         <rect width={W} height={H} fill={`url(#${id('cv')})`} />
+      </g>
+      {/* Edge bloom: wide faint strokes + a thin bright rim (no blur filter: cheap on phones). Loudness mask: loud = more glow. */}
+      <g mask={`url(#${id('glowm')})`} className="syn-wf-tint" data-waveform-glow="blue" fill="none" strokeLinejoin="round">
+        <path d={d} stroke={NEON_BLUE_GLOW} strokeOpacity={0.12} strokeWidth={9} vectorEffect="non-scaling-stroke" />
+        <path d={d} stroke={NEON_BLUE_GLOW} strokeOpacity={0.24} strokeWidth={4.5} vectorEffect="non-scaling-stroke" />
+        <path d={d} stroke={NEON_BLUE_CORE} strokeOpacity={0.85} strokeWidth={1.3} vectorEffect="non-scaling-stroke" />
       </g>
     </g>
   );

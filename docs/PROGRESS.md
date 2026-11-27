@@ -192,3 +192,13 @@ Dated entries, newest last, so work can resume if a session is cut off.
 - Browser check (headless Chromium, production build): Shadows_Opening_Click_Repair.wav and the 30 s quiet-to-loud synthetic render the mesh at 1440 and 360 px, reduced motion, and Ctrl+wheel zoom 52x; empty workstation draws no mesh; no page errors. Not checked on a real phone.
 - Checks: lint ok, 504 tests pass, build ok, check:bundle ok, production /api/health ok:true.
 - Next: (none for this order).
+## 2026-11-26 — Waveform pass 4: bright neon glowing BLUE body
+- Owner: "keep everything as is but make the audio waveform bright neon glowing blue."
+- Only the waveform body changed (waveformTint.ts MESH_PALETTE + waveformLayers.tsx LoudnessTint): the rainbow mesh palette is now a cyclic neon-blue family (#1E90FF > #00B4FF > hot cyan > #7FDBFF ice-blue > #00B4FF > deep electric blue), so it reads as one glowing blue tube with a gentle shimmer along time; glow blobs are blue/cyan too.
+- Brighter ice-blue (#7FDBFF to near-white) core along the center line; body slightly more translucent (group opacity 0.94 -> 0.84) so layers behind still show.
+- New edge bloom: the waveform outline duplicated as two faint wide #00B4FF strokes plus a thin bright #7FDBFF rim (non-scaling strokes, no blur filter, no animation). It sits under the same RMS loudness mask, so loud = brighter body and more glow, quiet = dim.
+- Unchanged: frequency-colored rainbow fill under the analyser line, neon envelope line, fade curves/shading/labels, zoom, pill, skin.
+- Tests: waveformTint.test.ts updated: palette must stay blue-dominant all the way round (starts on #1E90FF), every body color in the render is neon blue, edge bloom strokes present and under the loudness mask, ice-blue center core; all earlier checks kept (clip, loudness dimming, no blur/animation, no blobs on silence, nothing drawn with no track).
+- Browser check (headless Chromium, production build, Shadows_Opening_Click_Repair.wav): 1440 px, 360 px, reduced motion, Ctrl+wheel zoom 52x; no page errors; computed filter/animation none. Not checked on a real phone.
+- Checks: lint ok, 504 tests pass, build ok, check:bundle ok (main 736.9 KiB raw / 224.6 KiB gzip, waveformLayers chunk 7.6 KiB), production /api/health ok:true.
+- Next: (none for this order).

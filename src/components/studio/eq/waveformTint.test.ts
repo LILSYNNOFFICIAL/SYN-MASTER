@@ -76,6 +76,11 @@ test('lazy layers render: frequency-colored neon fill fading down, loudness tint
   assert.match(tint, /mask="url\(#u-mglowm\)"/, 'loudness glow mask applied');
   assert.match(tint, /mask="url\(#u-medgem\)"/, 'center-to-peak hue layer');
   assert.doesNotMatch(tint, /blur|filter=|<animate/, 'no blur, no animation (phones, reduced motion)');
+  assert.match(tint, /data-waveform-color="neon-blue"/);
+  assert.match(tint, /data-waveform-glow="blue"[^>]*>(<path[^>]*stroke="#00B4FF"[^>]*><\/path>){2}<path[^>]*stroke="#7FDBFF"/, 'edge bloom: two faint cyan strokes + bright ice-blue rim');
+  assert.match(tint, /<g mask="url\(#u-mglowm\)"[^>]*data-waveform-glow/, 'edge glow follows loudness');
+  assert.match(tint, /id="u-mcv"[\s\S]*?stop-color="#7FDBFF"/, 'bright ice-blue center-line core');
+  for (const c of tint.match(/rgb\(\d+,\d+,\d+\)/g)!) { const [r, g, bl] = c.match(/\d+/g)!.map(Number); assert.ok(bl >= 230 && bl > r + 100, `body color ${c} is neon blue`); }
   const hues = new Set([...tint.matchAll(/id="u-mcore"[\s\S]*?<\/linearGradient>/g)][0][0].match(/rgb\(\d+,\d+,\d+\)/g));
   assert.ok(hues.size >= 12, `many neon hues along time (got ${hues.size})`);
   const glow = [...[...tint.matchAll(/id="u-mglow"[\s\S]*?<\/linearGradient>/g)][0][0].matchAll(/stop-opacity="([\d.]+)"/g)].map((m) => Number(m[1]));
@@ -95,7 +100,13 @@ test('lazy layers render: frequency-colored neon fill fading down, loudness tint
 
 test('neon mesh: smooth cyclic palette, hues pinned to time, zoom keeps several hues, glow/blobs follow loudness', () => {
   const rgb = (c: string) => c.match(/\d+/g)!.map(Number);
-  assert.equal(meshColor(0), `rgb(${MESH_PALETTE[0].join(',')})`, 'starts on hot pink');
+  assert.equal(meshColor(0), `rgb(${MESH_PALETTE[0].join(',')})`, 'starts on neon blue');
+  assert.equal(meshColor(0), 'rgb(30,144,255)', '#1E90FF');
+  // Neon blue only: every color around the cycle is blue-dominant and bright (no pink/gold/green).
+  for (let i = 0; i <= 200; i++) {
+    const [r, g, bl] = rgb(meshColor(i / 200));
+    assert.ok(bl >= 230 && bl > r + 100 && bl > g, `blue at ${i}: rgb(${r},${g},${bl})`);
+  }
   assert.equal(meshColor(1), meshColor(0), 'cyclic');
   assert.equal(meshColor(-0.25), meshColor(0.75), 'negative phases wrap');
   assert.equal(meshColor(NaN), meshColor(0));

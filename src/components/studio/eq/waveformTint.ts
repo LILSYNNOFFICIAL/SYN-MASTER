@@ -65,22 +65,31 @@ export const FREQ_FILL_STOPS: ReadonlyArray<[number, string]> = [
 ];
 
 /* ---------------------------------------------------------------------------------------------
- * Neon mesh gradient for the waveform body (aurora / mesh-gradient look).
+ * Neon mesh gradient for the waveform body, in the neon blue family (MESH_PALETTE).
  * Hue flows along TIME (stops pinned to track seconds, so zooming keeps colors on the audio) and a
  * phase-shifted copy shows toward the peaks, so color also changes from the center line outward.
  * Loudness drives brightness: a per-column glow mask (dim when quiet, bright when loud) and soft
  * radial blobs anchored on the loudest moments. Pure math; display only.
  * ------------------------------------------------------------------------------------------- */
 
-/** Cyclic neon palette: hot pink > violet > electric blue > cyan > aqua-green > gold/orange > back. */
+/**
+ * Cyclic NEON BLUE palette (owner, 2026-11-26: "bright neon glowing blue"): dodger blue > electric
+ * blue-cyan > hot cyan > ice-blue highlight > back. Stays in the blue family everywhere, so the body
+ * reads as one glowing blue tube with a gentle shimmer along time, not a rainbow.
+ */
 export const MESH_PALETTE: ReadonlyArray<[number, number, number]> = [
-  [255, 46, 166], // hot pink / magenta
-  [157, 78, 255], // violet
-  [46, 107, 255], // electric blue
-  [34, 224, 255], // cyan
-  [32, 255, 170], // aqua-green
-  [255, 184, 46], // gold / orange
+  [30, 144, 255], // #1E90FF dodger / neon blue
+  [0, 180, 255], // #00B4FF electric blue-cyan
+  [0, 214, 255], // hot cyan
+  [127, 219, 255], // #7FDBFF ice-blue highlight
+  [0, 180, 255], // #00B4FF
+  [41, 121, 255], // deep electric blue
 ];
+
+/** Bright near-white blue for the center-line core and the inner neon rim. */
+export const NEON_BLUE_CORE = '#7FDBFF';
+/** Outer glow / bloom color along the waveform edges. */
+export const NEON_BLUE_GLOW = '#00B4FF';
 
 /** Palette color at a cyclic phase (any real number; 1 = one full trip through the palette). */
 export function meshColor(phase: number): string {
