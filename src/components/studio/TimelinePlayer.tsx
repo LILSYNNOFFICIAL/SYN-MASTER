@@ -7,7 +7,7 @@ interface Props {
   durationSec: number;
   isPlaying: boolean;
   fades: FadeSettings;
-  onFadesChange: (f: FadeSettings) => void;
+  onFadesChange: (f: FadeSettings | ((current: FadeSettings) => FadeSettings)) => void;
   onSeek: (sec: number) => void;
   onTogglePlay: () => void;
   onImport: (file: File) => void;
