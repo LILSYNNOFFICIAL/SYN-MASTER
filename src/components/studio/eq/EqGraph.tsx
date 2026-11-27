@@ -162,6 +162,15 @@ export const EqGraph: React.FC<Props> = ({
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
   };
 
+  const startFadeDrag = (side: 'in' | 'out') => (e: React.PointerEvent<SVGCircleElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fadeDragRef.current = side;
+    lastPointerXRef.current = e.clientX;
+    setFadeDragSide(side);
+    svgRef.current?.setPointerCapture?.(e.pointerId);
+  };
+
   const startDrag = (n: EqGraphNode, kind: 'node' | 'qlo' | 'qhi') => (e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -175,7 +184,8 @@ export const EqGraph: React.FC<Props> = ({
       const rect = svgRef.current.getBoundingClientRect();
       const sec = tl(e.clientX, rect);
       const maxLen = durationSec * 0.5;
-      onFadesChange((current) => fadeDragRef.current === 'in'
+      const side = fadeDragRef.current;
+      onFadesChange((current) => side === 'in'
         ? { ...current, inSec: Number(Math.min(maxLen, sec).toFixed(2)) }
         : { ...current, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
       return;
@@ -560,10 +570,10 @@ export const EqGraph: React.FC<Props> = ({
               </g>
             ))}
             {fadeOverlay.inX >= -8 && fadeOverlay.inX <= W + 8 && (
-              <circle data-fade-handle="in" onPointerEnter={() => setFadeHot('in')} onPointerLeave={() => setFadeHot(null)} className="syn-wf-fade-handle" cx={Math.max(10, Math.min(W - 10, fadeOverlay.inX))} cy={12} r={7} fill="#3FE0FF" pointerEvents="all" />
+              <circle data-fade-handle="in" onPointerDown={startFadeDrag('in')} onPointerEnter={() => setFadeHot('in')} onPointerLeave={() => setFadeHot(null)} className="syn-wf-fade-handle" cx={Math.max(10, Math.min(W - 10, fadeOverlay.inX))} cy={12} r={7} fill="#3FE0FF" pointerEvents="all" />
             )}
             {fadeOverlay.outX >= -8 && fadeOverlay.outX <= W + 8 && (
-              <circle data-fade-handle="out" onPointerEnter={() => setFadeHot('out')} onPointerLeave={() => setFadeHot(null)} className="syn-wf-fade-handle" cx={Math.min(W - 10, Math.max(10, fadeOverlay.outX))} cy={28} r={7} fill="#3FE0FF" pointerEvents="all" />
+              <circle data-fade-handle="out" onPointerDown={startFadeDrag('out')} onPointerEnter={() => setFadeHot('out')} onPointerLeave={() => setFadeHot(null)} className="syn-wf-fade-handle" cx={Math.min(W - 10, Math.max(10, fadeOverlay.outX))} cy={28} r={7} fill="#3FE0FF" pointerEvents="all" />
             )}
           </g>
         )}

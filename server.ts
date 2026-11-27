@@ -24,6 +24,7 @@ import {
 } from './src/server/aiPayloadValidation.ts';
 import { createRateLimiter } from './src/server/requestLimiter.mjs';
 import { createAiSpendLimiter, readAiSpendLimitsFromEnv } from './src/server/aiSpendLimiter.mjs';
+import { createFirestoreAiSpendStore } from './src/server/firestoreAiSpendStore.mjs';
 import { createAiGuestSession } from './src/server/aiAccess.ts';
 import { createConcurrencyLimiter } from './src/server/aiConcurrencyLimiter.mjs';
 import { validateChainAgainstInventory } from './src/director/processorInventory.ts';
@@ -105,14 +106,64 @@ function aiConcurrencyGuard(req: express.Request, res: express.Response, next: e
   next();
 }
 const aiSpendLimiter = createAiSpendLimiter({ limits: readAiSpendLimitsFromEnv(process.env) });
+const sharedSpendMode = process.env.SYN_AI_SHARED_SPEND_MODE ?? (process.env.NODE_ENV === 'production' ? 'firestore' : 'local');
+if (!['firestore', 'local'].includes(sharedSpendMode)) {
+  throw new Error('SYN_AI_SHARED_SPEND_MODE must be "firestore" or "local".');
+}
+if (sharedSpendMode === 'local' && process.env.NODE_ENV === 'production' && process.env.SYN_TEST_ALLOW_LOCAL_AI_SPEND !== '1') {
+  throw new Error('Production Cloud AI requires the shared Firestore spend guard.');
+}
+const sharedAiSpendStore = sharedSpendMode === 'firestore' ? createFirestoreAiSpendStore() : null;
 app.use('/api/ai', aiRateLimiter, aiGuestSession.middleware, aiConcurrencyGuard);
 
-function consumeAiSpend(res: express.Response, kind: 'strategy' | 'refine'): boolean {
+async function consumeAiSpend(res: express.Response, kind: 'strategy' | 'refine'): Promise<boolean> {
   const sessionId = String(res.locals.guestSessionId ?? '');
   if (!sessionId) {
     res.status(401).json({ error: 'A valid Cloud AI guest session is required.' });
     return false;
   }
+
+  const localCheck = aiSpendLimiter.peek(sessionId, kind);
+  if (!localCheck.allowed) {
+    const retryAfterSec = Math.max(1, Math.ceil(localCheck.retryAfterMs / 1000));
+    res.setHeader('Retry-After', String(retryAfterSec));
+    res.status(429).json({
+      error: localCheck.message,
+      code: 'ai_rate_limited',
+      scope: localCheck.scope,
+      retryAfterSec,
+      fallback: 'local-dsp-planner',
+    });
+    return false;
+  }
+
+  if (sharedAiSpendStore) {
+    try {
+      const shared = await sharedAiSpendStore.consumeGlobalDaily(aiSpendLimiter.limits.globalPerDay);
+      if (!shared.allowed) {
+        const retryAfterSec = Math.max(1, Math.ceil(shared.retryAfterMs / 1000));
+        res.setHeader('Retry-After', String(retryAfterSec));
+        res.status(429).json({
+          error: 'This server has used today\'s shared cloud AI allowance. FIX ALL keeps working with the local DSP planner.',
+          code: 'ai_rate_limited',
+          scope: 'global-day',
+          retryAfterSec,
+          fallback: 'local-dsp-planner',
+        });
+        return false;
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'shared counter unavailable';
+      console.error('[SYN-AI] Shared daily budget check failed:', detail);
+      res.status(503).json({
+        error: 'Cloud AI is temporarily unavailable because its shared daily usage limit could not be checked.',
+        code: 'ai_budget_unavailable',
+        fallback: 'local-dsp-planner',
+      });
+      return false;
+    }
+  }
+
   const result = aiSpendLimiter.consume(sessionId, kind);
   if (!result.allowed) {
     const retryAfterSec = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
@@ -459,7 +510,7 @@ app.post('/api/ai/master', async (req, res) => {
     const safeMode = sanitizeMasteringMode(mode) ?? 'ai-auto';
     const safeObjective = sanitizeObjectiveId(objective);
 
-    if (!consumeAiSpend(res, 'strategy')) return;
+    if (!(await consumeAiSpend(res, 'strategy'))) return;
 
     const { aiMeta, ...strategy } = await generateGeminiMasterStrategy({
       analysis,
@@ -524,7 +575,7 @@ app.post('/api/ai/refine', async (req, res) => {
     const safeMode = sanitizeMasteringMode(mode);
     const safeObjective = sanitizeObjectiveId(objective);
 
-    if (!consumeAiSpend(res, 'refine')) return;
+    if (!(await consumeAiSpend(res, 'refine'))) return;
 
     const { aiMeta, ...refined } = await refineGeminiIteration({
       preAnalysis,

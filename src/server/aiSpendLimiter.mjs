@@ -7,9 +7,10 @@ import { createRateLimiter } from './requestLimiter.mjs';
  *   - per-client strategy calls per minute (POST /api/ai/master)
  *   - per-client refine calls per minute (POST /api/ai/refine)
  *   - per-client strategy calls per day and spending calls per day
- *   - one global spending cap per day for the whole server process
- * All checks run before any budget is consumed, so a rejected call never spends another
- * limit. State is process-local, like the existing limiter.
+ *   - a local defensive global spending cap per day; the server also enforces the
+ *     deployment-wide global cap through the shared Firestore counter
+ * All checks run before any local budget is consumed. This module's limiter state is
+ * process-local; the server's Firestore counter coordinates production replicas.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -63,10 +64,10 @@ export function createAiSpendLimiter(options = {}) {
   const globalDay = createRateLimiter({ limit: limits.globalPerDay, windowMs: DAY_MS, now, maxKeys: 1 });
 
   /**
-   * @param {string} clientKey usually the client IP
+   * @param {string} clientKey usually the signed guest session ID
    * @param {'strategy' | 'refine'} kind
    */
-  function consume(clientKey, kind) {
+  function check(clientKey, kind) {
     const key = String(clientKey || 'unknown');
     const checks = kind === 'strategy'
       ? [['client-minute', strategyMinute, key], ['client-day', strategyDay, key], ['client-day', clientDay, key], ['global-day', globalDay, 'global']]
@@ -83,11 +84,27 @@ export function createAiSpendLimiter(options = {}) {
         };
       }
     }
+    return { allowed: true, checks };
+  }
+
+  function peek(clientKey, kind) {
+    const result = check(clientKey, kind);
+    if (!result.allowed) return result;
     let remaining = Infinity;
-    for (const [, limiter, limiterKey] of checks) {
+    for (const [, limiter, limiterKey] of result.checks) {
+      remaining = Math.min(remaining, limiter.peek(limiterKey).remaining);
+    }
+    return { allowed: true, remaining, retryAfterMs: 0 };
+  }
+
+  function consume(clientKey, kind) {
+    const decision = check(clientKey, kind);
+    if (!decision.allowed) return decision;
+    let remaining = Infinity;
+    for (const [, limiter, limiterKey] of decision.checks) {
       const result = limiter(limiterKey);
       if (!result.allowed) {
-        // Only reachable when the key table is full; fail closed.
+        // A concurrent request or full key table changed the decision after preflight.
         return { allowed: false, scope: 'global-day', limit: limiter.limit, retryAfterMs: Math.max(1000, result.retryAfterMs), message: MESSAGES['global-day'] };
       }
       remaining = Math.min(remaining, result.remaining);
@@ -95,7 +112,7 @@ export function createAiSpendLimiter(options = {}) {
     return { allowed: true, remaining, retryAfterMs: 0 };
   }
 
-  return { consume, limits };
+  return { peek, consume, limits };
 }
 
 /** Express middleware: counts POSTs to the spending routes and answers 429 when a cap is hit. */

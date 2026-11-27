@@ -21,8 +21,16 @@ async function getFreePort() {
 async function startServer(t, extraEnv) {
   const port = await getFreePort();
   const baseUrl = 'http://127.0.0.1:' + port;
-  const env = { ...process.env, NODE_ENV: 'production', PORT: String(port), SYN_MASTER_SESSION_SECRET: SESSION_SECRET, ...extraEnv };
-  // Never let the test reach a real Gemini key: every spending call stops before billing.
+  const env = {
+    ...process.env,
+    NODE_ENV: 'production',
+    PORT: String(port),
+    SYN_MASTER_SESSION_SECRET: SESSION_SECRET,
+    SYN_AI_SHARED_SPEND_MODE: 'local',
+    SYN_TEST_ALLOW_LOCAL_AI_SPEND: '1',
+    ...extraEnv,
+  };
+  // Never reach a real Gemini key or Google Cloud dependency in this isolated integration test.
   delete env.GEMINI_API_KEY;
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
   let diagnostics = '';

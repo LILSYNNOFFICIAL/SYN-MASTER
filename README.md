@@ -47,7 +47,7 @@ SYN MASTER is an AI-assisted mastering workstation (React + TypeScript + Vite fr
 - Keep the entry files: `index.html` -> `src/main.tsx` -> `src/App.tsx`, `src/index.css`, `vite.config.ts`, `server.ts`, `metadata.json`.
 - Keep the build setup: `npm run dev` (`tsx server.ts`), `npm run build` (`vite build`), Tailwind v4 via `@tailwindcss/vite`.
 - The Gemini API key is read **only on the server** from `process.env.GEMINI_API_KEY` (see `server.ts` / `src/server/aiMastering.ts`). Never move it into client code or a `VITE_` variable.
-- No new backend services. New DSP goes in the browser (Web Audio API / `OfflineAudioContext` / the existing `src/dsp/*` offline renderer).
+- New DSP goes in the browser (Web Audio API / `OfflineAudioContext` / the existing `src/dsp/*` offline renderer). Production Cloud AI uses a Firestore transaction for its cross-instance daily spend cap; see Hosting.
 - Minimal checks before pushing: `npm run lint` (tsc) and `npm run build`.
 
 ## Current handoff: AI evidence, processor telemetry, and EQ interactions (Nov 27, 2026)
@@ -487,7 +487,7 @@ Cloud AI is provided by SYN-MASTER. Ordinary users do not need a Google AI Studi
 
 ## AI endpoint protections and limits
 
-The AI routes are protected by a process-local fixed-window IP limiter: 20 requests per IP per minute. A 429 response includes `Retry-After`. Validated anonymous guest-session IDs key the per-session strategy/refine budgets; those budgets are consumed only after payload and chain validation, immediately before the Gemini call. The per-process daily global cap is not deployment-wide when Cloud Run has multiple instances. Validated anonymous guest-session IDs key the per-session strategy/refine budgets. The server also allows at most 2 active mastering/refinement requests per guest session and 8 per process; these counters are process-local.
+The AI routes are protected by a process-local fixed-window IP limiter: 20 requests per IP per minute. A 429 response includes `Retry-After`. Validated anonymous guest-session IDs key the per-session strategy/refine budgets; those budgets are consumed only after payload and chain validation, immediately before the Gemini call. The global daily cap is stored in a Firestore transaction shared by Cloud Run replicas. Configure the existing project’s Firestore Native-mode database and grant the service account `roles/datastore.user`; if that check fails, Cloud AI fails closed with HTTP 503 instead of bypassing the cap. Validated anonymous guest-session IDs key the per-session strategy/refine budgets. The server also allows at most 2 active mastering/refinement requests per guest session and 8 per process; these counters are process-local.
 
 Because cloud AI is on by default for FIX ALL, the two routes that spend `GEMINI_API_KEY` (`POST /api/ai/master`, `POST /api/ai/refine`) also have spend caps (`src/server/aiSpendLimiter.mjs`), checked after signed guest-session validation so unauthenticated traffic never uses the budget:
 
@@ -586,7 +586,7 @@ The live `/api/health` response only verifies configuration presence, not full A
 
 ### Hosted AI access-token limitations
 
-Anonymous guest sessions provide short-lived session identity without user registration. They are signed by a backend-only secret and stored in an HttpOnly, SameSite=Strict cookie. The current spend limiter and IP limiter keep process-local state; cross-instance quota enforcement is not guaranteed until a shared store is added. A successful CI check does not prove hosted AI Studio/Cloud Run configuration.
+Anonymous guest sessions provide short-lived session identity without user registration. They are signed by a backend-only secret and stored in an HttpOnly, SameSite=Strict cookie. The daily global Gemini spend cap is shared across Cloud Run replicas through Firestore. Per-IP request throttles and per-session minute/day allowances remain process-local; they are abuse controls, while the shared global cap is the deployment-wide billing limit. A successful CI check does not prove hosted AI Studio/Cloud Run configuration.
 
 ## Parallel execution status — November 23, 2026
 

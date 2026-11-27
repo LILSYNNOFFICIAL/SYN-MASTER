@@ -14,6 +14,14 @@ test('peek reports the next decision without spending budget', () => {
   assert.equal(allow.peek('a').allowed, true);
 });
 
+test('peek does not consume the AI budget', () => {
+  const limiter = createAiSpendLimiter({ limits: { strategyPerMinute: 1 } });
+  assert.equal(limiter.peek('a', 'strategy').allowed, true);
+  assert.equal(limiter.peek('a', 'strategy').allowed, true);
+  assert.equal(limiter.consume('a', 'strategy').allowed, true);
+  assert.equal(limiter.peek('a', 'strategy').scope, 'client-minute');
+});
+
 test('strategy calls are limited per client per minute and reset after the window', () => {
   let now = 0;
   const limiter = createAiSpendLimiter({ now: () => now, limits: { strategyPerMinute: 2 } });
