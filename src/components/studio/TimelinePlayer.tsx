@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Pause, Play, SkipBack, SkipForward, Upload } from 'lucide-react';
+import { Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { telemetryStore } from '../../engine/telemetryStore';
 import type { FadeCurve, FadeSettings } from '../../dsp/fades';
 
@@ -76,18 +76,6 @@ export const TimelinePlayer: React.FC<Props> = (p) => {
       {!p.hideTransport && <TransportControls {...p} />}
       {p.extra}
       <div className="syn-player-controls">
-        <label className="syn-player-btn syn-player-import">
-          <Upload className="w-4 h-4" aria-hidden="true" /> Import Track
-          <input
-            type="file"
-            accept="audio/*,.wav,.flac,.mp3,.aac,.m4a,.ogg,.aiff,.aif"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) p.onImport(f);
-              e.target.value = '';
-            }}
-          />
-        </label>
         <div className="syn-player-fades" role="group" aria-label="Fades">
           <label>
             <span>Fade in <b>{p.fades.inSec.toFixed(2)}s</b></span>
