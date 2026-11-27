@@ -450,11 +450,19 @@ export const EqGraph: React.FC<Props> = ({
           const target = e.target as Element | null;
           if (target?.closest?.('[data-band-id], [data-q-handle]')) return;
           if (fades && onFadesChange && durationSec > 0 && svgRef.current) {
-            const p = toLocal(e);
-            const inX = Math.max(10, secToX(fades.inSec, viewRef.current, W));
-            const outX = Math.min(W - 10, secToX(durationSec - fades.outSec, viewRef.current, W));
-            if (p.y <= 20 && Math.abs(p.x - inX) <= 15) fadeDragRef.current = 'in';
-            else if (p.y >= 20 && p.y <= 40 && Math.abs(p.x - outX) <= 15) fadeDragRef.current = 'out';
+            // Prefer the actual handle element over coordinate hit-testing. SVG viewBox
+            // scaling and responsive sizing can otherwise make the visible handle's
+            // screen-space center miss the narrow timeline hit region.
+            const handleSide = target?.closest?.('[data-fade-handle]')?.getAttribute('data-fade-handle');
+            if (handleSide === 'in' || handleSide === 'out') {
+              fadeDragRef.current = handleSide;
+            } else {
+              const p = toLocal(e);
+              const inX = Math.max(10, secToX(fades.inSec, viewRef.current, W));
+              const outX = Math.min(W - 10, secToX(durationSec - fades.outSec, viewRef.current, W));
+              if (p.y <= 20 && Math.abs(p.x - inX) <= 15) fadeDragRef.current = 'in';
+              else if (p.y >= 20 && p.y <= 40 && Math.abs(p.x - outX) <= 15) fadeDragRef.current = 'out';
+            }
             if (fadeDragRef.current) {
               setFadeDragSide(fadeDragRef.current);
               e.preventDefault();
