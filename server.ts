@@ -116,7 +116,7 @@ if (sharedSpendMode === 'local' && process.env.NODE_ENV === 'production' && proc
 const sharedAiSpendStore = sharedSpendMode === 'firestore' ? createFirestoreAiSpendStore() : null;
 app.use('/api/ai', aiRateLimiter, aiGuestSession.middleware, aiConcurrencyGuard);
 
-async type AiSpendDecision = {
+type AiSpendDecision = {
   allowed: boolean;
   remaining?: number;
   retryAfterMs?: number;
