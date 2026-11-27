@@ -1,7 +1,7 @@
 import type { ExternalVST3Params, ProcessorModule } from '../types/mastering';
 import { dbToLinear, linearToDb } from './analyzer';
 import { applyFadesInPlace, type FadeSettings } from './fades';
-import { processChainOffline, type ProcessorMeterTelemetry } from './offlineDsp';
+import type { ProcessorMeterTelemetry } from './offlineDsp';
 
 export type ExternalPluginProcessCallback = (
   channels: Float32Array[],
@@ -38,6 +38,8 @@ export async function renderMixedChain(
   externalProcessor?: ExternalPluginProcessCallback,
   postFades?: FadeSettings | null,
 ): Promise<MixedChainRenderResult> {
+  // Loaded on demand (bundle budget); same module and code as before, so output is identical.
+  const { processChainOffline } = await import('./offlineDsp');
   if (!chainHasActiveExternalPlugins(chain)) {
     const syncRes = processChainOffline(sourceChannels, sampleRate, chain, postFades);
     return {

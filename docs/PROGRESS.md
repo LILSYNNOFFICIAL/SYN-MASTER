@@ -169,3 +169,14 @@ Dated entries, newest last, so work can resume if a session is cut off.
 - Removed the old hidden "Import Track" button from the fades row (TimelinePlayer.tsx). The header Import pill and drag-and-drop are unchanged. Its now-unused CSS in skin.css was left in place to avoid clashing with the bundle agent's skin.css edits (dead rules, harmless; safe to delete later).
 - All new code is in lazy chunks (waveformLayers.tsx, waveformTint.ts, waveformDetail.ts). Tests: 503 pass (4 new: tint mapping, stop downsampling, RMS vs raw scan, lazy layer render). Main chunk 819,101 bytes = 799.9 KiB raw (limit 800).
 - Browser check (headless Chromium, production build, 30 s synthetic quiet-to-loud WAV): fill, tint and fade label render at 1440 and 360 px and with reduced motion, no page errors; Ctrl+wheel zoom to 52x keeps the tint (96 stops). Not checked on a real phone.
+## 2026-11-26 — Bundle headroom: main chunk 799.9 -> 736.9 KiB
+- Main JavaScript chunk: 799.9 KiB raw / 245.6 KiB gzip -> 736.9 KiB raw / 224.6 KiB gzip (budget 800 / 250 unchanged; vite config unchanged).
+- Split out of the first download (all load on their own shortly after the page is idle, so they open instantly when used):
+  - In-process DSP renderer (offlineDsp.ts, ~30 KiB with its helpers): only used when the DSP worker cannot run, or for the external-plugin mixed render. Loaded on demand by workerClient's fallback and renderMixedChain, both already async; same module and code, so audio/analysis output is identical (workerClient, mixed chain, analysis identity and export/preview parity tests pass).
+  - AI Provider section of Settings (AiProviderPanel.tsx). The top-bar AI chip moved to its own small file (AiProviderChip.tsx) so it stays on first paint; opening Settings fetches the section in parallel with the dialog.
+  - Workspace banner (WorkspaceHero.tsx): only shown on secondary workspaces, never on the default Dashboard.
+  - Library panel inside the closed hamburger drawer (LeftLibraryPanel.tsx): starts loading right after mount.
+- Every split part has a small "Loading..." placeholder in the skin's style (or nothing, where it is hidden). No behaviour changes.
+- Browser check (headless Chromium, production build): Settings > AI Provider, library drawer and the Reference Match banner all open on first click with no page errors at 1440 and 360 px, and on a throttled 50 KB/s + 400 ms connection; demo session renders.
+- Checks: lint ok, 503 tests pass, build ok, check:bundle ok, production /api/health ok:true.
+- Next: (none for this order).

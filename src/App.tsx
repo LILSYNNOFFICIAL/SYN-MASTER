@@ -54,7 +54,7 @@ import {
 } from './dsp/mixedChainRenderer';
 import { type DynamicEqTrace, type ProcessorMeterTelemetry } from './dsp/offlineDsp';
 import { chainHasSoloedBand } from './dsp/eqDesign';
-import { renderAndAnalyzeOffThread } from './dsp/workerClient';
+import { loadOfflineDsp, renderAndAnalyzeOffThread } from './dsp/workerClient';
 import { ProgressRing } from './components/ui/ProgressRing';
 import { IMPORT_STAGE_LABELS, importStagePercent, type ImportStage } from './components/ui/progressMath';
 import { getActiveRebalanceStems, getRebalanceStemState, separateActiveRebalanceStems, setActiveRebalanceSource, subscribeRebalanceStems } from './services/rebalanceStemStore';
@@ -104,7 +104,9 @@ import {
   saveChainRecord,
   saveProject,
 } from './storage/projectDb';
-import { LeftLibraryPanel } from './components/LeftLibraryPanel';
+// The library lives in the closed hamburger drawer, so it is split out of the main chunk; it starts
+// loading as soon as the app mounts (the drawer is always mounted), long before anyone opens it.
+const LeftLibraryPanel = React.lazy(() => import('./components/LeftLibraryPanel').then(({ LeftLibraryPanel }) => ({ default: LeftLibraryPanel })));
 // Rack UIs are split out of the initial bundle (budget); the in-page rack is prefetched on mount
 // so it is ready by the time a track is loaded, and the floating window loads when first opened.
 const loadMasteringRack = () => import('./components/MasteringRack');
@@ -138,7 +140,9 @@ const PluginManagerView = React.lazy(() =>
 const ExportModal = React.lazy(() => import('./components/Modals').then(({ ExportModal }) => ({ default: ExportModal })));
 const SettingsModal = React.lazy(() => import('./components/Modals').then(({ SettingsModal }) => ({ default: SettingsModal })));
 import { WorkspaceNavigation } from './components/WorkspaceNavigation';
-import { WorkspaceHero } from './components/WorkspaceHero';
+// Hero banner shows only on secondary workspaces (not the default studio view): split out of the main chunk.
+const loadWorkspaceHero = () => import('./components/WorkspaceHero');
+const WorkspaceHero = React.lazy(() => loadWorkspaceHero().then(({ WorkspaceHero }) => ({ default: WorkspaceHero })));
 import { MasterConsole } from './components/console/MasterConsole';
 import { Portal } from './ui/Portal';
 // Shown only after a track is loaded and a run produced a diagnostic log (D2: off the main chunk).
@@ -155,7 +159,10 @@ import { LOUDNESS_TARGET_PRESETS } from './dsp/loudnessTargets';
 import { buildDiagnosticLog, summarizeAiFallbackBanner } from './director/diagnosticLog';
 import { BUILTIN_LABEL, requestRefine, requestStrategy } from './ai/masteringClient';
 import { SYSTEM_PROMPT, buildRefineUserPrompt, buildStrategyUserPrompt } from './ai/masteringPrompt';
-import { AiProviderChip, AiProviderPanel } from './components/AiProviderPanel';
+import { AiProviderChip } from './components/AiProviderChip';
+// Provider settings live inside the Settings dialog: loaded with it, not on first paint.
+const loadAiProviderPanel = () => import('./components/AiProviderPanel');
+const AiProviderPanel = React.lazy(() => loadAiProviderPanel().then(({ AiProviderPanel }) => ({ default: AiProviderPanel })));
 import { describeProvider } from './ai/providerAdapters';
 import { getActiveAiCall, getActiveProviderConfig, getBuiltinAccessHeaders, runProviderCall } from './ai/providerStore';
 import {
@@ -540,6 +547,24 @@ export default function App() {
   // Prefetch the split-out rack UI right after first paint.
   useEffect(() => {
     const t = window.setTimeout(() => { void loadMasteringRack(); }, 0);
+    return () => window.clearTimeout(t);
+  }, []);
+  // Opening Settings fetches the AI provider section alongside the dialog code (in parallel, not one after the other).
+  useEffect(() => {
+    if (settingsModalOpen) void loadAiProviderPanel().catch(() => undefined);
+  }, [settingsModalOpen]);
+  // Warm the other split-out code once the page is idle, so the Settings AI section, the secondary
+  // workspace banners and the in-process render fallback open instantly (and keep working offline).
+  useEffect(() => {
+    const warm = () => {
+      for (const load of [loadAiProviderPanel, loadWorkspaceHero, loadOfflineDsp]) void load().catch(() => undefined);
+    };
+    const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(warm, { timeout: 4000 });
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const t = window.setTimeout(warm, 1500);
     return () => window.clearTimeout(t);
   }, []);
 
@@ -3744,6 +3769,7 @@ export default function App() {
             </div>
             <div className="syn-drawer-nav-title">Library</div>
           </nav>
+          <React.Suspense fallback={<div className="p-3 text-[11px] text-[#A99A74]" role="status">Loading library…</div>}>
           <LeftLibraryPanel
             activeTrack={activeTrack}
             referenceTrack={referenceTrack}
@@ -3761,6 +3787,7 @@ export default function App() {
             onOpenProject={handleOpenProject}
             onDeleteProject={handleDeleteProject}
           />
+          </React.Suspense>
           </div>
         )}
         </Portal>
@@ -4139,7 +4166,7 @@ export default function App() {
             </section>
           )}
 
-          {activeTab !== 'studio' && activeTab !== 'ai' && activeTab !== 'qc' && <WorkspaceHero workspace={activeTab} hasTrack={Boolean(activeTrack)} />}
+          {activeTab !== 'studio' && activeTab !== 'ai' && activeTab !== 'qc' && <React.Suspense fallback={null}><WorkspaceHero workspace={activeTab} hasTrack={Boolean(activeTrack)} /></React.Suspense>}
 
           {activeTab === 'stems' && <StemIntelligencePanel />}
 
@@ -4477,7 +4504,9 @@ export default function App() {
               )}
               <p className="text-[10px] text-[#A99A74]">Browser applications cannot take exclusive control of native ASIO or bypass the Windows audio stack. The displayed sample rate and latency are the actual values reported by the browser.</p>
             </section>
-            <AiProviderPanel />
+            <React.Suspense fallback={<div className="p-3 text-[11px] text-[#A99A74]" role="status">Loading AI provider settings…</div>}>
+              <AiProviderPanel />
+            </React.Suspense>
           </SettingsModal>
         </React.Suspense>
       )}

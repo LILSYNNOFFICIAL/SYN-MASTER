@@ -6,7 +6,7 @@ import {
   renderMixedChain,
   type ExternalPluginProcessCallback,
 } from './mixedChainRenderer.ts';
-import { processChainOffline, type DynamicEqTrace, type ProcessorMeterTelemetry } from './offlineDsp.ts';
+import type { DynamicEqTrace, ProcessorMeterTelemetry } from './offlineDsp.ts';
 import type {
   DspWorkerErrorResponse,
   DspWorkerMessage,
@@ -22,6 +22,13 @@ import { fingerprintStereo, getRebalanceStems, rebalanceIsActive, type Rebalance
  * The cached Vocal Rebalance stems a render needs, or null: an enabled rebalance with a stem
  * away from 0 dB and a stem set registered for exactly this source audio.
  */
+/**
+ * The in-process renderer is only needed when the DSP worker is unavailable, so it is loaded on
+ * demand (keeps it out of the initial bundle). Same module, same code: results are identical.
+ * The app prefetches it after first paint so a fallback render never waits on the network.
+ */
+export const loadOfflineDsp = () => import('./offlineDsp.ts');
+
 export function rebalanceStemsForRender(
   chain: ProcessorModule[],
   sourceChannels: Float32Array[],
@@ -208,6 +215,7 @@ export function createDspWorkerClient(options: DspWorkerClientOptions = {}) {
     preview: PreviewRenderOptions = {},
   ): Promise<OffThreadRenderResult> => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const { processChainOffline } = await loadOfflineDsp();
     const processed = processChainOffline(sourceChannels, sampleRate, chain, postFades, preview);
     const analysis = analyzeAudioBuffer(processed.channels, sampleRate);
     const peaks = includePeaks ? extractWaveformPeaks(processed.channels, peakBins) : undefined;
