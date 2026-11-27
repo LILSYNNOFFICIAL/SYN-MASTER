@@ -2001,8 +2001,10 @@ export default function App() {
         `${finding.title} ${finding.explanation} ${finding.recommendedAction ?? ''}`,
       ),
     );
-    if (diagnosisRequestsVocalBalance && !vocalBalance.stemsCached) {
-      aiProviderLog.push('Vocal Rebalance: the local diagnosis warrants stem-level vocal balance analysis; starting resource-gated separation.');
+    if ((runOperatingMode !== 'manual' || diagnosisRequestsVocalBalance) && !vocalBalance.stemsCached) {
+      aiProviderLog.push(runOperatingMode !== 'manual'
+        ? 'Vocal analysis: measuring source stems before AI tool selection so Vocal Rebalance is considered from evidence.'
+        : 'Vocal Rebalance: the local diagnosis warrants stem-level vocal balance analysis; starting resource-gated separation.');
       try {
         await separateActiveRebalanceStems();
       } catch (separationError) {
@@ -2063,8 +2065,8 @@ export default function App() {
           role: m.role,
           manufacturer: m.manufacturer,
         })),
-        // Only sent when stems are cached, so prompts for tracks without stems are unchanged.
-        ...(vocalBalance.stemsCached ? { vocalBalance } : {}),
+        // Always state measured or unavailable vocal evidence so the AI cannot mistake missing stems for a clean vocal balance.
+        vocalBalance,
       };
       const strategyPromptChars = SYSTEM_PROMPT.length + buildStrategyUserPrompt(strategyInput).length;
       const builtinStrategyAttempt: {

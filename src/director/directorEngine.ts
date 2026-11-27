@@ -1876,7 +1876,7 @@ export interface RunAutonomousDirectorOptions {
     channels: Float32Array[],
     sampleRate: number,
     chain: ProcessorModule[],
-  ) => Promise<{ channels: Float32Array[]; analysis: AudioAnalysis }>;
+  ) => Promise<{ channels: Float32Array[]; analysis: AudioAnalysis; telemetry?: import('../dsp/offlineDsp').ProcessorMeterTelemetry[] }>;
   aiRefineCallback?: (ctx: {
     preAnalysis: AudioAnalysis;
     postAnalysis: AudioAnalysis;
@@ -2695,6 +2695,7 @@ export async function runAutonomousDirectorLoop(
       label: pass === 1 ? 'Initial Master Render' : `Autonomous Refinement #${pass}`,
       timestamp: Date.now(),
       chain: structuredClone(workingChain),
+      processorTelemetry: rendered.telemetry ?? [],
       analysis: post,
       qcReport,
       multiObjective,

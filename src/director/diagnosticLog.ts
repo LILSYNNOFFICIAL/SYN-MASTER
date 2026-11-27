@@ -56,6 +56,8 @@ export interface DiagnosticLog {
     detectedIssue?: string;
     /** Why the pass was not retained, e.g. "Regression guard rejected: transient detail regression". */
     rejectionReason?: string;
+    /** Actual per-module peak and gain-reduction measurements from this render. */
+    processors: Array<{ name: string; type: ProcessorType; inputPeakDb: number; outputPeakDb: number; gainReductionDb: number; rebalance?: import('../dsp/offlineDsp').ProcessorMeterTelemetry['rebalance'] }>;
   }>;
   /** True when no processed pass was kept and the delivered audio is the original source (pass 0). */
   rolledBackToSource: boolean;
@@ -373,6 +375,10 @@ export function buildDiagnosticLog(input: {
     clicks: cp.analysis.clickCount ?? 0,
     gatePassed: cp.targetGate ? cp.targetGate.passed : null,
     outcome: cp.iterationSummary?.outcome ?? '',
+    processors: (cp.processorTelemetry ?? []).flatMap((meter) => {
+      const module = cp.chain.find((item) => item.id === meter.id);
+      return module ? [{ name: module.name, type: module.type, inputPeakDb: meter.inputPeakDb, outputPeakDb: meter.outputPeakDb, gainReductionDb: meter.gainReductionDb, ...(meter.rebalance ? { rebalance: meter.rebalance } : {}) }] : [];
+    }),
     ...(cp.iterationSummary?.detectedIssue ? { detectedIssue: cp.iterationSummary.detectedIssue } : {}),
     ...(cp.iterationSummary?.rejectionReasons?.length
       ? { rejectionReason: cp.iterationSummary.rejectionReasons.join('; ') }
@@ -461,6 +467,15 @@ export function diagnosticLogToText(log: DiagnosticLog): string {
     for (const p of log.passes) {
       L.push(`  #${p.pass}: ${p.lufs.toFixed(1)} LUFS, ${p.truePeakDb.toFixed(2)} dBTP, clicks ${p.clicks}, gate ${p.gatePassed === null ? '-' : p.gatePassed ? 'PASS' : 'FAIL'} (${p.outcome})`);
       if (p.rejectionReason) L.push(`      not retained: ${p.rejectionReason}`);
+      for (const m of p.processors) {
+        const gr = m.type === 'dynamic-eq' || m.type === 'compressor' || m.type === 'multiband-comp' || m.type === 'limiter' || m.type === 'maximizer' || m.type === 'multiband-maximizer'
+          ? ` | gain reduction ${m.gainReductionDb.toFixed(2)} dB`
+          : '';
+        const rebalance = m.rebalance
+          ? ` | vocal ${m.rebalance.applied ? `${m.rebalance.stemGainsDb.vocals.toFixed(1)} dB effective` : `not applied (${m.rebalance.reason ?? 'unknown'})`}`
+          : '';
+        L.push(`      ${m.name} (${m.type}): input peak ${m.inputPeakDb.toFixed(2)} dBFS → output peak ${m.outputPeakDb.toFixed(2)} dBFS${gr}${rebalance}`);
+      }
     }
     if (log.rolledBackToSource) L.push('  Result: rolled back to Pass 0 (original source); no processed pass was retained.');
   }

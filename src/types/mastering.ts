@@ -1104,6 +1104,8 @@ export interface DirectorCheckpoint {
   label: string;
   timestamp: number;
   chain: ProcessorModule[];
+  /** Per-module measurements from this exact render; absent for legacy reports. */
+  processorTelemetry?: import('../dsp/offlineDsp').ProcessorMeterTelemetry[];
   analysis: AudioAnalysis;
   qcReport: QCReport;
   multiObjective: MultiObjectiveEvaluation;
