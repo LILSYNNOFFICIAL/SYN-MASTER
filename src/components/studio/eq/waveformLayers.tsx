@@ -1,7 +1,9 @@
 /**
  * Lazy-loaded extra layers for the EQ graph (kept out of the main bundle):
  * - NeonFill: frequency-colored translucent fill under the analyser's neon outline.
- * - LoudnessTint: waveform tinted by RMS loudness per column (blue quiet > magenta/gold loud).
+ * - LoudnessTint: neon MESH gradient clipped to the waveform (rainbow hues flowing along time and
+ *   shifting from the center line to the peaks, soft glow blobs on the loudest moments), with RMS
+ *   loudness driving brightness (quiet = dim, loud = bright and saturated).
  * - FadeLabel: fade length in seconds, shown on the fade curve while hovering or dragging.
  * Display only. No blur, no animation (cheap on phones, nothing to reduce for reduced-motion).
  */
@@ -10,7 +12,7 @@ import type { FadeSettings } from '../../../dsp/fades';
 import { H, W, fToX } from './graphMath';
 import { fadeGainAt, secToX, type TimeView } from './waveformView';
 import type { WaveformSource } from './waveformSource';
-import { FREQ_FILL_STOPS, tintStops } from './waveformTint';
+import { FREQ_FILL_STOPS, meshBlobs, meshColor, meshGlowStops, meshHueStops, meshRate } from './waveformTint';
 
 export const NeonFill: React.FC<{ uid: string; d: string }> = ({ uid, d }) => (
   <g pointerEvents="none" data-neon-fill="freq">
@@ -59,23 +61,81 @@ export const LoudnessTint: React.FC<TintProps> = ({ uid, d, env, view, durationS
     }, 60);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [source, view, durationSec]);
-  const stops = useMemo(() => {
+  const levels = useMemo(() => {
     const fresh = rms && rms.key === source && Math.abs(rms.start - view.start) < 1e-9 && Math.abs(rms.end - view.end) < 1e-9;
-    const levels = fresh ? rms.levels.slice() : env.map((v) => v * PEAK_TO_RMS);
+    const lv = fresh ? rms.levels.slice() : env.map((v) => v * PEAK_TO_RMS);
     // The fallback envelope is already fade-scaled by the graph; real RMS is pre-fade audio.
     if (fresh && scaleByFades && fades && durationSec > 0) {
       const span = view.end - view.start;
-      for (let i = 0; i < levels.length; i++) levels[i] *= fadeGainAt(view.start + ((i + 0.5) / levels.length) * span, durationSec, fades);
+      for (let i = 0; i < lv.length; i++) lv[i] *= fadeGainAt(view.start + ((i + 0.5) / lv.length) * span, durationSec, fades);
     }
-    return tintStops(levels, 96);
+    return lv;
   }, [rms, source, env, view, scaleByFades, fades, durationSec]);
-  if (!stops.length) return null;
+  const mesh = useMemo(() => {
+    if (!levels.length) return null;
+    const span = view.end - view.start;
+    const rate = meshRate(durationSec > 0 ? span : 1, durationSec);
+    return {
+      core: meshHueStops(view, durationSec, 40, 0),
+      edge: meshHueStops(view, durationSec, 40, 0.5),
+      glow: meshGlowStops(levels, 64),
+      blobs: meshBlobs(levels, 3).map((b) => ({
+        ...b,
+        // Blob hue = palette half a trip away from the time hue there (contrast, still in-family).
+        color: meshColor((durationSec > 0 ? view.start + b.x * span : b.x) * rate + 0.5),
+      })),
+    };
+  }, [levels, view, durationSec]);
+  if (!mesh) return null;
+  const id = (k: string) => `${uid}-m${k}`;
   return (
-    <g pointerEvents="none" data-waveform-tint="loudness">
-      <linearGradient id={`${uid}-tint`} x1={0} x2={W} y1={0} y2={0} gradientUnits="userSpaceOnUse">
-        {stops.map((s, i) => <stop key={i} offset={s.offset.toFixed(4)} stopColor={s.color} stopOpacity={s.opacity} />)}
-      </linearGradient>
-      <path d={d} fill={`url(#${uid}-tint)`} stroke="none" className="syn-wf-tint" />
+    <g pointerEvents="none" data-waveform-tint="loudness" data-waveform-mesh="neon">
+      <defs>
+        <clipPath id={id('clip')}><path d={d} /></clipPath>
+        <linearGradient id={id('core')} x1={0} x2={W} y1={0} y2={0} gradientUnits="userSpaceOnUse">
+          {mesh.core.map((s, i) => <stop key={i} offset={s.offset.toFixed(4)} stopColor={s.color} />)}
+        </linearGradient>
+        <linearGradient id={id('edge')} x1={0} x2={W} y1={0} y2={0} gradientUnits="userSpaceOnUse">
+          {mesh.edge.map((s, i) => <stop key={i} offset={s.offset.toFixed(4)} stopColor={s.color} />)}
+        </linearGradient>
+        {/* Center line > peaks: the shifted hue takes over away from the middle. */}
+        <linearGradient id={id('ev')} x1={0} x2={0} y1={0} y2={H} gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#fff" stopOpacity={1} />
+          <stop offset="0.33" stopColor="#fff" stopOpacity={0.95} />
+          <stop offset="0.5" stopColor="#fff" stopOpacity={0} />
+          <stop offset="0.67" stopColor="#fff" stopOpacity={0.95} />
+          <stop offset="1" stopColor="#fff" stopOpacity={1} />
+        </linearGradient>
+        <mask id={id('edgem')} maskUnits="userSpaceOnUse" x={0} y={0} width={W} height={H}>
+          <rect width={W} height={H} fill={`url(#${id('ev')})`} />
+        </mask>
+        {/* Loudness: quiet columns dim, loud columns bright. */}
+        <linearGradient id={id('glow')} x1={0} x2={W} y1={0} y2={0} gradientUnits="userSpaceOnUse">
+          {mesh.glow.map((s, i) => <stop key={i} offset={s.offset.toFixed(4)} stopColor="#fff" stopOpacity={s.opacity} />)}
+        </linearGradient>
+        <mask id={id('glowm')} maskUnits="userSpaceOnUse" x={0} y={0} width={W} height={H}>
+          <rect width={W} height={H} fill={`url(#${id('glow')})`} />
+        </mask>
+        {/* Soft white core along the center line (reads as light inside the glass). */}
+        <linearGradient id={id('cv')} x1={0} x2={0} y1={0} y2={H} gradientUnits="userSpaceOnUse">
+          <stop offset="0.4" stopColor="#fff" stopOpacity={0} />
+          <stop offset="0.5" stopColor="#fff" stopOpacity={0.16} />
+          <stop offset="0.6" stopColor="#fff" stopOpacity={0} />
+        </linearGradient>
+        {mesh.blobs.map((b, i) => (
+          <radialGradient key={i} id={id(`b${i}`)} cx={b.x * W} cy={H / 2} r={W * (0.1 + 0.08 * b.t)} gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor={b.color} stopOpacity={(0.35 + 0.4 * b.t).toFixed(3)} />
+            <stop offset="0.55" stopColor={b.color} stopOpacity={(0.12 + 0.14 * b.t).toFixed(3)} />
+            <stop offset="1" stopColor={b.color} stopOpacity={0} />
+          </radialGradient>
+        ))}
+      </defs>
+      <g clipPath={`url(#${id('clip')})`} mask={`url(#${id('glowm')})`} className="syn-wf-tint" opacity={0.94}>
+        <rect width={W} height={H} fill={`url(#${id('core')})`} />
+        <rect width={W} height={H} fill={`url(#${id('edge')})`} mask={`url(#${id('edgem')})`} />
+        {mesh.blobs.map((b, i) => <rect key={i} width={W} height={H} fill={`url(#${id(`b${i}`)})`} data-mesh-blob={i} />)}
+        <rect width={W} height={H} fill={`url(#${id('cv')})`} />
+      </g>
     </g>
   );
 };

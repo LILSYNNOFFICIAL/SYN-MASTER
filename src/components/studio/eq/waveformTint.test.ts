@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loudnessT, tintColor, tintStops, TINT_CEIL_DB, TINT_FLOOR_DB } from './waveformTint';
+import { loudnessT, meshBlobs, meshColor, meshGlowStops, meshHueStops, meshRate, MESH_PALETTE, MESH_MIN_VISIBLE_CYCLES, tintColor, tintStops, TINT_CEIL_DB, TINT_FLOOR_DB } from './waveformTint';
 import { buildEnergyBlocks, rmsFromSamples } from './waveformDetail';
 import { fullView } from './waveformView';
 
@@ -71,8 +71,69 @@ test('lazy layers render: frequency-colored neon fill fading down, loudness tint
     uid: 'u', d: 'M0,120 Z', env, view: { start: 0, end: 60 }, durationSec: 60, source: null, scaleByFades: false,
   })));
   assert.match(tint, /data-waveform-tint="loudness"/);
-  assert.match(tint, /rgb\(46,120,255\)/, 'quiet half is cool blue');
-  assert.doesNotMatch(tint, /stop-color="rgb\(46,120,255\)"[^>]*offset="1/, 'loud end is not blue');
+  assert.match(tint, /data-waveform-mesh="neon"/);
+  assert.match(tint, /clip-path="url\(#u-mclip\)"/, 'mesh is clipped to the waveform shape');
+  assert.match(tint, /mask="url\(#u-mglowm\)"/, 'loudness glow mask applied');
+  assert.match(tint, /mask="url\(#u-medgem\)"/, 'center-to-peak hue layer');
+  assert.doesNotMatch(tint, /blur|filter=|<animate/, 'no blur, no animation (phones, reduced motion)');
+  const hues = new Set([...tint.matchAll(/id="u-mcore"[\s\S]*?<\/linearGradient>/g)][0][0].match(/rgb\(\d+,\d+,\d+\)/g));
+  assert.ok(hues.size >= 12, `many neon hues along time (got ${hues.size})`);
+  const glow = [...[...tint.matchAll(/id="u-mglow"[\s\S]*?<\/linearGradient>/g)][0][0].matchAll(/stop-opacity="([\d.]+)"/g)].map((m) => Number(m[1]));
+  assert.ok(glow[0] < glow[glow.length - 1], 'quiet half is dimmer than the loud half');
+  assert.match(tint, /data-mesh-blob="0"/, 'glow blob on the loud part');
+  const silent = renderToStaticMarkup(React.createElement('svg', null, React.createElement(LoudnessTint, {
+    uid: 's', d: 'M0,120 Z', env: new Array(200).fill(0), view: { start: 0, end: 60 }, durationSec: 60, source: null, scaleByFades: false,
+  })));
+  assert.doesNotMatch(silent, /data-mesh-blob/, 'silent track: no glow blobs');
+  const noEnv = renderToStaticMarkup(React.createElement('svg', null, React.createElement(LoudnessTint, {
+    uid: 'n', d: 'M0,120 Z', env: [], view: { start: 0, end: 1 }, durationSec: 0, source: null, scaleByFades: false,
+  })));
+  assert.equal(noEnv, '<svg></svg>', 'no track loaded: nothing drawn, no crash');
   const label = renderToStaticMarkup(React.createElement(FadeLabel, { side: 'in', fades: { inSec: 2, outSec: 0, inCurve: 'linear', outCurve: 'linear' }, durationSec: 60, view: { start: 0, end: 60 }, svg: null }));
   assert.equal(label, '', 'no label without a mounted graph');
+});
+
+test('neon mesh: smooth cyclic palette, hues pinned to time, zoom keeps several hues, glow/blobs follow loudness', () => {
+  const rgb = (c: string) => c.match(/\d+/g)!.map(Number);
+  assert.equal(meshColor(0), `rgb(${MESH_PALETTE[0].join(',')})`, 'starts on hot pink');
+  assert.equal(meshColor(1), meshColor(0), 'cyclic');
+  assert.equal(meshColor(-0.25), meshColor(0.75), 'negative phases wrap');
+  assert.equal(meshColor(NaN), meshColor(0));
+  // Smooth: no jump bigger than a small step anywhere around the cycle (no banding).
+  let prev = rgb(meshColor(0));
+  for (let i = 1; i <= 600; i++) {
+    const c = rgb(meshColor(i / 600));
+    assert.ok(Math.max(...c.map((v, j) => Math.abs(v - prev[j]))) <= 12, `smooth at ${i}`);
+    prev = c;
+  }
+  // Pinned to time: the same second gets the same color in different windows (same zoom).
+  const a = meshHueStops({ start: 10, end: 40 }, 120, 31);
+  const b = meshHueStops({ start: 20, end: 50 }, 120, 31);
+  assert.equal(a[10].color, b[0].color, 'panning moves colors with the audio');
+  assert.equal(a.length, 31);
+  assert.equal(a[0].offset, 0);
+  assert.equal(a[30].offset, 1);
+  // Deep zoom still spans at least MESH_MIN_VISIBLE_CYCLES of the palette.
+  assert.ok(meshRate(0.5, 300) * 0.5 >= MESH_MIN_VISIBLE_CYCLES - 1e-9);
+  assert.ok(new Set(meshHueStops({ start: 100, end: 100.5 }, 300, 32).map((s) => s.color)).size >= 20, 'zoomed window keeps many hues');
+  // Edge layer differs from the core layer (2D mesh, not a 1D strip).
+  const core = meshHueStops({ start: 0, end: 60 }, 60, 16, 0);
+  const edge = meshHueStops({ start: 0, end: 60 }, 60, 16, 0.5);
+  assert.ok(core.every((s, i) => s.color !== edge[i].color));
+  // No duration (no track): finite, valid stops.
+  assert.ok(meshHueStops({ start: NaN, end: NaN }, 0, 8).every((s) => /^rgb\(\d+,\d+,\d+\)$/.test(s.color)));
+  // Glow: quiet dim, loud bright, bounded.
+  const lv = Array.from({ length: 400 }, (_, i) => (i < 200 ? 0.003 : 0.4));
+  const g = meshGlowStops(lv, 64);
+  assert.equal(g.length, 64);
+  assert.ok(g.every((s) => s.opacity >= 0.38 && s.opacity <= 1));
+  assert.equal(g[0].opacity, 0.38);
+  assert.ok(g[63].opacity > 0.9);
+  assert.deepEqual(meshGlowStops([], 64), []);
+  // Blobs: on loud, separated moments; none for silence.
+  const bl = meshBlobs(Array.from({ length: 300 }, (_, i) => (i === 50 || i === 250 ? 0.5 : i === 52 ? 0.49 : 0.001)), 3);
+  assert.equal(bl.length, 2, 'a near-duplicate peak does not get its own blob');
+  assert.ok(bl[0].x < 0.2 && bl[1].x > 0.8);
+  assert.deepEqual(meshBlobs(new Array(100).fill(0), 3), []);
+  assert.deepEqual(meshBlobs([], 3), []);
 });

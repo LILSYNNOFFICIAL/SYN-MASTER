@@ -63,3 +63,110 @@ export const FREQ_FILL_STOPS: ReadonlyArray<[number, string]> = [
   [6000, '#3FE0FF'],
   [16000, '#F5C451'],
 ];
+
+/* ---------------------------------------------------------------------------------------------
+ * Neon mesh gradient for the waveform body (aurora / mesh-gradient look).
+ * Hue flows along TIME (stops pinned to track seconds, so zooming keeps colors on the audio) and a
+ * phase-shifted copy shows toward the peaks, so color also changes from the center line outward.
+ * Loudness drives brightness: a per-column glow mask (dim when quiet, bright when loud) and soft
+ * radial blobs anchored on the loudest moments. Pure math; display only.
+ * ------------------------------------------------------------------------------------------- */
+
+/** Cyclic neon palette: hot pink > violet > electric blue > cyan > aqua-green > gold/orange > back. */
+export const MESH_PALETTE: ReadonlyArray<[number, number, number]> = [
+  [255, 46, 166], // hot pink / magenta
+  [157, 78, 255], // violet
+  [46, 107, 255], // electric blue
+  [34, 224, 255], // cyan
+  [32, 255, 170], // aqua-green
+  [255, 184, 46], // gold / orange
+];
+
+/** Palette color at a cyclic phase (any real number; 1 = one full trip through the palette). */
+export function meshColor(phase: number): string {
+  const p = Number.isFinite(phase) ? phase : 0;
+  const n = MESH_PALETTE.length;
+  const x = (((p % 1) + 1) % 1) * n;
+  const i = Math.floor(x) % n;
+  const k = x - Math.floor(x);
+  // Smoothstep between neighbours: no visible kinks (banding) at the palette joints.
+  const s = k * k * (3 - 2 * k);
+  const a = MESH_PALETTE[i];
+  const b = MESH_PALETTE[(i + 1) % n];
+  return `rgb(${Math.round(a[0] + (b[0] - a[0]) * s)},${Math.round(a[1] + (b[1] - a[1]) * s)},${Math.round(a[2] + (b[2] - a[2]) * s)})`;
+}
+
+/** Palette trips across a whole track (enough hues to read as a rainbow at full view). */
+export const MESH_CYCLES = 1.5;
+
+/** Minimum palette trips visible in any window, so a deep zoom still shows several hues. */
+export const MESH_MIN_VISIBLE_CYCLES = 0.7;
+
+/** Palette phase per second for a window: track-wide rate, raised when zoomed so hues keep flowing. */
+export function meshRate(span: number, durationSec: number): number {
+  const dur = durationSec > 0 ? durationSec : 1;
+  const sp = span > 0 && Number.isFinite(span) ? span : dur;
+  return Math.max(MESH_CYCLES / dur, MESH_MIN_VISIBLE_CYCLES / sp);
+}
+
+/**
+ * Hue stops for the visible window, pinned to track time (panning moves colors with the audio). `shift` offsets the phase (the peak
+ * layer uses a shifted copy so color varies from center to edge). Without a duration the window
+ * is treated as the whole track.
+ */
+export function meshHueStops(view: { start: number; end: number }, durationSec: number, count = 32, shift = 0): Array<{ offset: number; color: string }> {
+  const dur = durationSec > 0 ? durationSec : 1;
+  const start = durationSec > 0 && Number.isFinite(view.start) ? view.start : 0;
+  const end = durationSec > 0 && Number.isFinite(view.end) && view.end > start ? view.end : start + dur;
+  const c = Math.max(2, Math.min(96, Math.floor(count)));
+  const rate = meshRate(end - start, dur);
+  const out: Array<{ offset: number; color: string }> = [];
+  for (let i = 0; i < c; i++) {
+    const o = i / (c - 1);
+    const t = start + o * (end - start);
+    out.push({ offset: o, color: meshColor(t * rate + shift) });
+  }
+  return out;
+}
+
+/**
+ * Glow mask stops from per-column RMS: opacity 0.38 (quiet) .. 1 (loud), loudest column of each
+ * group wins so short hits still glow. Smoothed lightly so neighbouring groups blend, not band.
+ */
+export function meshGlowStops(levels: ArrayLike<number>, maxStops = 64): Array<{ offset: number; opacity: number }> {
+  const n = levels.length;
+  if (!n) return [];
+  const count = Math.max(2, Math.min(maxStops, n));
+  const raw: number[] = [];
+  for (let s = 0; s < count; s++) {
+    const a = Math.floor((s / count) * n);
+    const b = Math.max(a + 1, Math.floor(((s + 1) / count) * n));
+    let m = 0;
+    for (let i = a; i < Math.min(n, b); i++) if (levels[i] > m) m = levels[i];
+    raw.push(loudnessT(m));
+  }
+  return raw.map((t, s) => {
+    const l = raw[Math.max(0, s - 1)];
+    const r = raw[Math.min(count - 1, s + 1)];
+    const sm = Math.max(t, 0.25 * l + 0.5 * t + 0.25 * r);
+    return { offset: s / (count - 1), opacity: Number((0.38 + 0.62 * sm).toFixed(3)) };
+  });
+}
+
+/**
+ * Up to `max` glow blobs (x 0..1, loudness t 0..1) on the loudest, well separated moments.
+ * Quiet material (t < 0.2) gets no blob, so a silent track stays calm.
+ */
+export function meshBlobs(levels: ArrayLike<number>, max = 3, minGap = 0.18): Array<{ x: number; t: number }> {
+  const n = levels.length;
+  if (!n) return [];
+  const cand = Array.from({ length: n }, (_, i) => ({ x: n > 1 ? i / (n - 1) : 0.5, t: loudnessT(levels[i]) }))
+    .filter((c) => c.t >= 0.2)
+    .sort((a, b) => b.t - a.t || a.x - b.x);
+  const out: Array<{ x: number; t: number }> = [];
+  for (const c of cand) {
+    if (out.length >= max) break;
+    if (out.every((o) => Math.abs(o.x - c.x) >= minGap)) out.push(c);
+  }
+  return out.sort((a, b) => a.x - b.x);
+}

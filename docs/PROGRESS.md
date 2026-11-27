@@ -180,3 +180,15 @@ Dated entries, newest last, so work can resume if a session is cut off.
 - Browser check (headless Chromium, production build): Settings > AI Provider, library drawer and the Reference Match banner all open on first click with no page errors at 1440 and 360 px, and on a throttled 50 KB/s + 400 ms connection; demo session renders.
 - Checks: lint ok, 503 tests pass, build ok, check:bundle ok, production /api/health ok:true.
 - Next: (none for this order).
+## 2026-11-26 — Waveform pass 3: neon rainbow MESH gradient
+- Owner feedback on the loudness tint (one color per slice): "needs neon colors, plural, rainbow colors merged together as a mesh."
+- The waveform body now carries a multi-color neon mesh (waveformLayers.tsx LoudnessTint + waveformTint.ts mesh helpers), clipped to the waveform shape:
+  - Hues flow along time through a smooth cyclic palette (hot pink > violet > electric blue > cyan > aqua-green > gold/orange), pinned to track seconds so panning keeps colors on the audio; a deep zoom still shows at least 0.7 of the palette.
+  - A half-cycle-shifted copy takes over from the center line toward the peaks, so color also changes vertically (2D mesh, not a strip); a faint white core runs along the center line.
+  - Up to 3 soft radial glow blobs sit on the loudest, well separated moments (none on silent/quiet material).
+  - Loudness stays meaningful: a per-column RMS glow mask makes quiet sections dim (38%) and loud sections bright and saturated (100%).
+- SVG gradients/masks only: no CSS blur, no animation (static under reduced motion and everywhere; optional hue drift skipped to keep phones cool). Still in the lazy eq/ waveformLayers chunk (7.1 KiB); main chunk unchanged at 736.9 KiB raw / 224.7 KiB gzip.
+- Tests: waveformTint.test.ts render test now checks the mesh (clip, glow mask, center-to-peak layer, >= 12 hues, quiet dimmer than loud, blob on loud part, no blobs on silence, nothing drawn with no track); new pure test for palette smoothness (no banding), time pinning, zoom hue count, glow and blob rules. Old tint-color function tests kept unchanged.
+- Browser check (headless Chromium, production build): Shadows_Opening_Click_Repair.wav and the 30 s quiet-to-loud synthetic render the mesh at 1440 and 360 px, reduced motion, and Ctrl+wheel zoom 52x; empty workstation draws no mesh; no page errors. Not checked on a real phone.
+- Checks: lint ok, 504 tests pass, build ok, check:bundle ok, production /api/health ok:true.
+- Next: (none for this order).
