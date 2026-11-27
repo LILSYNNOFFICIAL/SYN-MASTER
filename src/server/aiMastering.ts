@@ -31,9 +31,50 @@ export class AiTimeoutError extends Error {
   }
 }
 
+/**
+ * Gemini answered, but with nothing usable: an empty body or a safety block. Thrown without
+ * trying the fallback model (no extra upstream call) so the real cause reaches the log.
+ */
+export class AiUpstreamResponseError extends Error {
+  readonly failureCode: 'empty-response' | 'upstream-safety-block';
+  constructor(failureCode: 'empty-response' | 'upstream-safety-block', message: string) {
+    super(message);
+    this.name = 'AiUpstreamResponseError';
+    this.failureCode = failureCode;
+  }
+}
+
+const SAFETY_FINISH_REASONS = new Set(['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII', 'IMAGE_SAFETY']);
+
+/** Throws AiUpstreamResponseError when a Gemini response is safety-blocked or empty. */
+export function assertUsableGeminiResponse(response: {
+  text?: string;
+  promptFeedback?: { blockReason?: unknown } | null;
+  candidates?: Array<{ finishReason?: unknown } | null> | null;
+}): string {
+  const blockReason = response.promptFeedback?.blockReason;
+  const finishReason = response.candidates?.[0]?.finishReason;
+  if (
+    (blockReason !== undefined && blockReason !== null && String(blockReason) !== 'BLOCKED_REASON_UNSPECIFIED') ||
+    (typeof finishReason === 'string' && SAFETY_FINISH_REASONS.has(finishReason))
+  ) {
+    throw new AiUpstreamResponseError('upstream-safety-block', 'Cloud AI declined to answer (safety filter).');
+  }
+  let text: string | undefined;
+  try {
+    text = response.text;
+  } catch {
+    text = undefined;
+  }
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    throw new AiUpstreamResponseError('empty-response', 'Cloud AI returned an empty response.');
+  }
+  return text;
+}
+
 export const BUILTIN_GEMINI_MODEL = 'gemini-4-hydrogen';
 export const FALLBACK_GEMINI_MODEL = 'gemini-3.1-flash-lite';
-const GEMINI_TIMEOUT_MS = 60_000;
+export const GEMINI_TIMEOUT_MS = 60_000;
 
 export function extractJsonText(raw: string | undefined): string {
   if (!raw) return '{}';
@@ -53,8 +94,9 @@ async function executeGeminiContentWithFallback(
   timeoutMessage: string,
 ): Promise<{ rawText: string; modelName: string }> {
   // Primary attempt: gemini-4-hydrogen with ThinkingLevel.LOW for fast low-latency strategy
+  let primaryResponse: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
   try {
-    const response = await withTimeout(
+    primaryResponse = await withTimeout(
       ai.models.generateContent({
         model: BUILTIN_GEMINI_MODEL,
         contents,
@@ -68,8 +110,6 @@ async function executeGeminiContentWithFallback(
       timeoutMs,
       timeoutMessage,
     );
-    const rawText = extractJsonText(response.text);
-    return { rawText, modelName: BUILTIN_GEMINI_MODEL };
   } catch (err) {
     const isHighDemandOrQuota =
       err instanceof Error &&
@@ -78,8 +118,14 @@ async function executeGeminiContentWithFallback(
       throw err;
     }
     console.warn(
-      `[SYN-AI] ${BUILTIN_GEMINI_MODEL} unavailable or high demand (${err instanceof Error ? err.message : String(err)}). Falling back to ${FALLBACK_GEMINI_MODEL}.`,
+      `[SYN-AI] ${BUILTIN_GEMINI_MODEL} unavailable or high demand (${err instanceof Error ? err.message.replace(/key=[^&\s]+/gi, 'key=***').slice(0, 200) : 'unknown error'}). Falling back to ${FALLBACK_GEMINI_MODEL}.`,
     );
+  }
+  if (primaryResponse) {
+    // Checked outside the try above: an empty or safety-blocked answer is reported as-is
+    // instead of silently triggering a second model call (no automatic retries).
+    const rawText = extractJsonText(assertUsableGeminiResponse(primaryResponse));
+    return { rawText, modelName: BUILTIN_GEMINI_MODEL };
   }
 
   // High-availability fallback: gemini-3.1-flash-lite executes in ~2s and honors the same schema
@@ -96,7 +142,7 @@ async function executeGeminiContentWithFallback(
     timeoutMs,
     timeoutMessage,
   );
-  const rawText = extractJsonText(fallbackResponse.text);
+  const rawText = extractJsonText(assertUsableGeminiResponse(fallbackResponse));
   return { rawText, modelName: FALLBACK_GEMINI_MODEL };
 }
 
@@ -209,7 +255,7 @@ export async function generateGeminiMasterStrategy(input: {
     SYSTEM_PROMPT,
     STRATEGY_SCHEMA,
     GEMINI_TIMEOUT_MS,
-    'AI mastering strategy timed out after 60s.',
+    `AI mastering strategy timed out after ${GEMINI_TIMEOUT_MS / 1000}s.`,
   );
 
   const responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));
@@ -266,7 +312,7 @@ export async function refineGeminiIteration(input: {
     SYSTEM_PROMPT,
     STRATEGY_SCHEMA,
     GEMINI_TIMEOUT_MS,
-    'AI refinement pass timed out after 60s.',
+    `AI refinement pass timed out after ${GEMINI_TIMEOUT_MS / 1000}s.`,
   );
 
   const responseTimeMs = Math.max(0, Math.round(performance.now() - startedMs));

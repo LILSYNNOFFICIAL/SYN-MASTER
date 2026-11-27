@@ -6,17 +6,21 @@
  */
 
 import type { AiFallbackReason, AiTimeoutHit } from '../types/mastering.ts';
+import { isAiUpstreamFailureCode, type AiUpstreamFailureCode } from './aiFailureCodes.ts';
 
 export type CloudAiLimitScope = 'client-minute' | 'client-day' | 'global-day' | 'burst';
 
 export class CloudAiRateLimitError extends Error {
   readonly scope: CloudAiLimitScope;
   readonly retryAfterSec: number;
-  constructor(message: string, scope: CloudAiLimitScope, retryAfterSec: number) {
+  /** Set when the server says Gemini itself (not this app's spend limiter) answered 429. */
+  readonly upstreamCode: AiUpstreamFailureCode | null;
+  constructor(message: string, scope: CloudAiLimitScope, retryAfterSec: number, upstreamCode: AiUpstreamFailureCode | null = null) {
     super(message);
     this.name = 'CloudAiRateLimitError';
     this.scope = scope;
     this.retryAfterSec = retryAfterSec;
+    this.upstreamCode = upstreamCode;
   }
 }
 
@@ -25,6 +29,10 @@ export class CloudAiHttpError extends Error {
   readonly code: string | null;
   readonly fallbackReason: AiFallbackReason;
   readonly timeoutHit: AiTimeoutHit;
+  /** The timeout limit (ms) that fired, when timeoutHit is set. */
+  readonly timeoutMs: number | null;
+  /** Safe short code from the server describing the real upstream failure. */
+  readonly upstreamCode: AiUpstreamFailureCode | null;
   constructor(
     message: string,
     opts: {
@@ -32,6 +40,8 @@ export class CloudAiHttpError extends Error {
       code?: string | null;
       fallbackReason: AiFallbackReason;
       timeoutHit?: AiTimeoutHit;
+      timeoutMs?: number | null;
+      upstreamCode?: AiUpstreamFailureCode | null;
     },
   ) {
     super(message);
@@ -40,6 +50,8 @@ export class CloudAiHttpError extends Error {
     this.code = opts.code ?? null;
     this.fallbackReason = opts.fallbackReason;
     this.timeoutHit = opts.timeoutHit ?? null;
+    this.timeoutMs = opts.timeoutMs ?? null;
+    this.upstreamCode = opts.upstreamCode ?? null;
   }
 }
 
@@ -53,7 +65,8 @@ export interface CloudAiRequestSignal {
 }
 
 /**
- * Combines the client's 30 s cloud AI timeout (longer than the server's 25 s Gemini timeout)
+ * Combines the client's cloud AI timeout (CLOUD_AI_TIMEOUT_MS, longer than the server's
+ * GEMINI_TIMEOUT_MS)
  * with an external cancel signal (such as the Stop button) so either aborts the fetch immediately.
  */
 export function createCloudAiRequestSignal(
@@ -130,40 +143,71 @@ function parseScope(value: unknown): CloudAiLimitScope {
   return value === 'client-minute' || value === 'client-day' || value === 'global-day' ? value : 'burst';
 }
 
+/** Server's own Gemini timeout when an older server did not send timeoutMs (matches GEMINI_TIMEOUT_MS). */
+const LEGACY_SERVER_TIMEOUT_MS = 60_000;
+
 export function classifyBuiltinHttpFailure(
   status: number,
   data: Record<string, unknown>,
   message: string,
-): { fallbackReason: AiFallbackReason; timeoutHit: AiTimeoutHit } {
+): { fallbackReason: AiFallbackReason; timeoutHit: AiTimeoutHit; timeoutMs: number | null; upstreamCode: AiUpstreamFailureCode | null } {
   const code = typeof data.code === 'string' ? data.code : '';
-  if (status === 429 || code === 'ai_rate_limited') return { fallbackReason: '429', timeoutHit: null };
-  if (code === 'missing_key') return { fallbackReason: 'missing-key', timeoutHit: null };
-  if (code === 'guest_session' || status === 401 || status === 403) return { fallbackReason: 'guest-session', timeoutHit: null };
-  if (code === 'ai_timeout' || status === 504) return { fallbackReason: 'timeout', timeoutHit: data.timeoutHit === 'server-25s' || status === 504 ? 'server-25s' : null };
-  if (code === 'parse_error' || status === 502) return { fallbackReason: 'parse', timeoutHit: null };
-  if (code === 'validation_error' || status === 422) return { fallbackReason: 'validation', timeoutHit: null };
-  if (status === 503 && /not configured/i.test(message)) return { fallbackReason: 'missing-key', timeoutHit: null };
-  return { fallbackReason: 'server-error', timeoutHit: null };
+  const upstreamCode = isAiUpstreamFailureCode(data.fallbackDetail) ? data.fallbackDetail : null;
+  const none = { timeoutHit: null, timeoutMs: null, upstreamCode } as const;
+  if (status === 429 || code === 'ai_rate_limited') return { fallbackReason: '429', ...none };
+  if (code === 'missing_key') return { fallbackReason: 'missing-key', ...none };
+  if (code === 'guest_session' || status === 401 || status === 403) return { fallbackReason: 'guest-session', ...none };
+  if (code === 'ai_timeout' || status === 504) {
+    // Our server's own timer fired (explicit 'server', or a legacy 504 with no upstream code).
+    const serverTimer = data.timeoutHit === 'server' || (status === 504 && upstreamCode === null);
+    const bodyMs = Number(data.timeoutMs);
+    return {
+      fallbackReason: 'timeout',
+      timeoutHit: serverTimer ? 'server' : null,
+      timeoutMs: serverTimer ? (Number.isFinite(bodyMs) && bodyMs > 0 ? bodyMs : LEGACY_SERVER_TIMEOUT_MS) : null,
+      upstreamCode,
+    };
+  }
+  if (code === 'empty_response' || code === 'safety_block') return { fallbackReason: 'server-error', ...none };
+  if (code === 'parse_error' || status === 502) return { fallbackReason: 'parse', ...none };
+  if (code === 'validation_error' || status === 422) return { fallbackReason: 'validation', ...none };
+  if (status === 503 && /not configured/i.test(message)) return { fallbackReason: 'missing-key', ...none };
+  return { fallbackReason: 'server-error', ...none };
+}
+
+export interface ClassifiedBuiltinAiError {
+  fallbackReason: AiFallbackReason;
+  timeoutHit: AiTimeoutHit;
+  /** The timeout limit (ms) that fired, when timeoutHit is set. */
+  timeoutMs: number | null;
+  /** Shown in the banner and diagnostic log: the safe upstream code when the server sent one. */
+  fallbackDetail: string;
 }
 
 export function classifyBuiltinAiError(
   err: unknown,
   timedOut: boolean,
-): { fallbackReason: AiFallbackReason; timeoutHit: AiTimeoutHit; fallbackDetail: string } {
+  clientTimeoutMs: number = CLOUD_AI_TIMEOUT_MS,
+): ClassifiedBuiltinAiError {
   const msg = err instanceof Error ? err.message : String(err ?? 'Unknown error');
-  if (timedOut) {
-    return { fallbackReason: 'timeout', timeoutHit: 'client-30s', fallbackDetail: 'client 30s timeout exceeded' };
-  }
+  const clientTimeout: ClassifiedBuiltinAiError = {
+    fallbackReason: 'timeout',
+    timeoutHit: 'client',
+    timeoutMs: clientTimeoutMs,
+    fallbackDetail: `client timeout exceeded (${clientTimeoutMs} ms)`,
+  };
+  if (timedOut) return clientTimeout;
   if (err instanceof CloudAiRateLimitError) {
-    return { fallbackReason: '429', timeoutHit: null, fallbackDetail: msg };
+    return { fallbackReason: '429', timeoutHit: null, timeoutMs: null, fallbackDetail: err.upstreamCode ?? msg };
   }
   if (err instanceof CloudAiHttpError) {
-    return { fallbackReason: err.fallbackReason, timeoutHit: err.timeoutHit, fallbackDetail: msg };
+    const fallbackDetail = err.timeoutHit === 'server' && err.timeoutMs !== null
+      ? `${err.upstreamCode ?? 'upstream-timeout'}, server limit ${err.timeoutMs} ms`
+      : err.upstreamCode ?? msg;
+    return { fallbackReason: err.fallbackReason, timeoutHit: err.timeoutHit, timeoutMs: err.timeoutMs, fallbackDetail };
   }
-  if (err instanceof DOMException && err.name === 'TimeoutError') {
-    return { fallbackReason: 'timeout', timeoutHit: 'client-30s', fallbackDetail: msg };
-  }
-  return { fallbackReason: 'server-error', timeoutHit: null, fallbackDetail: msg };
+  if (err instanceof DOMException && err.name === 'TimeoutError') return clientTimeout;
+  return { fallbackReason: 'server-error', timeoutHit: null, timeoutMs: null, fallbackDetail: msg };
 }
 
 /**
@@ -188,6 +232,7 @@ export async function readBuiltinAiResponse(res: Response, now = Date.now()): Pr
       typeof data.error === 'string' ? data.error : 'Cloud AI rate limit reached.',
       parseScope(data.scope),
       retryAfterSec,
+      isAiUpstreamFailureCode(data.fallbackDetail) ? data.fallbackDetail : null,
     );
     noteCloudAiRateLimited(err, now);
     throw err;
@@ -200,6 +245,8 @@ export async function readBuiltinAiResponse(res: Response, now = Date.now()): Pr
       code: typeof data.code === 'string' ? data.code : null,
       fallbackReason: classified.fallbackReason,
       timeoutHit: classified.timeoutHit,
+      timeoutMs: classified.timeoutMs,
+      upstreamCode: classified.upstreamCode,
     });
   }
   return data;

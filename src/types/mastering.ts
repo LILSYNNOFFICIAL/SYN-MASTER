@@ -1183,7 +1183,8 @@ export type AiFallbackReason =
   | 'validation'
   | 'user-disabled';
 
-export type AiTimeoutHit = 'server-25s' | 'client-30s' | null;
+/** Which side's timeout fired. The actual limit in ms is recorded in AiPassTrace.timeoutMs. */
+export type AiTimeoutHit = 'server' | 'client' | null;
 
 export interface AiPassTrace {
   /** 0 = initial strategy planning (before Pass 1); 1..N = refinement after Pass N. */
@@ -1196,6 +1197,8 @@ export interface AiPassTrace {
   responseTimeMs: number | null;
   promptChars: number | null;
   timeoutHit: AiTimeoutHit;
+  /** The timeout limit (ms) that fired when timeoutHit is set; null/absent otherwise. */
+  timeoutMs?: number | null;
   aiReturnedModules: ProcessorType[];
   finalRenderedModules: ProcessorType[];
 }

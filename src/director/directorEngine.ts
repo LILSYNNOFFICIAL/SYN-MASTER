@@ -1927,6 +1927,7 @@ export interface AiRefineSuggestion {
     responseTimeMs?: number | null;
     promptChars?: number | null;
     timeoutHit?: AiTimeoutHit;
+    timeoutMs?: number | null;
     aiReturnedModules?: ProcessorModule['type'][];
   };
 }
@@ -2909,6 +2910,7 @@ export async function runAutonomousDirectorLoop(
           responseTimeMs: refineTraceMeta?.responseTimeMs ?? null,
           promptChars: refineTraceMeta?.promptChars ?? null,
           timeoutHit: refineTraceMeta?.timeoutHit ?? null,
+          ...(refineTraceMeta?.timeoutHit ? { timeoutMs: refineTraceMeta.timeoutMs ?? null } : {}),
           aiReturnedModules: refineAiReturnedModules,
           finalRenderedModules: nextChainFromAi.map((m) => m.type),
         };
@@ -2959,6 +2961,7 @@ export async function runAutonomousDirectorLoop(
           responseTimeMs: refineTraceMeta?.responseTimeMs ?? null,
           promptChars: refineTraceMeta?.promptChars ?? null,
           timeoutHit: refineTraceMeta?.timeoutHit ?? null,
+          ...(refineTraceMeta?.timeoutHit ? { timeoutMs: refineTraceMeta.timeoutMs ?? null } : {}),
           aiReturnedModules: refineAiReturnedModules,
           finalRenderedModules: refinementSourceChain.map((m) => m.type),
         };

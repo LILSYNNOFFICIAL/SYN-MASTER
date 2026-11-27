@@ -81,10 +81,10 @@ test('cloud AI client timeout is longer than the server 60s timeout and Stop can
   }
 });
 
-test('readBuiltinAiResponse and classifyBuiltinAiError distinguish fallback causes and 25s/30s timeouts', async () => {
+test('readBuiltinAiResponse and classifyBuiltinAiError distinguish fallback causes and server/client timeouts', async () => {
   resetCloudAiCooldown();
   const cases: Array<{ status: number; body: Record<string, unknown>; expectedReason: string; expectedTimeout: string | null }> = [
-    { status: 504, body: { error: 'AI mastering took too long. Please try again.', code: 'ai_timeout', timeoutHit: 'server-25s' }, expectedReason: 'timeout', expectedTimeout: 'server-25s' },
+    { status: 504, body: { error: 'AI mastering took too long. Please try again.', code: 'ai_timeout', timeoutHit: 'server', timeoutMs: 60_000, fallbackDetail: 'upstream-timeout' }, expectedReason: 'timeout', expectedTimeout: 'server' },
     { status: 503, body: { error: 'GEMINI_API_KEY is not configured.', code: 'missing_key' }, expectedReason: 'missing-key', expectedTimeout: null },
     { status: 401, body: { error: 'Guest session expired.', code: 'guest_session' }, expectedReason: 'guest-session', expectedTimeout: null },
     { status: 502, body: { error: 'Malformed JSON from Gemini', code: 'parse_error' }, expectedReason: 'parse', expectedTimeout: null },
@@ -107,5 +107,70 @@ test('readBuiltinAiResponse and classifyBuiltinAiError distinguish fallback caus
 
   const clientTimedOut = classifyBuiltinAiError(new DOMException('timed out', 'TimeoutError'), true);
   assert.equal(clientTimedOut.fallbackReason, 'timeout');
-  assert.equal(clientTimedOut.timeoutHit, 'client-30s');
+  assert.equal(clientTimedOut.timeoutHit, 'client');
+  assert.equal(clientTimedOut.timeoutMs, CLOUD_AI_TIMEOUT_MS);
+  assert.match(clientTimedOut.fallbackDetail, /client timeout exceeded \(70000 ms\)/);
+});
+
+test('server timeout records the actual limit in ms and the safe upstream code', async () => {
+  resetCloudAiCooldown();
+  let caught: unknown;
+  try {
+    await readBuiltinAiResponse(jsonResponse(504, { error: 'x', code: 'ai_timeout', timeoutHit: 'server', timeoutMs: 60_000, fallbackDetail: 'upstream-timeout' }));
+  } catch (err) {
+    caught = err;
+  }
+  const c = classifyBuiltinAiError(caught, false);
+  assert.equal(c.timeoutHit, 'server');
+  assert.equal(c.timeoutMs, 60_000);
+  assert.equal(c.fallbackDetail, 'upstream-timeout, server limit 60000 ms');
+
+  // Gemini's own deadline (not our timer): timeout reason, but no server timeoutHit.
+  caught = undefined;
+  try {
+    await readBuiltinAiResponse(jsonResponse(504, { error: 'Cloud AI timed out upstream.', code: 'ai_timeout', fallbackDetail: 'upstream-timeout' }));
+  } catch (err) {
+    caught = err;
+  }
+  const up = classifyBuiltinAiError(caught, false);
+  assert.equal(up.fallbackReason, 'timeout');
+  assert.equal(up.timeoutHit, null);
+  assert.equal(up.timeoutMs, null);
+  assert.equal(up.fallbackDetail, 'upstream-timeout');
+});
+
+test('fallbackDetail carries the server upstream code and ignores codes outside the allowlist', async () => {
+  const cases: Array<{ status: number; body: Record<string, unknown>; reason: string; detail: string }> = [
+    { status: 503, body: { error: 'high demand', code: 'server_error', fallbackDetail: 'upstream-5xx' }, reason: 'server-error', detail: 'upstream-5xx' },
+    { status: 502, body: { error: 'empty', code: 'empty_response', fallbackDetail: 'empty-response' }, reason: 'server-error', detail: 'empty-response' },
+    { status: 502, body: { error: 'blocked', code: 'safety_block', fallbackDetail: 'upstream-safety-block' }, reason: 'server-error', detail: 'upstream-safety-block' },
+    { status: 502, body: { error: 'bad json', code: 'parse_error', fallbackDetail: 'json-parse' }, reason: 'parse', detail: 'json-parse' },
+    { status: 422, body: { error: 'bad chain', code: 'validation_error', fallbackDetail: 'schema-validation' }, reason: 'validation', detail: 'schema-validation' },
+    { status: 500, body: { error: 'AI mastering service could not complete the request.', code: 'server_error', fallbackDetail: 'unknown' }, reason: 'server-error', detail: 'unknown' },
+    // Not in the allowlist: falls back to the server's fixed message, never the injected text.
+    { status: 500, body: { error: 'generic', code: 'server_error', fallbackDetail: 'key=AIzaSECRET stack at x.ts:1' }, reason: 'server-error', detail: 'generic' },
+  ];
+  for (const c of cases) {
+    resetCloudAiCooldown();
+    let caught: unknown;
+    try {
+      await readBuiltinAiResponse(jsonResponse(c.status, c.body));
+    } catch (err) {
+      caught = err;
+    }
+    const classified = classifyBuiltinAiError(caught, false);
+    assert.equal(classified.fallbackReason, c.reason, `reason for ${c.detail}`);
+    assert.equal(classified.fallbackDetail, c.detail);
+  }
+
+  resetCloudAiCooldown();
+  let rate: unknown;
+  try {
+    await readBuiltinAiResponse(jsonResponse(429, { error: 'Cloud AI rate limit reached.', code: 'ai_rate_limited', fallbackDetail: 'upstream-429' }));
+  } catch (err) {
+    rate = err;
+  }
+  assert.ok(rate instanceof CloudAiRateLimitError);
+  assert.equal(classifyBuiltinAiError(rate, false).fallbackDetail, 'upstream-429');
+  resetCloudAiCooldown();
 });

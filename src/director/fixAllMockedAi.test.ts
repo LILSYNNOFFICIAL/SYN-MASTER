@@ -465,11 +465,12 @@ test('Director records deterministic-director fallback with exact reason when AI
       trace: {
         source: 'deterministic-director',
         fallbackReason: 'timeout',
-        fallbackDetail: 'client 30s timeout exceeded',
+        fallbackDetail: 'client timeout exceeded (70000 ms)',
         modelName: 'gemini-4-hydrogen',
-        responseTimeMs: 30005,
+        responseTimeMs: 70005,
         promptChars: 6100,
-        timeoutHit: 'client-30s',
+        timeoutHit: 'client',
+        timeoutMs: 70_000,
         aiReturnedModules: [],
       },
     }),
@@ -478,7 +479,7 @@ test('Director records deterministic-director fallback with exact reason when AI
   const aiPasses = report.aiPasses ?? [];
   assert.equal(aiPasses[0]?.source, 'local-dsp-planner');
   assert.equal(aiPasses[0]?.fallbackReason, '429');
-  assert.ok(aiPasses.some((p) => p.stage === 'refine' && p.source === 'deterministic-director' && p.fallbackReason === 'timeout' && p.timeoutHit === 'client-30s'));
+  assert.ok(aiPasses.some((p) => p.stage === 'refine' && p.source === 'deterministic-director' && p.fallbackReason === 'timeout' && p.timeoutHit === 'client' && p.timeoutMs === 70_000));
   const banner = summarizeAiFallbackBanner(aiPasses);
   assert.ok(banner && banner.includes('Cloud AI was not used for this pass because:'));
   assert.match(banner, /429/);

@@ -10,12 +10,10 @@ import { mkdtemp, open, rm } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import {
-  AiConfigError,
-  AiTimeoutError,
   generateGeminiMasterStrategy,
   refineGeminiIteration,
 } from './src/server/aiMastering.ts';
-import { AiValidationError } from './src/ai/masteringPrompt.ts';
+import { buildSanitizedAiErrorResponse } from './src/server/aiErrorClassification.ts';
 import {
   isValidAnalysisPayload,
   sanitizeAvailablePlugins,
@@ -149,36 +147,10 @@ app.use('/api/export/encode', (req, res, next) => {
 app.use(express.json({ limit: '4mb' }));
 
 function sendSanitizedAiError(res: express.Response, err: unknown): void {
-  if (err instanceof AiConfigError) {
-    res.status(503).json({ error: err.message, code: 'missing_key' });
-    return;
-  }
-  if (err instanceof AiTimeoutError) {
-    res.status(504).json({ error: err.message, code: 'ai_timeout', timeoutHit: 'server-25s' });
-    return;
-  }
-  if (err instanceof SyntaxError) {
-    res.status(502).json({ error: 'AI returned malformed strategy JSON.', code: 'parse_error' });
-    return;
-  }
-  if (err instanceof AiValidationError) {
-    res.status(422).json({ error: err.message, code: 'validation_error' });
-    return;
-  }
-  const msg = err instanceof Error ? err.message : 'AI mastering request failed.';
-  console.error('[SYN-AI] Endpoint error:', msg);
-
-  if (/429|RESOURCE_EXHAUSTED|quota|rate.*limit/i.test(msg)) {
-    res.status(429).json({ error: 'Cloud AI rate limit reached. Retrying or using local DSP.', code: 'ai_rate_limited' });
-    return;
-  }
-  if (/503|UNAVAILABLE|high demand/i.test(msg)) {
-    res.status(503).json({ error: 'Cloud AI model is temporarily experiencing high demand. Please try again shortly.', code: 'server_error' });
-    return;
-  }
-
-  const sanitizedMsg = msg.replace(/key=[^&\s]+/gi, 'key=***').slice(0, 200);
-  res.status(500).json({ error: sanitizedMsg || 'AI mastering service could not complete the request.', code: 'server_error' });
+  // Classified into a safe short code (fallbackDetail); never forwards keys, bodies or stacks.
+  const { status, body, logLine } = buildSanitizedAiErrorResponse(err);
+  if (logLine) console.error(logLine);
+  res.status(status).json(body);
 }
 
 async function measureEncodedLoudness(filePath: string): Promise<{ integratedLufs: number | null; truePeakDbtp: number | null }> {

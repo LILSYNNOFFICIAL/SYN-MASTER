@@ -64,7 +64,7 @@ export const DiagnosticLogPanel: React.FC<{ log: DiagnosticLog }> = ({ log }) =>
               const label = a.stage === 'strategy' ? 'Strategy' : `Refine #${a.pass}`;
               const parts: string[] = [a.source];
               if (a.responseTimeMs !== null) parts.push(`${a.responseTimeMs} ms`);
-              if (a.timeoutHit) parts.push(a.timeoutHit);
+              if (a.timeoutHit) parts.push(`${a.timeoutHit} timeout${typeof a.timeoutMs === 'number' ? ` ${a.timeoutMs} ms` : ''}`);
               if (a.fallbackReason) parts.push(`fallback: ${a.fallbackReason}`);
               return `${label} (${parts.join(', ')})`;
             })
@@ -168,7 +168,7 @@ export const DiagnosticLogPanel: React.FC<{ log: DiagnosticLog }> = ({ log }) =>
                     <td>{a.modelName ?? '—'}</td>
                     <td>{a.responseTimeMs !== null ? `${a.responseTimeMs} ms` : '—'}</td>
                     <td>{a.promptChars !== null ? `${a.promptChars} chars` : '—'}</td>
-                    <td>{a.timeoutHit ?? '—'}</td>
+                    <td>{a.timeoutHit ? `${a.timeoutHit}${typeof a.timeoutMs === 'number' ? ` (${a.timeoutMs} ms)` : ''}` : '—'}</td>
                     <td>{a.fallbackReason ? `${a.fallbackReason}${a.fallbackDetail ? ` (${a.fallbackDetail})` : ''}` : '—'}</td>
                     <td>AI: [{a.aiReturnedModules.join(', ') || 'none'}] / Rendered: [{a.finalRenderedModules.join(', ') || 'none'}]</td>
                   </tr>

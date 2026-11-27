@@ -421,7 +421,7 @@ export function diagnosticLogToText(log: DiagnosticLog): string {
       const timeStr = a.responseTimeMs !== null ? `${a.responseTimeMs} ms` : 'n/a';
       const promptStr = a.promptChars !== null ? `${a.promptChars} chars` : 'n/a';
       const modelStr = a.modelName ?? 'none';
-      const timeoutStr = a.timeoutHit ?? 'none';
+      const timeoutStr = a.timeoutHit ? `${a.timeoutHit}${typeof a.timeoutMs === 'number' ? ` (${a.timeoutMs} ms)` : ''}` : 'none';
       const fbStr = a.fallbackReason ? `${a.fallbackReason}${a.fallbackDetail ? ` (${a.fallbackDetail})` : ''}` : 'none';
       const aiMods = a.aiReturnedModules.join(', ') || 'none';
       const finalMods = a.finalRenderedModules.join(', ') || 'none';

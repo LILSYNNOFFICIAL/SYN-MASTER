@@ -1927,7 +1927,7 @@ export default function App() {
         } | null;
       } = { current: null };
       try {
-        // Built-in Gemini (default): client timeout (30s) exceeds server's 25s Gemini timeout,
+        // Built-in Gemini (default): client timeout (CLOUD_AI_TIMEOUT_MS) exceeds the server's Gemini timeout,
         // and clicking Stop cancels the active request immediately.
         const builtinStrategy = async (cancelSignal?: AbortSignal) => {
           const startedMs = performance.now();
@@ -2095,6 +2095,7 @@ export default function App() {
             responseTimeMs: builtinStrategyAttempt.current?.responseTimeMs ?? null,
             promptChars: builtinStrategyAttempt.current?.promptChars ?? strategyPromptChars,
             timeoutHit: classified.timeoutHit,
+            timeoutMs: classified.timeoutMs,
             aiReturnedModules: [],
             finalRenderedModules: [],
           };
@@ -2305,6 +2306,7 @@ export default function App() {
                     responseTimeMs: builtinRefineAttempt.current?.responseTimeMs ?? null,
                     promptChars: builtinRefineAttempt.current?.promptChars ?? refinePromptChars,
                     timeoutHit: classified.timeoutHit,
+                    timeoutMs: classified.timeoutMs,
                     aiReturnedModules: [],
                     finalRenderedModules: [],
                   }]);
@@ -2323,6 +2325,7 @@ export default function App() {
                       responseTimeMs: builtinRefineAttempt.current?.responseTimeMs ?? null,
                       promptChars: builtinRefineAttempt.current?.promptChars ?? refinePromptChars,
                       timeoutHit: classified.timeoutHit,
+                      timeoutMs: classified.timeoutMs,
                       aiReturnedModules: [],
                     },
                   };

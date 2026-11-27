@@ -185,7 +185,8 @@ test('summarizeAiFallbackBanner reports all fallback causes and stays silent whe
         modelName: 'gemini-4-hydrogen',
         responseTimeMs: 42,
         promptChars: 4000,
-        timeoutHit: reason === 'timeout' ? 'client-30s' : null,
+        timeoutHit: reason === 'timeout' ? 'client' : null,
+        timeoutMs: reason === 'timeout' ? 70_000 : null,
         aiReturnedModules: [],
         finalRenderedModules: ['parametric-eq'],
       },
@@ -220,11 +221,12 @@ test('diagnostic log JSON/text downloads, DiagnosticLogPanel, and MasterConsole 
       stage: 'refine',
       source: 'deterministic-director',
       fallbackReason: 'timeout',
-      fallbackDetail: 'server 25s Gemini timeout exceeded',
+      fallbackDetail: 'upstream-timeout, server limit 60000 ms',
       modelName: 'gemini-4-hydrogen',
-      responseTimeMs: 25014,
+      responseTimeMs: 60014,
       promptChars: 7340,
-      timeoutHit: 'server-25s',
+      timeoutHit: 'server',
+      timeoutMs: 60_000,
       aiReturnedModules: [],
       finalRenderedModules: ['parametric-eq', 'compressor', 'maximizer'],
     },
@@ -254,7 +256,9 @@ test('diagnostic log JSON/text downloads, DiagnosticLogPanel, and MasterConsole 
   assert.equal(parsedJson.aiPasses[0]?.promptChars, 9125);
   assert.deepEqual(parsedJson.aiPasses[0]?.aiReturnedModules, ['parametric-eq', 'compressor']);
   assert.deepEqual(parsedJson.aiPasses[0]?.finalRenderedModules, ['parametric-eq', 'compressor', 'limiter']);
-  assert.equal(parsedJson.aiPasses[1]?.timeoutHit, 'server-25s');
+  assert.equal(parsedJson.aiPasses[1]?.timeoutHit, 'server');
+  assert.equal(parsedJson.aiPasses[1]?.timeoutMs, 60_000);
+  assert.equal(parsedJson.aiPasses[1]?.fallbackDetail, 'upstream-timeout, server limit 60000 ms');
   assert.equal(parsedJson.aiPasses[1]?.fallbackReason, 'timeout');
   assert.ok(parsedJson.aiFallbackBanner?.includes('Cloud AI was not used for this pass because:'));
 
@@ -266,7 +270,9 @@ test('diagnostic log JSON/text downloads, DiagnosticLogPanel, and MasterConsole 
   assert.match(text, /model=gemini-4-hydrogen/);
   assert.match(text, /responseTime=1842 ms/);
   assert.match(text, /prompt=9125 chars/);
-  assert.match(text, /timeoutHit=server-25s/);
+  assert.match(text, /timeoutHit=server \(60000 ms\)/);
+  assert.match(text, /fallback=timeout \(upstream-timeout, server limit 60000 ms\)/);
+  assert.match(log.aiFallbackBanner ?? '', /upstream-timeout/);
   assert.match(text, /AI returned:\s+\[parametric-eq, compressor\]/);
   assert.match(text, /Final rendered:\s+\[parametric-eq, compressor, limiter\]/);
 
@@ -276,7 +282,9 @@ test('diagnostic log JSON/text downloads, DiagnosticLogPanel, and MasterConsole 
   assert.match(panelHtml, /Cloud AI was not used for this pass because:/);
   assert.match(panelHtml, /data-testid="diagnostic-ai-timing-summary"/);
   assert.match(panelHtml, /1842 ms/);
-  assert.match(panelHtml, /25014 ms/);
+  assert.match(panelHtml, /60014 ms/);
+  assert.match(panelHtml, /server timeout 60000 ms/);
+  assert.match(panelHtml, /upstream-timeout, server limit 60000 ms/);
 
   // MasterConsole shows banner when fallback occurred and hides it when null
   const noop = () => {};
