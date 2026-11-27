@@ -67,7 +67,7 @@ interface Props {
   onSeek?: (sec: number) => void;
   /** Fade curves and handles layered directly over the existing waveform blanket. */
   fades?: FadeSettings;
-  onFadesChange?: (next: FadeSettings | ((current: FadeSettings) => FadeSettings)) => void;
+  onFadesChange?: (next: FadeSettings) => void;
   ariaLabel: string;
   /** Popover rendered over the plot. */
   children?: React.ReactNode;
@@ -135,8 +135,6 @@ export const EqGraph: React.FC<Props> = ({
   const dragRef = useRef<null | { id: string; kind: 'node' | 'qlo' | 'qhi'; fine: boolean; sx: number; sy: number; node: EqGraphNode; last: { freq?: number; yDb?: number; q?: number } }>(null);
   const seekDragRef = useRef(false);
   const fadeDragRef = useRef<null | 'in' | 'out'>(null);
-  const fadesRef = useRef(fades);
-  fadesRef.current = fades;
   // Fade handle under the pointer or being dragged: shows its length on the curve.
   const [fadeHot, setFadeHot] = useState<null | 'in' | 'out'>(null);
   const [fadeDragSide, setFadeDragSide] = useState<null | 'in' | 'out'>(null);
@@ -172,21 +170,13 @@ export const EqGraph: React.FC<Props> = ({
     svgRef.current?.setPointerCapture?.(e.pointerId);
   };
 
-  const updateFadeFromPointer = (side: 'in' | 'out', sec: number) => {
-    if (!onFadesChange || durationSec <= 0) return;
-    const maxLen = durationSec * 0.5;
-    // Queue a functional state update. React applies this against the latest committed
-    // state, so a rapid fade-in followed by fade-out cannot overwrite the first change
-    // with a snapshot captured by an earlier render.
-    onFadesChange((current) => side === 'in'
-      ? { ...current, inSec: Number(Math.min(maxLen, sec).toFixed(2)) }
-      : { ...current, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
-  };
-
   const onMove = (e: React.PointerEvent) => {
-    if (fadeDragRef.current && fadesRef.current && onFadesChange && durationSec > 0 && svgRef.current) {
+    if (fadeDragRef.current && fades && onFadesChange && durationSec > 0 && svgRef.current) {
       const rect = svgRef.current.getBoundingClientRect();
-      updateFadeFromPointer(fadeDragRef.current, tl(e.clientX, rect));
+      const sec = tl(e.clientX, rect);
+      const maxLen = durationSec * 0.5;
+      if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
+      else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
       return;
     }
     if (seekDragRef.current && onSeek && durationSec > 0 && svgRef.current) {
@@ -222,9 +212,12 @@ export const EqGraph: React.FC<Props> = ({
   };
 
   const endDrag = () => {
-    if (fadeDragRef.current && fadesRef.current && onFadesChange && durationSec > 0 && svgRef.current) {
+    if (fadeDragRef.current && fades && onFadesChange && durationSec > 0 && svgRef.current) {
       const rect = svgRef.current.getBoundingClientRect();
-      updateFadeFromPointer(fadeDragRef.current, tl(lastPointerXRef.current, rect));
+      const sec = tl(lastPointerXRef.current, rect);
+      const maxLen = durationSec * 0.5;
+      if (fadeDragRef.current === 'in') onFadesChange({ ...fades, inSec: Number(Math.min(maxLen, sec).toFixed(2)) });
+      else onFadesChange({ ...fades, outSec: Number(Math.min(maxLen, durationSec - sec).toFixed(2)) });
       fadeDragRef.current = null;
       setFadeDragSide(null);
       return;
