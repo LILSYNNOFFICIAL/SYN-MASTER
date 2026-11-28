@@ -428,10 +428,9 @@ async function runWavExportE2E(browser) {
         side: el.getAttribute('data-fade-drag-side'),
         seconds: el.getAttribute('data-fade-last-seconds'),
         controls: document.querySelector('.syn-player-fades')?.innerText ?? '',
-        hitTarget,
       }));
       await page.mouse.up();
-      return diagnostics;
+      return { ...diagnostics, hitTarget };
     };
     step('fades');
     // Drag the actual SVG handles rather than approximating their hit targets
