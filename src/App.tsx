@@ -291,7 +291,7 @@ export default function App() {
   const [referenceTrack, setReferenceTrack] = useState<AudioTrackAsset | null>(null);
   const [albumProfile, setAlbumProfile] = useState<AlbumMasteringProfile | null>(null);
   const [albumProfileActive, setAlbumProfileActive] = useState(false);
-  const masteringReferenceAnalysis = albumProfileActive && albumProfile ? albumProfile.analysis : masteringReferenceAnalysis;
+  const masteringReferenceAnalysis = albumProfileActive && albumProfile ? albumProfile.analysis : referenceTrack?.analysis ?? null;
   const masteringReferenceLabel = albumProfileActive && albumProfile
     ? `ALBUM REFERENCE PROFILE (${albumProfile.trackCount}-track robust median)`
     : referenceTrack ? `REFERENCE TRACK: ${referenceTrack.name}` : 'REFERENCE TRACK MEASUREMENTS';
