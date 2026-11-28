@@ -46,6 +46,7 @@ export const VERIFIED_NATIVE_PROCESSOR_INVENTORY: Record<
       decrackle: { min: 0, max: 100, defaultValue: 0, unit: '%' },
       spikeRepair: { defaultValue: false },
       deShimmer: { min: 0, max: 100, defaultValue: 0, unit: '%' },
+      declip: { min: 0, max: 100, defaultValue: 0, unit: '%' },
     },
   },
   'parametric-eq': {

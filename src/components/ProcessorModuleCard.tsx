@@ -1166,6 +1166,17 @@ export const ProcessorModuleCard: React.FC<Props> = React.memo(({
                       onChange={(v) => setParam<RestoreParams>({ decrackle: v })}
                     />
                     <RotaryKnob
+                      label="De-Clip"
+                      value={p.declip ?? 0}
+                      min={0}
+                      max={100}
+                      step={1}
+                      defaultValue={0}
+                      unit="%"
+                      size="sm"
+                      onChange={(v) => setParam<RestoreParams>({ declip: v })}
+                    />
+                    <RotaryKnob
                       label="De-Shimmer"
                       value={p.deShimmer ?? 0}
                       min={0}

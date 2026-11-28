@@ -204,6 +204,8 @@ export interface RestoreParams {
   decrackle?: number; // 0 to 100
   spikeRepair?: boolean;
   deShimmer?: number; // 0 to 100
+  /** Conservative restoration for short, high-confidence clipped plateaus. */
+  declip?: number; // 0 to 100
 }
 
 export interface BassEnhancerParams {

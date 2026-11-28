@@ -413,6 +413,7 @@ export function buildExplainableMasterPlan(input: {
   const autoDeShimmer = shimmerConfidence >= SHIMMER_AUTO_CONFIDENCE ? Math.round(30 + 50 * Math.min(1, (shimmerConfidence - SHIMMER_AUTO_CONFIDENCE) / (1 - SHIMMER_AUTO_CONFIDENCE))) : 0;
   const needsRestore =
     baselineClicks > 0 ||
+    analysis.clippedSamples > 0 ||
     autoDeShimmer > 0 ||
     analysis.dcOffset >= 0.004 ||
     hasGenuineNoiseFloor ||
@@ -442,6 +443,8 @@ export function buildExplainableMasterPlan(input: {
       decrackle: baselineClicks > 20 ? 35 : baselineClicks > 0 ? 15 : 0,
       spikeRepair: baselineClicks > 0,
       deShimmer: autoDeShimmer,
+      // The renderer reconstructs only clear, short flat tops; uncertain peaks remain unchanged.
+      declip: analysis.clippedSamples > 0 ? 55 : 0,
     };
     recommendations.push({
       id: 'rec-restore',
@@ -452,6 +455,7 @@ export function buildExplainableMasterPlan(input: {
       supportingMeasurements: [
         `Noise Floor: ${nf.toFixed(1)} dBFS`,
         `DC Offset: ${(analysis.dcOffset * 100).toFixed(3)}%`,
+        `Clipped samples: ${analysis.clippedSamples}`,
         `Presence Energy: ${analysis.zoneEnergyDb.presence.toFixed(1)} dB`,
         ...(analysis.shimmer ? [`AI shimmer confidence: ${analysis.shimmer.confidence.toFixed(2)} (auto de-shimmer at ≥ ${SHIMMER_AUTO_CONFIDENCE})`] : []),
       ],

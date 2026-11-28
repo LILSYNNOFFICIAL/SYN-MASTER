@@ -27,8 +27,8 @@ const mk = (type: ProcessorType, name: string, patch: Record<string, unknown> = 
 export const MODULE_CATALOG: CatalogItem[] = [
   {
     id: 'ai-repair', label: 'AI Repair', category: 'Repair', type: 'restore',
-    description: 'De-click, de-crackle, spike repair and AI-shimmer reduction for Suno/Udio audio',
-    build: () => mk('restore', 'AI Repair (De-click / De-shimmer)', { hissReduction: 0, deEssAmount: 0, resonanceSuppress: 0, declick: 55, decrackle: 20, spikeRepair: true, deShimmer: 30 }),
+    description: 'Conservative de-clip, de-click, de-crackle, spike repair and AI-shimmer reduction for Suno/Udio audio',
+    build: () => mk('restore', 'AI Repair (De-clip / De-click)', { hissReduction: 0, deEssAmount: 0, resonanceSuppress: 0, declip: 55, declick: 55, decrackle: 20, spikeRepair: true, deShimmer: 30 }),
   },
   {
     id: 'vocal-rebalance', label: 'Vocal Rebalance', category: 'Repair', type: 'vocal-rebalance',

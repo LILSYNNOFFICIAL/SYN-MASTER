@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { detectClicks } from './clickDetect';
-import { repairClicksChannel, repairEdgeClicksChannel, repairEdgeClicksStereo } from './repair';
+import { repairClippedPlateausChannel, repairClicksChannel, repairEdgeClicksChannel, repairEdgeClicksStereo } from './repair';
 
 const SR = 44100;
 
@@ -49,4 +49,30 @@ test('stereo edge repair applies the same fade envelope to both channels', () =>
   const at = Math.round(SR * 0.004);
   assert.ok(Math.abs(left[at]) > 0 && Math.abs(right[at]) > 0);
   assert.ok(Math.abs(left[at] / right[at] - 2) < 0.05, 'the fade must preserve the stereo level relationship');
+});
+
+
+test('declipper reconstructs only a short clipped sine crest and reports the changed samples', () => {
+  const raw = new Float32Array(SR / 5);
+  const clipped = new Float32Array(SR / 5);
+  let peakAt = 0;
+  for (let i = 0; i < raw.length; i++) {
+    raw[i] = 1.04 * Math.sin((2 * Math.PI * 440 * i) / SR);
+    clipped[i] = Math.max(-1, Math.min(1, raw[i]));
+    if (raw[i] > raw[peakAt]) peakAt = i;
+  }
+  const result = repairClippedPlateausChannel(clipped, SR, 100);
+  assert.ok(result.plateaus > 0, 'a clear flat-topped positive crest should qualify');
+  assert.ok(result.samples >= 2, 'the repair should report reconstructed samples');
+  assert.ok(clipped[peakAt] > 1, 'reconstruction should restore some above-ceiling crest shape');
+  assert.ok(Math.abs(clipped[peakAt] - raw[peakAt]) < Math.abs(1 - raw[peakAt]), 'reconstruction should move the peak toward the known unclipped signal');
+});
+
+test('declipper leaves isolated full-scale samples and long clipped runs untouched', () => {
+  const isolated = new Float32Array(128);
+  isolated[64] = 1;
+  assert.deepEqual(repairClippedPlateausChannel(isolated, SR, 100), { plateaus: 0, samples: 0 });
+  const long = new Float32Array(256);
+  long.fill(1, 80, 120);
+  assert.deepEqual(repairClippedPlateausChannel(long, SR, 100), { plateaus: 0, samples: 0 });
 });

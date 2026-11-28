@@ -22,6 +22,8 @@ export interface RepairSettings {
   spikeRepair: boolean;
   /** 0..100 AI shimmer / metallic artifact reduction (0 = off). */
   deShimmer: number;
+  /** 0..100 conservative reconstruction of short, high-confidence flat-topped clips. */
+  declip?: number;
 }
 
 function d2(ch: Float32Array, i: number): number {
@@ -292,6 +294,66 @@ export function reduceShimmer(left: Float32Array, right: Float32Array, sampleRat
   return Number(maxGr.toFixed(2));
 }
 
+/**
+ * Reconstruct only short flat-topped peaks with clear rising/falling shoulders.
+ * Cubic Hermite interpolation estimates the unclipped crest; ambiguous, long, or
+ * non-monotonic plateaus are left untouched. This is intentionally conservative.
+ */
+export function repairClippedPlateausChannel(
+  ch: Float32Array,
+  sampleRate: number,
+  strength: number,
+): { plateaus: number; samples: number } {
+  if (!(strength > 0) || ch.length < 16 || !Number.isFinite(sampleRate) || sampleRate <= 0) return { plateaus: 0, samples: 0 };
+  const blend = Math.max(0, Math.min(1, strength / 100));
+  const ceiling = 0.999;
+  const maxRun = Math.max(2, Math.min(24, Math.round(sampleRate * 0.00045)));
+  let plateaus = 0;
+  let samples = 0;
+  let i = 2;
+  while (i < ch.length - 3) {
+    const sign = ch[i] >= ceiling ? 1 : ch[i] <= -ceiling ? -1 : 0;
+    if (!sign) { i++; continue; }
+    const start = i;
+    while (i < ch.length - 2 && sign * ch[i] >= ceiling) i++;
+    const end = i - 1;
+    const run = end - start + 1;
+    if (run < 2 || run > maxRun || start < 2 || end + 2 >= ch.length) continue;
+    const a = start - 1;
+    const b = end + 1;
+    const span = b - a;
+    const y0 = sign * ch[a];
+    const y1 = sign * ch[b];
+    const slopeIn = sign * (ch[a] - ch[a - 1]);
+    const slopeOut = sign * (ch[b + 1] - ch[b]);
+    if (!(y0 < ceiling && y1 < ceiling && slopeIn > 1e-5 && slopeOut < -1e-5)) continue;
+    const m0 = slopeIn * span;
+    const m1 = slopeOut * span;
+    let peak = -Infinity;
+    const estimateAt = (index: number) => {
+      const t = (index - a) / span;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * m0
+        + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * m1;
+    };
+    for (let k = start; k <= end; k++) peak = Math.max(peak, estimateAt(k));
+    if (!(peak > ceiling + 1e-5)) continue;
+    let changed = 0;
+    for (let k = start; k <= end; k++) {
+      const original = ch[k];
+      const reconstructed = sign * estimateAt(k);
+      const next = original + (reconstructed - original) * blend;
+      if (Number.isFinite(next) && sign * next > sign * original) {
+        ch[k] = next;
+        changed++;
+      }
+    }
+    if (changed > 0) { plateaus++; samples += changed; }
+  }
+  return { plateaus, samples };
+}
+
 /** Apply all enabled repair stages in place. Returns counts for telemetry/logs. */
 export function applyRepair(
   left: Float32Array,
@@ -302,7 +364,20 @@ export function applyRepair(
 ): { clicksRepaired: number; spikesRepaired: number; shimmerGrDb: number } {
   let clicksRepaired = 0;
   let spikesRepaired = 0;
+  let declipSamplesRepaired = 0;
+  let declipPlateausRepaired = 0;
   const stereoSame = left === right;
+  const declipStrength = ((settings.declip ?? 0) / 100) * intensityScale;
+  if (declipStrength > 0) {
+    const l = repairClippedPlateausChannel(left, sampleRate, declipStrength * 100);
+    declipPlateausRepaired += l.plateaus;
+    declipSamplesRepaired += l.samples;
+    if (!stereoSame) {
+      const r = repairClippedPlateausChannel(right, sampleRate, declipStrength * 100);
+      declipPlateausRepaired += r.plateaus;
+      declipSamplesRepaired += r.samples;
+    }
+  }
   if (settings.spikeRepair) {
     spikesRepaired += repairSpikesChannel(left);
     if (!stereoSame) spikesRepaired += repairSpikesChannel(right);
@@ -330,5 +405,5 @@ export function applyRepair(
   }
   const shimmer = ((settings.deShimmer ?? 0) / 100) * intensityScale;
   const shimmerGrDb = shimmer > 0 && !stereoSame ? reduceShimmer(left, right, sampleRate, shimmer) : 0;
-  return { clicksRepaired, spikesRepaired, shimmerGrDb };
+  return { clicksRepaired, spikesRepaired, shimmerGrDb, declipPlateausRepaired, declipSamplesRepaired };
 }

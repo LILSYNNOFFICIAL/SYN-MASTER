@@ -131,6 +131,7 @@ export const PROCESSOR_PARAM_LIMITS = {
     declick: [0, 100] as const,
     decrackle: [0, 100] as const,
     deShimmer: [0, 100] as const,
+    declip: [0, 100] as const,
   },
   'bass-enhancer': {
     subFreqHz: [35, 95] as const,
@@ -295,6 +296,7 @@ export function createDefaultParams(type: ProcessorType): ProcessorModule['param
         decrackle: 0,
         spikeRepair: false,
         deShimmer: 0,
+        declip: 0,
       } satisfies RestoreParams;
     case 'bass-enhancer':
       return {
