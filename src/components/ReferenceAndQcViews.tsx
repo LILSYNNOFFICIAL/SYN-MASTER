@@ -10,6 +10,8 @@ import type {
 } from '../types/mastering';
 import { SpectrumAndEQCanvas } from './CanvasVisualizers';
 import { LiveLoudnessPanel } from './qc/LiveLoudnessPanel';
+import { AlbumProfilePanel } from './studio/AlbumProfilePanel';
+import type { AlbumMasteringProfile } from '../director/albumProfile';
 
 interface RefProps {
   activeTrack: AudioTrackAsset | null;
@@ -23,6 +25,10 @@ interface RefProps {
   onAuditionReference: () => void;
   onAuditionMastered: () => void;
   onMatchReference: () => void;
+  albumProfile: AlbumMasteringProfile | null;
+  albumProfileActive: boolean;
+  onAlbumProfileChange: (profile: AlbumMasteringProfile | null) => void;
+  onAlbumProfileActiveChange: (active: boolean) => void;
 }
 
 export const ReferenceMatchView: React.FC<RefProps> = ({
@@ -37,6 +43,10 @@ export const ReferenceMatchView: React.FC<RefProps> = ({
   onAuditionReference,
   onAuditionMastered,
   onMatchReference,
+  albumProfile,
+  albumProfileActive,
+  onAlbumProfileChange,
+  onAlbumProfileActiveChange,
 }) => {
   const refFileInput = React.useRef<HTMLInputElement | null>(null);
   const activePost = postAnalysis ?? activeTrack?.analysis ?? null;
@@ -89,6 +99,13 @@ export const ReferenceMatchView: React.FC<RefProps> = ({
           )}
         </div>
       </div>
+
+      <AlbumProfilePanel
+        profile={albumProfile}
+        active={albumProfileActive}
+        onChange={onAlbumProfileChange}
+        onActivate={onAlbumProfileActiveChange}
+      />
 
       {!referenceTrack || !activePost ? (
         <div data-testid="workspace-empty-state" data-workspace="reference" className="syn-workspace-empty p-8 rounded bg-[#111217] border border-dashed border-[#2A2D39] text-center">
