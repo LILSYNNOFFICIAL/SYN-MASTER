@@ -402,7 +402,8 @@ async function runWavExportE2E(browser) {
       mimeType: 'audio/wav',
       buffer: makeToneWav(),
     });
-    step('imported');
+    await page.locator('[aria-labelledby="syn-import-overlay-title"]').waitFor({ state: 'detached', timeout: 30000 });
+    step('imported and overlay dismissed');
     const waveform = page.locator('.syn-eqx-svg:visible').last();
     await waveform.waitFor({ state: 'visible', timeout: 30000 });
 
