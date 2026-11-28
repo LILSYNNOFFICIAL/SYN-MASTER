@@ -33,6 +33,9 @@ export interface StrategyPromptInput {
   targetLufs?: number;
   userGenreOverride?: string;
   referenceAnalysis?: AudioAnalysis | null;
+  referenceLabel?: string;
+  matchEqAvailable?: boolean;
+  albumContext?: string;
   vocalBalanceVerification?: VocalBalanceVerification;
   availablePlugins?: Array<{ name: string; role: string; manufacturer: string }>;
   /** Vocal Rebalance context: whether stems are cached and the measured vocal balance. */
@@ -46,6 +49,9 @@ export interface RefinePromptInput {
   mode?: MasteringMode;
   objective?: MasteringObjectiveId;
   referenceAnalysis?: AudioAnalysis | null;
+  referenceLabel?: string;
+  matchEqAvailable?: boolean;
+  albumContext?: string;
   vocalBalanceVerification?: VocalBalanceVerification;
   remainingFindings?: Array<{
     findingId: string;
@@ -166,7 +172,7 @@ Never invent fake numbers—reference only the actual measured telemetry provide
 Supported Mastering Objectives: ${MASTERING_OBJECTIVE_IDS.join(', ')}.
 AI-generated sources (Suno/Udio) often carry clicks, transient spikes and metallic high-frequency shimmer: when clickCount > 0 put "restore" first (after any "vocal-rebalance") with declick enabled.
 Distinguish intentional artistic tonal/stereo character from technical defects (clipping, DC offset, low-end phase cancellation, elevated noise floor, narrow painful resonances).
-Consider every available processor, but enable a tool only when measurements or musical goals justify it. Set precise parameter values, not just on/off; keep EQ moves within +/- 4 dB unless correcting severe imbalance, and protect musical transients. Give each module a short rationale citing its measurement, and in strategySummary name any available tool deliberately left unused and why.
+Consider every available processor, but enable a tool only when measurements or musical goals justify it. An ALBUM REFERENCE PROFILE is a robust median across user-selected songs: use it as a consistency guide, preserve intentional track-to-track contrast, and never force identical chains or loudness. Set precise parameter values, not just on/off; keep EQ moves within +/- 4 dB unless correcting severe imbalance, and protect musical transients. Give each module a short rationale citing its measurement, and in strategySummary name any available tool deliberately left unused and why.
 The chain will be rendered and re-measured, so keep values conservative where measurement shows no problem.
 
 PROCESSOR SELECTION IS PART OF THE TASK, NOT AN OPTIONAL SUGGESTION:
@@ -251,9 +257,11 @@ export function buildStrategyUserPrompt(input: StrategyPromptInput): string {
       ? `Connected Third-Party VST3 Inventory (available on host): ${input.availablePlugins.map((p) => `${p.name} (${p.manufacturer}, ${p.role})`).join('; ')}`
       : 'External VST3 Inventory: None connected (use native SYN-DSP processors only).',
     input.referenceAnalysis
-      ? summarizeAnalysisForPrompt('REFERENCE TRACK MEASUREMENTS', input.referenceAnalysis)
+      ? summarizeAnalysisForPrompt(input.referenceLabel ?? 'REFERENCE TRACK MEASUREMENTS', input.referenceAnalysis)
       : '',
-    formatMatchEqAvailability(Boolean(input.referenceAnalysis)),
+    formatMatchEqAvailability(input.matchEqAvailable ?? Boolean(input.referenceAnalysis)),
+    input.albumContext ?? '',
+    input.albumContext ?? '',
     formatVocalBalanceVerification(input.vocalBalanceVerification),
     input.vocalBalance !== undefined ? summarizeVocalBalanceForPrompt(input.vocalBalance) : '',
     'Design an optimal, explainable mastering chain ending with a limiter or maximizer; each module\'s rationale states its supporting telemetry and tradeoffs.',

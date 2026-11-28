@@ -247,6 +247,9 @@ export async function generateGeminiMasterStrategy(input: {
   targetLufs?: number;
   userGenreOverride?: string;
   referenceAnalysis?: AudioAnalysis | null;
+  referenceLabel?: string;
+  matchEqAvailable?: boolean;
+  albumContext?: string;
   availablePlugins?: Array<{ name: string; role: string; manufacturer: string }>;
   vocalBalance?: VocalBalanceContext | null;
 }) {
@@ -301,6 +304,10 @@ export async function refineGeminiIteration(input: {
   currentChain: ProcessorModule[];
   mode?: MasteringMode;
   objective?: MasteringObjectiveId;
+  referenceAnalysis?: AudioAnalysis | null;
+  referenceLabel?: string;
+  matchEqAvailable?: boolean;
+  albumContext?: string;
   targetLufs: number;
   targetTruePeakDb: number;
   preserveDynamics: boolean;

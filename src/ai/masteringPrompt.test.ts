@@ -230,3 +230,18 @@ test('SYSTEM_PROMPT replaces hardcoded literals with types/enums, expands multib
   assert.ok(mbMaxLine.includes(`"high":{${mbBandSchema}`), 'multiband-maximizer expands high band fields');
 });
 
+
+
+test('album reference profile and Match EQ availability are described independently', () => {
+  const text = buildStrategyUserPrompt({
+    analysis,
+    mode: 'reference',
+    referenceAnalysis: analysis,
+    referenceLabel: 'ALBUM REFERENCE PROFILE (4-track robust median)',
+    matchEqAvailable: false,
+    albumContext: 'ALBUM REFERENCE PROFILE: median target -13 LUFS across 4 songs; keep track-specific contrast.',
+  });
+  assert.match(text, /ALBUM REFERENCE PROFILE \(4-track robust median\)/);
+  assert.match(text, /Match EQ: NOT AVAILABLE/);
+  assert.match(text, /keep track-specific contrast/);
+});

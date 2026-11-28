@@ -489,6 +489,9 @@ app.post('/api/ai/master', async (req, res) => {
       targetLufs,
       userGenreOverride,
       referenceAnalysis,
+      referenceLabel,
+      matchEqAvailable,
+      albumContext,
       availablePlugins,
       vocalBalance,
     } = req.body ?? {};
@@ -529,6 +532,9 @@ app.post('/api/ai/master', async (req, res) => {
       targetLufs,
       userGenreOverride: typeof userGenreOverride === 'string' ? userGenreOverride.slice(0, 60) : undefined,
       referenceAnalysis,
+      referenceLabel: typeof referenceLabel === 'string' ? referenceLabel.slice(0, 120) : undefined,
+      matchEqAvailable: typeof matchEqAvailable === 'boolean' ? matchEqAvailable : undefined,
+      albumContext: typeof albumContext === 'string' ? albumContext.slice(0, 2000) : undefined,
       availablePlugins: safePlugins,
       vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
@@ -553,7 +559,15 @@ app.post('/api/ai/refine', async (req, res) => {
       targetGate,
       vocalBalance,
       guardFeedback,
+      referenceAnalysis,
+      referenceLabel,
+      matchEqAvailable,
+      albumContext,
     } = req.body ?? {};
+    if (referenceAnalysis !== undefined && referenceAnalysis !== null && !isValidAnalysisPayload(referenceAnalysis)) {
+      res.status(400).json({ error: 'Invalid album/reference analysis telemetry.' });
+      return;
+    }
     if (
       !isValidAnalysisPayload(preAnalysis) ||
       !isValidAnalysisPayload(postAnalysis) ||
@@ -597,6 +611,10 @@ app.post('/api/ai/refine', async (req, res) => {
       qcReport,
       targetGate,
       guardFeedback: sanitizeGuardFeedback(guardFeedback),
+      referenceAnalysis,
+      referenceLabel: typeof referenceLabel === 'string' ? referenceLabel.slice(0, 120) : undefined,
+      matchEqAvailable: typeof matchEqAvailable === 'boolean' ? matchEqAvailable : undefined,
+      albumContext: typeof albumContext === 'string' ? albumContext.slice(0, 2000) : undefined,
       vocalBalance: sanitizeVocalBalance(vocalBalance),
     });
     res.json({ refined, meta: aiMeta });

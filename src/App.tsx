@@ -18,6 +18,7 @@ import {
 import type {
   AiChainLifecycleState,
   AIMasteringStrategy,
+  AlbumMasteringProfile,
   AiPassTrace,
   AppliedCorrectionRecord,
   AppSettings,
@@ -72,6 +73,7 @@ import {
   type ExplainableMasterPlan,
 } from './director/directorEngine';
 import { DEFAULT_DIRECTOR_OPERATING_MODE } from './director/operatingModeDefaults';
+import { formatAlbumMasteringContext } from './director/albumProfile';
 import { analyzeTrackIntelligence } from './director/analyzeIntelligence';
 import {
   computeChainFingerprint,
@@ -287,6 +289,13 @@ export default function App() {
 
   const [activeTrack, setActiveTrack] = useState<AudioTrackAsset | null>(null);
   const [referenceTrack, setReferenceTrack] = useState<AudioTrackAsset | null>(null);
+  const [albumProfile, setAlbumProfile] = useState<AlbumMasteringProfile | null>(null);
+  const [albumProfileActive, setAlbumProfileActive] = useState(false);
+  const masteringReferenceAnalysis = albumProfileActive && albumProfile ? albumProfile.analysis : masteringReferenceAnalysis;
+  const masteringReferenceLabel = albumProfileActive && albumProfile
+    ? `ALBUM REFERENCE PROFILE (${albumProfile.trackCount}-track robust median)`
+    : referenceTrack ? `REFERENCE TRACK: ${referenceTrack.name}` : 'REFERENCE TRACK MEASUREMENTS';
+  const albumReferenceContext = albumProfileActive && albumProfile ? formatAlbumMasteringContext(albumProfile) : undefined;
   const referenceTrackIdRef = useRef<string | null>(null);
   referenceTrackIdRef.current = referenceTrack?.id ?? null;
   const [postAnalysis, setPostAnalysis] = useState<AudioAnalysis | null>(null);
@@ -1623,9 +1632,9 @@ export default function App() {
     () =>
       alignQcProfileToObjective(
         QC_TARGET_PROFILES.find((p) => p.id === qcTargetId) ?? QC_TARGET_PROFILES[0],
-        resolveObjectiveTarget(objectiveId, customObjective, referenceTrack?.analysis ?? null),
+        resolveObjectiveTarget(objectiveId, customObjective, masteringReferenceAnalysis),
       ),
-    [qcTargetId, objectiveId, customObjective, referenceTrack],
+    [qcTargetId, objectiveId, customObjective, masteringReferenceAnalysis],
   );
 
   const qcReport = useMemo(() => {
@@ -1680,24 +1689,24 @@ export default function App() {
       analyzeTrackIntelligence(
         activeTrack.analysis,
         objectiveId,
-        referenceTrack?.analysis ?? null,
+        masteringReferenceAnalysis,
       )
     );
-  }, [activeTrack, directorPlan, objectiveId, referenceTrack]);
+  }, [activeTrack, directorPlan, objectiveId, masteringReferenceAnalysis]);
 
   const postFixVerification = useMemo(() => {
     if (!activeTrack) return null;
     const objectiveTarget = resolveObjectiveTarget(
       objectiveId,
       customObjective,
-      referenceTrack?.analysis ?? null,
+      masteringReferenceAnalysis,
     );
     return verifyPostFixAnalysis({
       baselineAnalysis: activeTrack.analysis,
       baselineDiagnosis,
       postAnalysis: postAnalysisState.status === 'ready' ? postAnalysis : null,
       objective: objectiveTarget,
-      referenceAnalysis: referenceTrack?.analysis ?? null,
+      referenceAnalysis: masteringReferenceAnalysis,
       baselineAnalysisId: activeTrack.id,
       postAnalysisId: postAnalysisState.analysisId,
       currentChainFingerprint,
@@ -1713,7 +1722,7 @@ export default function App() {
     postAnalysisState,
     objectiveId,
     customObjective,
-    referenceTrack,
+    masteringReferenceAnalysis,
     currentChainFingerprint,
     appliedCorrections,
   ]);
@@ -1734,8 +1743,8 @@ export default function App() {
       analysis: activeTrack.analysis,
       objectiveId,
       customSpec: customObjective,
-      referenceAnalysis: referenceTrack?.analysis ?? null,
-      matchEqProfile: referenceTrack ? matchEqStore.getProfile() : null,
+      referenceAnalysis: masteringReferenceAnalysis,
+      matchEqProfile: !albumProfileActive && referenceTrack ? matchEqStore.getProfile() : null,
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });
@@ -1744,7 +1753,7 @@ export default function App() {
     setStatusNotice(
       `SYN-ANALYZE complete (${plan.diagnosis.findings.filter((f) => f.kind === 'technical-problem').length} technical issue(s), ${plan.recommendations.length}-stage plan ready).`,
     );
-  }, [activeTrack, objectiveId, customObjective, referenceTrack, hostSnapshot.plugins, hostSnapshot.status]);
+  }, [activeTrack, objectiveId, customObjective, masteringReferenceAnalysis, referenceTrack, albumProfileActive, hostSnapshot.plugins, hostSnapshot.status]);
 
   const handleApplyRecommendation = useCallback(
     (rec: DirectorRecommendation) => {
@@ -1960,8 +1969,8 @@ export default function App() {
       analysis: runSourceAnalysis,
       objectiveId,
       customSpec: customObjective,
-      referenceAnalysis: referenceTrack?.analysis ?? null,
-      matchEqProfile: referenceTrack ? matchEqStore.getProfile() : null,
+      referenceAnalysis: masteringReferenceAnalysis,
+      matchEqProfile: !albumProfileActive && referenceTrack ? matchEqStore.getProfile() : null,
       externalPlugins: hostSnapshot.plugins,
       hostConnected: hostSnapshot.status === 'connected',
     });
@@ -2058,7 +2067,10 @@ export default function App() {
         customObjective,
         operatingMode: runOperatingMode,
         targetLufs: plan.objective.targetLufs,
-        referenceAnalysis: referenceTrack?.analysis ?? null,
+        referenceAnalysis: masteringReferenceAnalysis,
+        referenceLabel: masteringReferenceLabel,
+        matchEqAvailable: !albumProfileActive && Boolean(referenceTrack),
+        albumContext: albumReferenceContext,
         vocalBalanceVerification,
         availablePlugins: pluginSummary.matches.map((m) => ({
           name: m.name,
@@ -2337,11 +2349,11 @@ export default function App() {
         customSpec: customObjective,
         qcProfile: activeQcProfile,
         exportConfig,
-        referenceAnalysis: referenceTrack?.analysis ?? null,
+        referenceAnalysis: masteringReferenceAnalysis,
         verificationBaselineAnalysis: runSourceAnalysis,
         verificationBaselineDiagnosis: plan.diagnosis,
         vocalBalanceVerification,
-        matchEqReference: referenceTrack && matchEqStore.getSnapshot().reference
+        matchEqReference: !albumProfileActive && referenceTrack && matchEqStore.getSnapshot().reference
           ? { spectra: matchEqStore.getSnapshot().reference!, name: referenceTrack.name }
           : null,
         externalPlugins: hostSnapshot.plugins,
@@ -2363,6 +2375,10 @@ export default function App() {
                   ...ctx,
                   objective: ctx.objective ?? objectiveId,
                   mode: ctx.mode ?? mode,
+                  referenceAnalysis: masteringReferenceAnalysis,
+                  referenceLabel: masteringReferenceLabel,
+                  matchEqAvailable: !albumProfileActive && Boolean(referenceTrack),
+                  albumContext: albumReferenceContext,
                   ...(vocalBalance.stemsCached ? { vocalBalance } : {}),
                   ...(vocalBalanceVerification ? { vocalBalanceVerification } : {}),
                 };
@@ -2601,7 +2617,7 @@ export default function App() {
             aiProvider: useGeminiCloud
               ? { ...aiProviderUsed, log: aiProviderLog, aiPasses: report.aiPasses ?? [], aiFallbackBanner: summarizeAiFallbackBanner(report.aiPasses) }
               : { log: aiProviderLog, aiPasses: report.aiPasses ?? [], aiFallbackBanner: summarizeAiFallbackBanner(report.aiPasses) },
-            referenceAnalysis: referenceTrack?.analysis ?? null,
+            referenceAnalysis: masteringReferenceAnalysis,
             externalPlugins: hostSnapshot.plugins,
           },
         },
@@ -3232,7 +3248,7 @@ export default function App() {
     engineRef.current!.setMonitorVolume(v);
   }, []);
 
-  const activeObjective = resolveObjectiveTarget(objectiveId, customObjective, referenceTrack?.analysis ?? null);
+  const activeObjective = resolveObjectiveTarget(objectiveId, customObjective, masteringReferenceAnalysis);
   const targetLabel = targetPresetId
     ? LOUDNESS_TARGET_PRESETS.find((t) => t.id === targetPresetId)?.label ?? activeObjective.label
     : `${activeObjective.label} (${activeObjective.targetLufs} LUFS)`;
@@ -3244,7 +3260,7 @@ export default function App() {
         findings: (directorReport?.diagnosis ?? baselineDiagnosis)?.findings ?? [],
         chain,
         report: directorReport,
-        referenceAnalysis: referenceTrack?.analysis ?? null,
+        referenceAnalysis: masteringReferenceAnalysis,
       })
     : null;
 
@@ -3372,7 +3388,7 @@ export default function App() {
       sampleRate={activeTrack?.sampleRate ?? 48000}
       source={activeTrack?.analysis ?? null}
       master={postAnalysisState.status === 'ready' ? postAnalysis : null}
-      referenceAnalysis={referenceTrack?.analysis ?? null}
+      referenceAnalysis={masteringReferenceAnalysis}
       scopeChannels={postChannelsRef.current}
       waveformPeaks={activeTrack?.peaks ?? []}
       durationSec={activeTrack?.durationSec ?? 0}
@@ -4192,7 +4208,7 @@ export default function App() {
               postAnalysisError={postAnalysisState.error}
               baselineDiagnosis={baselineDiagnosis}
               postFixVerification={postFixVerification}
-              referenceAnalysis={referenceTrack?.analysis ?? null}
+              referenceAnalysis={masteringReferenceAnalysis}
               operatingMode={operatingMode}
               objectiveId={objectiveId}
               customObjective={customObjective}
@@ -4332,6 +4348,10 @@ export default function App() {
                 }
               }}
               onMatchReference={handleMatchReference}
+              albumProfile={albumProfile}
+              albumProfileActive={albumProfileActive}
+              onAlbumProfileChange={setAlbumProfile}
+              onAlbumProfileActiveChange={setAlbumProfileActive}
             />
           )}
 
